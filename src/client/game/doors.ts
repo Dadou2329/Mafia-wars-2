@@ -17,6 +17,7 @@ const RES = 1 / 16;
 const BRASS = 0xc9a24a;
 const SILVER = 0xb8c0cc;
 const IRON = 0x2a2a2c;
+const CHROME = 0xd8e0ea;
 
 type LeafKind = 'panel' | 'glazed' | 'plank' | 'church';
 
@@ -27,20 +28,23 @@ interface LeafStyle {
   kick: boolean;
 }
 
-const SHOP_TYPES = new Set<BuildingType>(['pub', 'shop', 'cafe', 'bakery', 'butcher', 'jeweller', 'pawn', 'gambling', 'post']);
-const PLANK_TYPES = new Set<BuildingType>(['warehouse', 'foundry', 'brewery', 'mill', 'gasworks', 'shipyard', 'sweatshop']);
-const GRAND_TYPES = new Set<BuildingType>(['bank', 'exchange', 'offices', 'customs', 'club', 'mansion', 'theatre', 'police', 'clocktower']);
+const SHOP_TYPES = new Set<BuildingType>(['bodega', 'diner', 'pharmacy', 'herbalist', 'teahouse', 'mahjong', 'techmarket', 'restaurant', 'tattoo', 'nightmarket', 'club', 'jazz', 'gym', 'boathouse']);
+const PLANK_TYPES = new Set<BuildingType>(['depot', 'factory', 'brewery', 'junkyard', 'garage']);
+const GRAND_TYPES = new Set<BuildingType>(['bank', 'exchange', 'corp', 'security', 'casino', 'theatre', 'hotel', 'gallery', 'studio', 'station', 'showroom', 'police', 'landmark', 'tower', 'penthouse']);
 
 function styleFor(def: BuildingInfo['def'] | undefined, variant: number, seed: number): LeafStyle {
-  if (variant === 1 || def?.hq === 'dadou') return { kind: 'panel', color: 0x5e1015, metal: BRASS, kick: true };
-  if (variant === 2 || def?.hq === 'even') return { kind: 'panel', color: 0x1a2c52, metal: SILVER, kick: true };
+  const boss = def?.residence?.boss;
+  if (variant === 1 || boss === 'dadou') return { kind: 'panel', color: 0x4a0c12, metal: BRASS, kick: true };
+  if (variant === 2 || boss === 'even') return { kind: 'panel', color: 0x14223f, metal: SILVER, kick: true };
   const t = def?.type;
   const pick = <T,>(list: T[]) => list[seed % list.length];
-  if (t === 'church') return { kind: 'church', color: 0x4a2f1c, metal: IRON, kick: false };
-  if (t && PLANK_TYPES.has(t)) return { kind: 'plank', color: pick([0x5a4632, 0x4a3a2a, 0x3e4a3a, 0x5a3a2a]), metal: IRON, kick: false };
-  if (t && SHOP_TYPES.has(t)) return { kind: 'glazed', color: pick([0x1f3a2a, 0x4a1a14, 0x161616, 0x1d2f55, 0x5a1a2a, 0x2a4a3a]), metal: BRASS, kick: t === 'pub' };
-  if (t && GRAND_TYPES.has(t)) return { kind: 'panel', color: pick([0x3a2414, 0x141414, 0x4a2f1c]), metal: BRASS, kick: true };
-  return { kind: 'panel', color: pick([0x3a4a3a, 0x4a3628, 0x2e2e34, 0x4a2a22, 0x2a3a4a]), metal: BRASS, kick: false };
+  // portes d'acier à lattes des entrepôts et ateliers
+  if (t && PLANK_TYPES.has(t)) return { kind: 'plank', color: pick([0x4a4e54, 0x3a3f46, 0x55504a, 0x2e3a40]), metal: IRON, kick: false };
+  // portes vitrées des commerces, cadre chromé
+  if (t && SHOP_TYPES.has(t)) return { kind: 'glazed', color: pick([0x16191e, 0x1d2430, 0x24181e, 0x1a2622, 0x20202a]), metal: CHROME, kick: false };
+  // grands halls : portes vitrées monumentales
+  if (t && GRAND_TYPES.has(t)) return { kind: 'glazed', color: pick([0x101318, 0x1a1c22, 0x2a2418]), metal: t === 'casino' || t === 'theatre' || t === 'hotel' ? BRASS : CHROME, kick: true };
+  return { kind: 'panel', color: pick([0x2e343c, 0x3a2e2a, 0x22262e, 0x3a2422, 0x26323e]), metal: CHROME, kick: false };
 }
 
 /**

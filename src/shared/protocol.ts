@@ -145,7 +145,9 @@ export type GameEvent =
   | { t: 'wanted'; level: number }
   | { t: 'over'; winner: Slot | null; reason: string; stats: Record<Slot, MatchStats> }
   | { t: 'sound'; s: string; x: number; y: number; z: number }
-  | { t: 'event'; kind: string; text: string; x: number; z: number; until: number };
+  | { t: 'event'; kind: string; text: string; x: number; z: number; until: number }
+  /** Un parrain emménage dans un nouveau QG. */
+  | { t: 'hq'; slot: Slot; b: number; tier: number };
 
 export interface MatchStats {
   kills: number;
@@ -172,6 +174,8 @@ export type ClientAction =
   | { a: 'buyBuilding'; b: number }
   /** Emménager dans le logement suivant de l'échelle (le QG s'y installe). */
   | { a: 'moveIn'; b: number }
+  /** Taxi volant : retour au QG (hors combat, sans police aux trousses). */
+  | { a: 'goHome' }
   | { a: 'quick'; cmd: 'follow' | 'attack' | 'defend' | 'retreat'; target?: number; building?: number; x?: number; z?: number }
   | { a: 'customize'; custom: Record<string, unknown> }
   | { a: 'interact'; what: string }

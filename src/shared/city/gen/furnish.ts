@@ -220,12 +220,27 @@ export class Furnisher {
 
   // --------------------------------------------------------------------- éléments en voxels
 
+  /** La cellule (locale) est-elle dans une zone réservée (passage, porte, cage d'escalier) ? */
+  isReserved(x: number, z: number): boolean {
+    for (const r of this.reserved) if (x + 0.5 > r.x0 && x + 0.5 < r.x1 && z + 0.5 > r.z0 && z + 0.5 < r.z1) return true;
+    return false;
+  }
+
+  /** Remplit un volume en épargnant les zones réservées (les passages restent libres). */
+  fillFree(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, mat: number): void {
+    for (let x = Math.min(x0, x1); x < Math.max(x0, x1); x++)
+      for (let z = Math.min(z0, z1); z < Math.max(z0, z1); z++) {
+        if (this.isReserved(x, z)) continue;
+        this.f.fill(x, y0, z, x + 1, y1, z + 1, mat);
+      }
+  }
+
   /** Comptoir (bar, boutique) : corps + plateau. */
   counter(x0: number, z0: number, x1: number, z1: number, body: number, top: number, height = 4, led?: number): void {
     const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + height - 1, z1, body);
-    this.f.fill(x0, y + height - 1, z0, x1, y + height, z1, top);
-    if (led) this.f.fill(x0, y, z0, x1, y + 1, z1, led);
+    this.fillFree(x0, y, z0, x1, y + height - 1, z1, body);
+    this.fillFree(x0, y + height - 1, z0, x1, y + height, z1, top);
+    if (led) this.fillFree(x0, y, z0, x1, y + 1, z1, led);
   }
 
   /** Revêtement de sol sur une zone (tapis, piste de danse…). */
@@ -236,7 +251,7 @@ export class Furnisher {
   /** Estrade (scène, ring) : plateau surélevé. */
   dais(x0: number, z0: number, x1: number, z1: number, h: number, mat: number, edge?: number): void {
     const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + h, z1, mat);
+    this.fillFree(x0, y, z0, x1, y + h, z1, mat);
     if (edge) {
       this.f.fill(x0, y + h - 1, z0, x1, y + h, z0 + 1, edge);
       this.f.fill(x0, y + h - 1, z1 - 1, x1, y + h, z1, edge);
@@ -250,7 +265,7 @@ export class Furnisher {
     for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++)
       for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
         const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
-        if (d <= r && (!shell || d > r - 1.5)) this.f.fill(x, y0, z, x + 1, y1, z + 1, mat);
+        if (d <= r && (!shell || d > r - 1.5) && !this.isReserved(x, z)) this.f.fill(x, y0, z, x + 1, y1, z + 1, mat);
       }
   }
 
@@ -267,23 +282,25 @@ export class Furnisher {
   /** Cloison basse ou vitrée entre deux points (le long de x ou de z). */
   partition(x0: number, z0: number, x1: number, z1: number, h: number, mat: number): void {
     const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + h, z1, mat);
+    this.fillFree(x0, y, z0, x1, y + h, z1, mat);
   }
 
   /** Étagères murales garnies de marchandises colorées (voxels). */
   shelves(x0: number, z0: number, x1: number, z1: number, height: number, goods: number[], frame = M.STEEL): void {
     const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + height, z1, frame);
+    this.fillFree(x0, y, z0, x1, y + height, z1, frame);
     const horizontal = x1 - x0 > z1 - z0;
     for (let ly = y + 1; ly < y + height - 1; ly += 3) {
       if (horizontal) {
         for (let lx = x0 + 1; lx < x1 - 1; lx++) {
+          if (this.isReserved(lx, z0)) continue;
           const g = goods[(lx * 7 + ly * 3) % goods.length];
           this.f.set(lx, ly, z0, this.rng.chance(0.85) ? g : 0);
           this.f.set(lx, ly + 1, z0, this.rng.chance(0.5) ? g : 0);
         }
       } else {
         for (let lz = z0 + 1; lz < z1 - 1; lz++) {
+          if (this.isReserved(x0, lz)) continue;
           const g = goods[(lz * 7 + ly * 3) % goods.length];
           this.f.set(x0, ly, lz, this.rng.chance(0.85) ? g : 0);
           this.f.set(x0, ly + 1, lz, this.rng.chance(0.5) ? g : 0);
@@ -382,7 +399,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     case 'cashier': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
       fu.counter(r.x0 + 2, r.z0 + 3, r.x1 - 2, r.z0 + 6, M.METAL_PANEL_DARK, M.GOLD, 5);
-      fu.f.fill(r.x0 + 2, fu.lv.floorTop + 5, r.z0 + 4, r.x1 - 2, fu.lv.floorTop + 11, r.z0 + 5, M.GLASS);
+      fu.fillFree(r.x0 + 2, fu.lv.floorTop + 5, r.z0 + 4, r.x1 - 2, fu.lv.floorTop + 11, r.z0 + 5, M.GLASS);
       fu.againstWall(r, 'SAFE', 'back', cx - 4);
       fu.againstWall(r, 'SAFE', 'back', cx + 4);
       fu.againstWall(r, 'SERVER_RACK', 'right', cz + 3);
@@ -393,7 +410,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     case 'theatre_hall': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_RED);
       fu.dais(r.x0 + 3, r.z1 - 12, r.x1 - 3, r.z1, 4, M.FLOOR_DARK, M.GOLD);
-      fu.f.fill(r.x0 + 3, fu.lv.floorTop + 4, r.z1 - 2, r.x1 - 3, fu.lv.ceil - 1, r.z1 - 1, M.SCREEN);
+      fu.fillFree(r.x0 + 3, fu.lv.floorTop + 4, r.z1 - 2, r.x1 - 3, fu.lv.ceil - 1, r.z1 - 1, M.SCREEN);
       for (let z = r.z0 + 5; z < r.z1 - 15; z += 4)
         for (let x = r.x0 + 4; x < r.x1 - 6; x += 11) if (Math.abs(x + 5 - cx) > 3) fu.p('SEAT_ROW', x + 5, z, Math.PI);
       fu.ceiling('STAGE_LIGHTS', cx - 8, r.z1 - 14, 1);
@@ -546,7 +563,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     case 'bank_hall': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE_GREEN);
       fu.counter(r.x0 + 4, r.z1 - 9, r.x1 - 4, r.z1 - 6, M.MARBLE, M.BRASS, 5);
-      fu.f.fill(r.x0 + 4, fu.lv.floorTop + 5, r.z1 - 8, r.x1 - 4, fu.lv.floorTop + 10, r.z1 - 7, M.GLASS);
+      fu.fillFree(r.x0 + 4, fu.lv.floorTop + 5, r.z1 - 8, r.x1 - 4, fu.lv.floorTop + 10, r.z1 - 7, M.GLASS);
       for (let x = r.x0 + 6; x < r.x1 - 6; x += 7) fu.p('OFFICE_CHAIR', x, r.z1 - 4, Math.PI);
       fu.p('PLANT_BIG', r.x0 + 3, r.z0 + 3, 0);
       fu.p('PLANT_BIG', r.x1 - 3, r.z0 + 3, 0);
@@ -565,7 +582,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     }
     case 'trading_floor': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_BLUE);
-      fu.f.fill(r.x0 + 2, fu.lv.ceil - 5, r.z1 - 1, r.x1 - 2, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
+      fu.fillFree(r.x0 + 2, fu.lv.ceil - 5, r.z1 - 1, r.x1 - 2, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
       fu.grid({ x0: r.x0 + 5, z0: r.z0 + 5, x1: r.x1 - 5, z1: r.z1 - 6 }, 9, 6, (x, z) => {
         fu.p('TRADING_DESK', x, z, 0);
         fu.p('OFFICE_CHAIR', x, z + 3, Math.PI);
@@ -617,7 +634,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     }
     case 'studio_set': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
-      fu.f.fill(r.x0 + 3, fu.lv.floorTop + 1, r.z1 - 1, r.x1 - 3, fu.lv.ceil - 2, r.z1, M.SCREEN);
+      fu.fillFree(r.x0 + 3, fu.lv.floorTop + 1, r.z1 - 1, r.x1 - 3, fu.lv.ceil - 2, r.z1, M.SCREEN);
       fu.p('NEWS_DESK', cx, r.z1 - 7, Math.PI);
       fu.p('HOLO_CAMERA', cx - 6, cz, 0);
       fu.p('HOLO_CAMERA', cx + 6, cz, 0);
@@ -637,7 +654,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     }
     case 'station_hall': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE);
-      fu.f.fill(r.x0 + 4, fu.lv.ceil - 6, r.z1 - 1, r.x1 - 4, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
+      fu.fillFree(r.x0 + 4, fu.lv.ceil - 6, r.z1 - 1, r.x1 - 4, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
       // kiosque central (l'horloge de Grand Central est dessinée par le client)
       fu.cylinder(cx, cz, 3, fu.lv.floorTop, fu.lv.floorTop + 5, M.BRASS);
       fu.cylinder(cx, cz, 2.2, fu.lv.floorTop + 5, fu.lv.floorTop + 9, M.MARBLE);

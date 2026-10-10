@@ -1,9 +1,9 @@
-// Client de jeu : rendu de Londres, parrain local, entités réseau, combats, interface.
+// Client de jeu : rendu de New York 2085, parrain local, entités réseau, combats, interface.
 
 import * as THREE from 'three';
-import { Anim, CharKind, FLAG, WEAPONS, Weapon } from '../../shared/characters';
-import { BOSS_NAME, DE_BOSS, MAFIA_NAME } from '../../shared/constants';
-import { BUILDINGS, DISTRICTS, Faction, HQ_BUILDING, districtAt } from '../../shared/city/plan';
+import { Anim, CharKind, FLAG, RECRUITER_NAME, WEAPONS, Weapon } from '../../shared/characters';
+import { BOSS_NAME, DE_BOSS, MAFIA_NAME, tierDef } from '../../shared/constants';
+import { BUILDINGS, DISTRICTS, Faction, RIVER_X0, RIVER_X1, districtAt, isWater } from '../../shared/city/plan';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import {
   BOSS_ENTITY_ID,
@@ -46,7 +46,7 @@ import { drawMinimap } from './minimap';
 import { PlayerController } from './player';
 import { StrategicMap } from './strategicMap';
 import { CommandWheel } from './wheel';
-import { Tutorial } from './tutorial';
+import { Tips } from './tips';
 import { DoorSystem } from './doors';
 import { SignSystem } from './signs';
 import { Civilians } from './civilians';
@@ -89,7 +89,7 @@ export class GameClient {
   readonly map: CityMap;
   readonly strategic: StrategicMap;
   readonly wheel: CommandWheel;
-  tutorial: Tutorial;
+  tips: Tips;
   readonly doors: DoorSystem;
   readonly signs: SignSystem;
   readonly civilians: Civilians;
@@ -220,7 +220,7 @@ export class GameClient {
     this.overlay.appendChild(this.strategic.el);
     this.wheel = new CommandWheel(this);
     this.overlay.appendChild(this.wheel.el);
-    this.tutorial = new Tutorial(this);
+    this.tips = new Tips(this);
     this.myView = {
       id: this.selfId,
       kind: this.you === 'dadou' ? CharKind.BOSS_DADOU : CharKind.BOSS_EVEN,
@@ -323,8 +323,8 @@ export class GameClient {
     this.settings = init.settings;
     this.applyPub(init.pub, true);
     this.applyPriv(init.priv);
-    // revanche (nouvelle partie) : la mission d'introduction repart ; simple reconnexion : on garde
-    if (init.time < 10) this.tutorial = new Tutorial(this);
+    // revanche (nouvelle partie) : les conseils repartent ; simple reconnexion : on garde
+    if (init.time < 10) this.tips = new Tips(this);
     if (init.over) this.showVictory(init.over.winner, init.over.reason, null);
     audio.playMusic('game');
   }
@@ -365,8 +365,7 @@ export class GameClient {
         const dir = to.clone().sub(from).normalize();
         this.effects.muzzleFlash(from, dir, e.w === Weapon.SHOTGUN || e.w === Weapon.RIFLE, this.camera);
         this.effects.tracer(from, to);
-        const name: SfxName = e.w === Weapon.SHOTGUN ? 'shotgun' : e.w === Weapon.RIFLE ? 'rifle' : 'revolver';
-        audio.play(name, { pos: from });
+        audio.play(shotSfx(e.w), { pos: from });
         // impact sur le décor si raté
         if (e.hit < 0) {
           const hit = this.world.world.raycast(from.x, from.y, from.z, dir.x, dir.y, dir.z, from.distanceTo(to) + 3);
@@ -421,7 +420,7 @@ export class GameClient {
           this.deadSince = now;
           audio.play('defeat', { volume: 0.4 });
         }
-        if (e.by === this.selfId && ent) this.tutorial.onKill(ent);
+        if (e.by === this.selfId && ent) this.tips.onKill(ent);
         break;
       }
       case 'reload': {
@@ -452,7 +451,7 @@ export class GameClient {
         if (e.owner === this.myFaction) {
           audio.play('capture');
           this.effects.burst(new THREE.Vector3(b.center.x, b.floorY + 1.5, b.center.z), 0xffd060, 40);
-          this.tutorial.onCapture(e.b);
+          this.tips.onCapture(e.b);
         } else if (prev === this.myFaction) audio.play('territory_lost');
         this.strategic.dirty = true;
         break;
@@ -461,7 +460,7 @@ export class GameClient {
         this.strategic.dirty = true;
         break;
       case 'chat': {
-        const from = e.from === 'system' ? 'Londres' : BOSS_NAME[e.from];
+        const from = e.from === 'system' ? 'New York' : BOSS_NAME[e.from];
         this.hud.chat(from, e.from === 'dadou' ? '#e05a5a' : e.from === 'even' ? '#6f95e0' : '#d4a640', e.text);
         audio.play('paper', { volume: 0.5 });
         break;
@@ -492,6 +491,18 @@ export class GameClient {
       case 'sound':
         audio.play(e.s as SfxName, { pos: { x: e.x, y: e.y, z: e.z } });
         break;
+      case 'hq': {
+        // un parrain emménage : le QG change d'adresse
+        this.pub.hq[e.slot] = e.b;
+        if (this.pub.tier) this.pub.tier[e.slot] = e.tier;
+        if (e.slot === this.you) {
+          const def = BUILDINGS[e.b];
+          this.hud.banner(`NOUVEAU QG : ${def.name.toUpperCase()}`, `${tierDef(e.tier).name} — ${tierDef(e.tier).perks.join(' · ')}`);
+          audio.play('purchase');
+        }
+        this.strategic.dirty = true;
+        break;
+      }
       case 'event':
         if (e.kind === 'end') {
           this.activeEvent = null;
@@ -546,7 +557,7 @@ export class GameClient {
     }
     this.hud.setPriv(p, this.pub);
     this.strategic.onPriv(p);
-    this.tutorial.onPriv(p);
+    this.tips.onPriv(p);
   }
 
   // ======================================================================= entrées
@@ -560,7 +571,7 @@ export class GameClient {
     }
     if (b.map.includes(code)) {
       if (this.strategic.open) this.strategic.close();
-      else this.strategic.show(this.priv.upgrades.includes('telegraph') ? 'orders' : 'view');
+      else this.strategic.show(this.priv.upgrades.includes('crypto') ? 'orders' : 'view');
       return true;
     }
     if (b.scores.includes(code) && !this.strategic.open) {
@@ -773,7 +784,7 @@ export class GameClient {
     this.atmo.time = this.dayTimeSmooth;
     this.atmo.update(dt, now, this.player.pos, this.camera);
     const fq = qualityProfile(settings.quality).fogScale;
-    const fogTarget = this.activeEvent?.kind === 'fog' ? 2.6 : 1;
+    const fogTarget = this.activeEvent?.kind === 'storm' ? 2.2 : 1;
     this.fogBoost += (fogTarget - this.fogBoost) * Math.min(1, dt * 0.25);
     envUniforms.uFogDensity.value *= fq * this.fogBoost;
     this.marker.update(now);
@@ -815,13 +826,13 @@ export class GameClient {
       this.fpsAcc.n = 0;
       this.hud.setFps(settings.showFps ? this.fpsAcc.v : null);
     }
-    this.tutorial.update(dt);
+    this.tips.update(dt);
     input.endFrame();
   };
 
   private handleCombat(now: number, input: typeof this.app.input): void {
     const w = this.weapons;
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 5; i++) {
       if (input.hit(`weapon${i}` as 'weapon1')) {
         if (w.selectSlot(i)) audio.play('weapon_switch', { volume: 0.6 });
       }
@@ -832,10 +843,12 @@ export class GameClient {
     }
     if (input.hit('reload')) w.startReload(now);
     const def = WEAPONS[w.current];
-    const trigger = def.ranged ? input.hit('fire') || (w.current === Weapon.PISTOL ? false : false) : input.hit('fire');
+    // tir automatique (pistolet-mitrailleur) : bouton maintenu
+    const trigger = def.ranged && def.auto ? input.is('fire') : input.hit('fire');
     if (!trigger) return;
     if (def.ranged) {
       if ((w.mag.get(w.current) ?? 0) <= 0) {
+        if (!input.hit('fire')) return;
         audio.play('empty_click', { volume: 0.8 });
         w.startReload(now);
         return;
@@ -850,11 +863,12 @@ export class GameClient {
       const muzzle = this.player.firstPerson ? this.viewmodel.muzzleWorld(this.camera) : this.chars.muzzleOf(this.selfId)?.clone() ?? o.clone();
       const big = w.current === Weapon.SHOTGUN || w.current === Weapon.RIFLE;
       this.effects.muzzleFlash(muzzle, d, big, this.camera);
-      audio.play(w.current === Weapon.SHOTGUN ? 'shotgun' : w.current === Weapon.RIFLE ? 'rifle' : 'revolver', { pos: this.player.pos });
-      this.player.recoil += big ? 3 : 1.6;
-      this.player.pitch += big ? 0.035 : 0.018;
-      this.player.shake += big ? 1.2 : 0.5;
-      this.viewmodel.kick(big ? 1.4 : 1);
+      audio.play(shotSfx(w.current), { pos: this.player.pos });
+      const smg = w.current === Weapon.SMG;
+      this.player.recoil += big ? 3 : smg ? 0.7 : 1.6;
+      this.player.pitch += big ? 0.035 : smg ? 0.006 : 0.018;
+      this.player.shake += big ? 1.2 : smg ? 0.2 : 0.5;
+      this.viewmodel.kick(big ? 1.4 : smg ? 0.5 : 1);
       const hits: number[][] = [];
       let civKilled = false;
       for (const end of res.ends) {
@@ -886,7 +900,7 @@ export class GameClient {
       this.app.net.fire({ w: w.current, o: [o.x, o.y, o.z], d: [d.x, d.y, d.z], hits });
       if (civKilled) this.app.net.act({ a: 'interact', what: 'civilian' });
       this.recentShots.push({ x: this.player.pos.x, z: this.player.pos.z, t: now });
-      this.tutorial.onFire();
+      this.tips.onFire();
       if ((w.mag.get(w.current) ?? 0) === 0) setTimeout(() => w.startReload(performance.now() / 1000), 250);
     } else {
       const target = w.meleeTarget(now, this.player.pos.x, this.player.pos.y, this.player.pos.z, this.player.bodyYaw, this.store, this.selfId, this.myFaction);
@@ -941,7 +955,17 @@ export class GameClient {
     hud.setClock(this.dayTimeSmooth, this.pub.timeLeft);
     // capture du bâtiment où l'on se trouve
     const bid = this.buildingAt(p.x, p.z, p.y);
-    if (bid >= 0 && BUILDINGS[bid].capturable) {
+    const resv = bid >= 0 && BUILDINGS[bid].residence && this.pub.buildings[bid]?.owner === Faction.NEUTRAL ? BUILDINGS[bid] : null;
+    if (resv) {
+      const r = resv.residence!;
+      hud.setCapture(
+        r.boss === this.you
+          ? `${resv.name} — votre futur ${tierDef(r.tier).name.toLowerCase()} : ${formatMoney(resv.price)} (carte stratégique ou ${actionKey(settings.bindings, 'interact')} au bureau).`
+          : `${resv.name} — logement réservé à ${BOSS_NAME[r.boss]}. Il ne peut pas être pris tant qu’il est vide.`,
+        0,
+        false,
+      );
+    } else if (bid >= 0 && BUILDINGS[bid].capturable) {
       const st = this.pub.buildings[bid];
       const def = BUILDINGS[bid];
       if (st.cap > 0 || st.contested) {
@@ -966,8 +990,8 @@ export class GameClient {
       const time = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
       if (ev.kind === 'contraband') hud.setEvent('CARGAISON DE CONTREBANDE', `À ${Math.round(Math.hypot(ev.x - p.x, ev.z - p.z))} m — encore ${time}`);
       else if (ev.kind === 'raid') hud.setEvent('DESCENTE DE POLICE', `${districtAt(ev.x, ev.z).name} — encore ${time}`);
-      else if (ev.kind === 'fog') hud.setEvent('BROUILLARD', `Visibilité réduite — encore ${time}`);
-      else if (ev.kind === 'informant') hud.setEvent('INFORMATEUR', `Positions ennemies révélées — encore ${time}`);
+      else if (ev.kind === 'storm') hud.setEvent('ORAGE MAGNÉTIQUE', `Pluie battante, visibilité réduite — encore ${time}`);
+      else if (ev.kind === 'informant') hud.setEvent('HACKEUSE', `Positions ennemies révélées — encore ${time}`);
     } else hud.setEvent(null);
     // interaction contextuelle
     this.interact = this.findInteraction(bid);
@@ -996,35 +1020,32 @@ export class GameClient {
     hud.setCrosshair(enemy, !this.player.dead && !this.strategic.open);
     // mort
     if (this.player.dead && this.priv.dead) {
-      hud.showDeath(`Les médecins vous recousent au quartier général… réapparition dans ${Math.ceil(this.priv.respawnIn)} s.`);
+      hud.showDeath(`Les médecins de la mafia vous recousent au quartier général… réapparition dans ${Math.ceil(this.priv.respawnIn)} s.`);
     } else if (!this.player.dead) hud.showDeath(null);
     // ambiance sonore
     const shots = this.recentShots.filter((s) => now - s.t < 5);
     this.recentShots = shots;
     const combat = Math.min(1, shots.filter((s) => Math.hypot(s.x - p.x, s.z - p.z) < 45).length / 6);
+    const riverD = p.x < RIVER_X0 ? RIVER_X0 - p.x : p.x > RIVER_X1 ? p.x - RIVER_X1 : 0;
     audio.setAmbience({
       night: this.atmo.night,
       indoor: bid >= 0,
-      nearWater: Math.max(0, Math.min(1, (p.z - 118) / 20)),
+      nearWater: isWater(p.x, p.z) ? 1 : Math.max(0, Math.min(1, 1 - riverD / 25)),
       combat,
       crowd: Math.min(1, this.civilians.countNear(p.x, p.z, 20) / 8),
+      rain: this.pub.rain ?? 0,
     });
-    // cloches de Big Ben à chaque heure
-    const hour = Math.floor(this.dayTimeSmooth * 24);
-    if (this.lastHour >= 0 && hour !== this.lastHour) {
-      const tower = this.world.buildings.find((b) => b.def.type === 'clocktower');
-      audio.bellChime(hour % 12 || 12, tower ? { x: tower.center.x, y: 30, z: tower.center.z } : undefined);
-    }
-    this.lastHour = hour;
   }
 
-  /** Bâtiment (zone intérieure) contenant le point. */
+  /** Bâtiment (volume intérieur, tous étages) contenant le point. */
   buildingAt(x: number, z: number, y?: number): number {
     for (const b of this.world.buildings) {
       const f = b.footprint;
       if (x < f[0] || x > f[2] || z < f[1] || z > f[3]) continue;
-      if (y !== undefined && Math.abs(y - b.floorY) > 2.5) continue;
-      for (const r of b.zone) if (x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3]) return b.id;
+      for (const zn of b.zone) {
+        const r = zn.rect;
+        if (x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3] && (y === undefined || (y >= zn.y0 - 0.6 && y <= zn.y1))) return b.id;
+      }
     }
     return -1;
   }
@@ -1033,8 +1054,8 @@ export class GameClient {
     if (this.player.dead) return null;
     const p = this.player.pos;
     const key = actionKey(settings.bindings, 'interact');
-    const hq = this.world.buildings[HQ_BUILDING[this.you].id];
-    const near = (pt: { x: number; z: number } | undefined, r: number) => !!pt && Math.hypot(pt.x - p.x, pt.z - p.z) < r && Math.abs(p.y - hq.floorY) < 2;
+    const hq = this.world.buildings[this.pub.hq[this.you]];
+    const near = (pt: { x: number; z: number; y?: number } | undefined, r: number) => !!pt && Math.hypot(pt.x - p.x, pt.z - p.z) < r && Math.abs(p.y - (pt.y ?? hq.floorY)) < 1.6;
     if (near(hq.desk, 2.3))
       return {
         key,
@@ -1043,35 +1064,47 @@ export class GameClient {
         run: () => {
           this.myView.interactAt = performance.now() / 1000;
           this.strategic.show('orders');
-          this.tutorial.onDesk();
+          this.tips.onDesk();
         },
       };
     if (near(hq.recruit, 2.4))
       return {
         key,
         text: 'Recruter des hommes',
-        sub: this.you === 'dadou' ? 'Bill le barman' : 'Molly la tenancière',
+        sub: RECRUITER_NAME[this.you],
         run: () => this.strategic.show('recruit'),
       };
     if (near(hq.armory, 2.6))
       return { key, text: 'Armurerie', sub: this.priv.upgrades.includes('armory') ? 'Armes et munitions' : 'Amélioration requise', run: () => this.strategic.show('armory') };
-    // bâtiment neutre à vendre
+    // bâtiment neutre à vendre, ou logement suivant de l'ascension
     if (bid >= 0) {
       const def = BUILDINGS[bid];
       const st = this.pub.buildings[bid];
-      if (def.capturable && st.owner === Faction.NEUTRAL && def.price > 0 && st.guards === 0)
+      const b = this.world.buildings[bid];
+      if (def.residence && st.owner === Faction.NEUTRAL && def.residence.boss === this.you && near(b.desk, 2.6)) {
+        const tier = def.residence.tier;
+        return {
+          key,
+          text: `Emménager ici — ${formatMoney(def.price)}`,
+          sub: `${tierDef(tier).name} : ${tierDef(tier).perks.slice(0, 3).join(', ')}`,
+          run: () => {
+            this.app.net.act({ a: 'moveIn', b: bid });
+          },
+        };
+      }
+      if (def.capturable && !def.residence && st.owner === Faction.NEUTRAL && def.price > 0 && st.guards === 0)
         return {
           key,
           text: `Acheter ${leNom(def.name)} — ${formatMoney(def.price)}`,
-          sub: `+${def.income} £/min`,
+          sub: `+${def.income} $/min`,
           run: () => {
             this.app.net.act({ a: 'buyBuilding', b: bid });
             audio.play('purchase');
           },
         };
       // bureau ennemi : un petit plaisir
-      const ehq = this.world.buildings[HQ_BUILDING[this.you === 'dadou' ? 'even' : 'dadou'].id];
-      if (ehq.desk && Math.hypot(ehq.desk.x - p.x, ehq.desk.z - p.z) < 2.3) {
+      const ehq = this.world.buildings[this.pub.hq[this.you === 'dadou' ? 'even' : 'dadou']];
+      if (ehq.desk && Math.hypot(ehq.desk.x - p.x, ehq.desk.z - p.z) < 2.3 && Math.abs(p.y - (ehq.desk.y ?? ehq.floorY)) < 1.6) {
         const other = this.you === 'dadou' ? 'even' : 'dadou';
         return {
           key,
@@ -1125,3 +1158,15 @@ export class GameClient {
 }
 
 export { formatTime };
+
+/** Son du coup de feu selon l'arme. */
+function shotSfx(w: Weapon): SfxName {
+  switch (w) {
+    case Weapon.SHOTGUN:
+      return 'shotgun';
+    case Weapon.RIFLE:
+      return 'rifle';
+    default:
+      return 'revolver';
+  }
+}

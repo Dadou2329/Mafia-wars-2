@@ -24,6 +24,12 @@ const DAYTIME_LABEL: Record<MatchSettings['daytime'], string> = {
   night: 'Nuit permanente',
   dusk: 'Crépuscule permanent',
 };
+const WEATHERS: MatchSettings['weather'][] = ['variable', 'rain', 'clear'];
+const WEATHER_LABEL: Record<MatchSettings['weather'], string> = {
+  variable: 'Averses de temps en temps',
+  rain: 'Pluie permanente',
+  clear: 'Temps sec',
+};
 
 // ============================================================================ journal du salon
 // Conservé au niveau du module (un par connexion) pour que la discussion survive à un passage
@@ -124,7 +130,8 @@ function describeChanges(prev: RoomState | null, s: RoomState, me: string): stri
   const ns = s.settings;
   if (ps.timeLimit !== ns.timeLimit) out.push(`Durée de la partie : ${timeLabel(ns.timeLimit).toLowerCase()}.`);
   if (ps.daytime !== ns.daytime) out.push(`Heure : ${DAYTIME_LABEL[ns.daytime].toLowerCase()}.`);
-  if (ps.tutorial !== ns.tutorial) out.push(ns.tutorial ? 'Mission d’introduction activée.' : 'Mission d’introduction désactivée.');
+  if (ps.weather !== ns.weather) out.push(`Météo : ${WEATHER_LABEL[ns.weather].toLowerCase()}.`);
+  if (ps.tips !== ns.tips) out.push(ns.tips ? 'Conseils activés.' : 'Conseils désactivés.');
   return out;
 }
 
@@ -310,17 +317,25 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
     day.value.textContent = DAYTIME_LABEL[v];
     net.setMatchSettings({ daytime: v });
   });
+  const weather = stepper('Météo', (d) => {
+    const r = net.room;
+    if (!r || !isHost()) return;
+    const i = Math.max(0, WEATHERS.indexOf(r.settings.weather));
+    const v = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
+    weather.value.textContent = WEATHER_LABEL[v];
+    net.setMatchSettings({ weather: v });
+  });
   const tutoInput = h('input', { type: 'checkbox' });
   const tutoText = h('span', { class: 'mw-toggle-text' });
   tutoInput.addEventListener('change', () => {
     if (!isHost()) return;
     app.click();
-    tutoText.textContent = tutoInput.checked ? 'Activée' : 'Désactivée';
-    net.setMatchSettings({ tutorial: tutoInput.checked });
+    tutoText.textContent = tutoInput.checked ? 'Activés' : 'Désactivés';
+    net.setMatchSettings({ tips: tutoInput.checked });
   });
   const tutoToggle = h('label', { class: 'toggle mw-setting-toggle' }, tutoInput, h('span', { class: 'knob' }), tutoText);
   withSounds(app, tutoToggle, false);
-  const tuto = h('div', { class: 'mw-setting' }, h('span', { class: 'mw-setting-label' }, 'Mission d’introduction'), tutoToggle);
+  const tuto = h('div', { class: 'mw-setting' }, h('span', { class: 'mw-setting-label' }, 'Conseils pour débuter'), tutoToggle);
   const settingsNote = h('p', { class: 'mw-setting-note' });
   const settingsBox = h(
     'section',
@@ -328,6 +343,7 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
     h('h3', { class: 'title-s' }, 'Réglages de la partie'),
     dur.el,
     day.el,
+    weather.el,
     tuto,
     settingsNote,
   );
@@ -468,10 +484,11 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
     settingsBox.classList.toggle('is-readonly', !host);
     dur.value.textContent = timeLabel(r.settings.timeLimit);
     day.value.textContent = DAYTIME_LABEL[r.settings.daytime] ?? r.settings.daytime;
-    for (const b of [...dur.btns, ...day.btns]) b.disabled = !host || r.phase !== 'lobby';
-    tutoInput.checked = r.settings.tutorial;
+    weather.value.textContent = WEATHER_LABEL[r.settings.weather] ?? r.settings.weather;
+    for (const b of [...dur.btns, ...day.btns, ...weather.btns]) b.disabled = !host || r.phase !== 'lobby';
+    tutoInput.checked = r.settings.tips;
     tutoInput.disabled = !host || r.phase !== 'lobby';
-    tutoText.textContent = r.settings.tutorial ? 'Activée' : 'Désactivée';
+    tutoText.textContent = r.settings.tips ? 'Activés' : 'Désactivés';
     const hostName = r.host ? r.players[r.host]?.name : null;
     settingsNote.textContent = host
       ? fr('Modifier un réglage annule l’état « prêt » des deux joueurs.')
@@ -558,7 +575,7 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
   );
   if (!net.connected) banner.classList.add('is-visible');
 
-  // ------------------------------------------------------------ génération de Londres
+  // ------------------------------------------------------------ génération de New York
   let genDone = false;
   const offGen = onWorldProgress((_step, f) => {
     if (genDone) return;
@@ -567,7 +584,7 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
       genLine.textContent = '';
       genLine.classList.remove('is-visible');
     } else {
-      genLine.textContent = fr(`Génération de Londres… ${pct(f)}`);
+      genLine.textContent = fr(`Génération de New York… ${pct(f)}`);
       genLine.classList.add('is-visible');
     }
   });

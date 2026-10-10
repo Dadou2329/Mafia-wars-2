@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
+import { NEON_COLORS } from '../../shared/city/props';
 
 /** Couleurs de faction (sRGB) : [neutre, Dadou, Even] × [principale, secondaire, sombre]. */
 export const factionUniform = {
@@ -21,6 +22,12 @@ export const factionUniform = {
       new THREE.Color(0x0c1426),
     ],
   },
+};
+
+/** Couleurs des néons : celles des variantes (NEON_COLORS) puis les six couleurs fixes des emplacements 10 à 15. */
+export const neonUniform = {
+  uNeon: { value: NEON_COLORS.map((c) => new THREE.Color(c)) },
+  uNeonFixed: { value: [0xff3cc8, 0x3ce8ff, 0xff2a40, 0x40ff80, 0xffb020, 0x4a7aff].map((c) => new THREE.Color(c)) },
 };
 
 /** Palette des personnages : texture 32 emplacements × N lignes (une ligne par personnage). */
@@ -47,7 +54,7 @@ export interface ObjectMaterialOptions {
 export function createObjectMaterial(opts: ObjectMaterialOptions = {}): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, envUniforms, factionUniform, paletteUniform);
+    Object.assign(shader.uniforms, envUniforms, factionUniform, paletteUniform, neonUniform);
     shader.uniforms.uFlash = { value: 0 };
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -62,6 +69,7 @@ varying vec3 vWNrm;
 varying float vAO;
 flat varying int vSlot;
 flat varying int vOwner;
+flat varying int vNeon;
 flat varying int vRow;
 varying vec3 vInstLight;`,
       )
@@ -77,7 +85,10 @@ vWPos = (wMatX * vec4(transformed, 1.0)).xyz;
 vWNrm = normalize(mat3(wMatX) * normal);
 vSlot = int(aExt.x + 0.5);
 vAO = aExt.y;
-vOwner = int(aOwner + 0.5);
+// aOwner = propriétaire (0 neutre, 1 Dadou, 2 Even) + 4 × couleur de néon de l'instance
+int ownRaw = int(aOwner + 0.5);
+vOwner = ownRaw & 3;
+vNeon = ownRaw >> 2;
 vRow = int(aRow + 0.5);
 vInstLight = aLight;`,
       );
@@ -89,12 +100,15 @@ ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${LIGHT_GLSL}
 uniform vec3 uFaction[9];
+uniform vec3 uNeon[8];
+uniform vec3 uNeonFixed[6];
 uniform sampler2D uPalette;
 varying vec3 vWPos;
 varying vec3 vWNrm;
 varying float vAO;
 flat varying int vSlot;
 flat varying int vOwner;
+flat varying int vNeon;
 flat varying int vRow;
 varying vec3 vInstLight;`,
       )
@@ -118,6 +132,22 @@ if (vSlot >= 1 && vSlot <= 3) {
 } else if (vSlot == 6) {
   albedo = vec3(0.05, 0.06, 0.07);
   gSpec = 1.0;
+} else if (vSlot == 7 || (vSlot >= 10 && vSlot <= 15)) {
+  // néons : couleur de la variante de l'objet, ou couleur fixe
+  vec3 nc = vSlot == 7 ? uNeon[clamp(vNeon, 0, 7)] : uNeonFixed[vSlot - 10];
+  albedo = nc;
+  gEm = nc * (1.5 + 1.9 * uNight);
+} else if (vSlot == 8) {
+  albedo = vec3(0.8, 0.9, 1.0);
+  gEm = vec3(0.72, 0.86, 1.0) * (1.2 + 1.6 * uNight);
+} else if (vSlot == 9) {
+  // écran : aplats colorés qui défilent et lignes de balayage
+  float tt = uTime * 0.5;
+  vec2 q = vec2(vWPos.x + vWPos.z, vWPos.y) * 2.2;
+  vec3 sc = 0.5 + 0.5 * cos(6.2831 * (vec3(0.0, 0.33, 0.67) + vnoise(q * 0.6 + vec2(tt, 0.0)) + 0.1 * tt));
+  float scan = 0.8 + 0.2 * sin(vWPos.y * 120.0 - uTime * 6.0);
+  albedo = sc * 0.25;
+  gEm = sc * scan * (0.9 + 1.3 * uNight);
 } else if (vSlot >= 16) {
   vec4 pc = texelFetch(uPalette, ivec2(vSlot - 16, vRow), 0);
   albedo = pow(pc.rgb, vec3(2.2));

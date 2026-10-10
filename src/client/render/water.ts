@@ -1,9 +1,9 @@
-// La Tamise : surface d'eau animée avec reflets du ciel et des lampes.
+// L'East River, l'Hudson et la baie : surface d'eau animée avec reflets du ciel et des néons.
 
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
-import { RIVER_Z, WORLD_W } from '../../shared/city/plan';
+import { CREEK, RIVER_X0, RIVER_X1, WATER_Y, WORLD_D } from '../../shared/city/plan';
 
 const VERT = /* glsl */ `
 varying vec3 vWPos;
@@ -57,12 +57,42 @@ export function createWater(): { mesh: THREE.Mesh; mat: THREE.ShaderMaterial } {
     },
   });
   mat.toneMapped = false;
-  const w = WORLD_W + 600;
-  const d = 400;
-  const geo = new THREE.PlaneGeometry(w, 35, 1, 1);
-  geo.rotateX(-Math.PI / 2);
+  // une seule géométrie : l'East River (prolongée au nord et au sud), Newtown Creek,
+  // l'Hudson à l'ouest de Manhattan et la baie au sud de la pointe
+  const far = 700;
+  const rects: [number, number, number, number][] = [
+    [RIVER_X0, -far, RIVER_X1, WORLD_D + far],
+    [CREEK[0], CREEK[1], CREEK[2], CREEK[3]],
+    [-far, -far, 0, WORLD_D + far],
+    [0, WORLD_D + 6, RIVER_X0, WORLD_D + far],
+  ];
+  const geos = rects.map(([x0, z0, x1, z1]) => {
+    const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, 1, 1);
+    g.rotateX(-Math.PI / 2);
+    g.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
+    return g;
+  });
+  const geo = mergeGeometries(geos);
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(WORLD_W / 2, -1.05, RIVER_Z + 17.5);
+  mesh.position.set(0, WATER_Y + 0.05, 0);
   mesh.receiveShadow = false;
   return { mesh, mat };
+}
+
+/** Fusion de géométries non indexées de même format (positions, normales, UV). */
+function mergeGeometries(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const geos = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const parts = geos.map((g) => g.getAttribute(name) as THREE.BufferAttribute);
+    const size = parts[0].itemSize;
+    const arr = new Float32Array(parts.reduce((n, a) => n + a.count * size, 0));
+    let o = 0;
+    for (const a of parts) {
+      arr.set(a.array as Float32Array, o);
+      o += a.count * size;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  return out;
 }

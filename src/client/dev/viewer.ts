@@ -1,8 +1,8 @@
 // Visionneuse de développement : affiche la ville avec une caméra libre (utilisée pour les captures).
 import * as THREE from 'three';
 import { generateCity } from '../../shared/city/gen/city';
-import { computeLightVolume } from '../render/lightVolume';
-import { createLightTexture, createMaterialTexture } from '../render/env';
+import { computeLightVolume, computeTintVolume } from '../render/lightVolume';
+import { createLightTexture, createMaterialTexture, createTintTexture } from '../render/env';
 import { createWorldMaterial } from '../render/worldMaterial';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Atmosphere } from '../render/atmosphere';
@@ -18,6 +18,7 @@ export async function startViewer(root: HTMLElement): Promise<void> {
   const t2 = performance.now();
   createMaterialTexture();
   createLightTexture(lv);
+  createTintTexture(computeTintVolume(city.world, city.ctx.lights));
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(1);
   renderer.setSize(window.innerWidth, window.innerHeight);

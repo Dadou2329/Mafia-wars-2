@@ -33,7 +33,7 @@ export class Room {
   members = new Map<string, Session>();
   host: string | null = null;
   picks: Record<Slot, string | null> = { dadou: null, even: null };
-  settings: MatchSettings = { timeLimit: 0, daytime: 'cycle', tutorial: true };
+  settings: MatchSettings = { timeLimit: 0, daytime: 'cycle', weather: 'variable', tips: true };
   game: Game | null = null;
   private timer: NodeJS.Timeout | null = null;
   private errors = 0;
@@ -141,7 +141,8 @@ export class Room {
     if (this.host !== s.id || this.phase !== 'lobby') return;
     if (typeof settings.timeLimit === 'number' && [0, 20, 30, 45, 60, 90].includes(settings.timeLimit)) this.settings.timeLimit = settings.timeLimit;
     if (settings.daytime && ['cycle', 'night', 'dusk'].includes(settings.daytime)) this.settings.daytime = settings.daytime;
-    if (typeof settings.tutorial === 'boolean') this.settings.tutorial = settings.tutorial;
+    if (settings.weather && ['variable', 'rain', 'clear'].includes(settings.weather)) this.settings.weather = settings.weather;
+    if (typeof settings.tips === 'boolean') this.settings.tips = settings.tips;
     for (const m of this.members.values()) m.ready = false;
     this.broadcastState();
   }

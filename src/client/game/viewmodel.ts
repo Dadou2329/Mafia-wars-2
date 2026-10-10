@@ -161,6 +161,10 @@ const RIGS: Record<Weapon, RigDef> = {
     recoil: { back: 0, climb: 0, up: 0, roll: 0 },
     pivot: [0, 0, 3 * S],
   },
+  // pistolet-mitrailleur : provisoirement la prise en main du pistolet
+  get [Weapon.SMG]() {
+    return RIGS[Weapon.PISTOL];
+  },
 };
 
 /** Poing gauche (garde de boxe : bras avant). */

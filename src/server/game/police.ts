@@ -1,4 +1,4 @@
-// Police métropolitaine : patrouilles, poursuites des parrains recherchés.
+// NYPD 2085 : patrouilles, poursuites des parrains recherchés.
 
 import { CharKind, Weapon } from '../../shared/characters';
 import { HP } from '../../shared/constants';
@@ -12,17 +12,23 @@ const POLICE_COUNT = 6;
 const respawnAt = new WeakMap<Game, number>();
 
 function patrolRoute(g: Game, i: number): Vec2[] {
-  // circuits dans les beaux quartiers, avec un détour par les autres
-  const districts = i % 3 === 0 ? ['westminster', 'city'] : i % 3 === 1 ? ['city', 'soho', 'westminster'] : ['westminster', 'industrial', 'city'];
+  // circuits dans les beaux quartiers de Manhattan, avec un détour par les autres
+  const routes: string[][] = [
+    ['midtown', 'wallstreet'],
+    ['midtown', 'centralpark', 'harlem'],
+    ['wallstreet', 'chinatown', 'midtown'],
+  ];
+  const districts = routes[i % routes.length];
   const pts: Vec2[] = [];
-  for (const b of BUILDINGS) if (districts.includes(b.district)) pts.push(g.building(b.id).doors[0].out);
+  for (const b of BUILDINGS) if (districts.includes(b.district) && !b.residence) pts.push(g.building(b.id).doors[0].out);
   // ordre aléatoire mais stable
   return pts.sort(() => g.rng.next() - 0.5).slice(0, 7);
 }
 
 export function spawnPolice(g: Game, n: number): void {
-  const yard = g.w.buildings.find((b) => b.def.type === 'police')!;
+  const precincts = g.w.buildings.filter((b) => b.def.type === 'police');
   for (let i = 0; i < n; i++) {
+    const yard = precincts[g.rng.int(0, precincts.length - 1)];
     const p = yard.doors[0].out;
     const e = g.addEnt({
       kind: CharKind.POLICE,

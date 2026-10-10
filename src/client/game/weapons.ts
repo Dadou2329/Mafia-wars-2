@@ -2,7 +2,7 @@
 // validée par le serveur), corps à corps.
 
 import * as THREE from 'three';
-import { CharKind, FLAG, WEAPONS, Weapon } from '../../shared/characters';
+import { CharKind, FLAG, WEAPONS, WEAPON_SLOTS, Weapon } from '../../shared/characters';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import { makeRayHit, type VoxelWorld } from '../../shared/voxel';
 import type { ClientEnt, EntityStore } from './entities';
@@ -108,10 +108,9 @@ export class WeaponSystem {
     return true;
   }
 
-  /** Change d'arme selon l'emplacement (1 poings, 2 revolver, 3 arme longue, 4 arme blanche). */
+  /** Change d'arme selon l'emplacement (1 mains nues et lames, 2 pistolet, 3 pistolet-mitrailleur, 4 fusil à pompe, 5 fusil à rail). */
   selectSlot(slot: number): boolean {
-    const groups: Weapon[][] = [[Weapon.FISTS], [Weapon.PISTOL], [Weapon.SHOTGUN, Weapon.RIFLE], [Weapon.KNIFE, Weapon.CLUB]];
-    const g = groups[slot - 1]?.filter((w) => this.owned.includes(w)) ?? [];
+    const g = WEAPON_SLOTS[slot - 1]?.filter((w) => this.owned.includes(w)) ?? [];
     if (g.length === 0) return false;
     const i = g.indexOf(this.current);
     const next = g[(i + 1) % g.length];

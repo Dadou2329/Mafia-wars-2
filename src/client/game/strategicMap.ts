@@ -1,4 +1,4 @@
-// Carte stratégique du bureau du parrain : Londres vue d'en haut, cibles cliquables
+// Carte stratégique du bureau du parrain : New York vue d'en haut, cibles cliquables
 // (bâtiments et quartiers), ordres aux lieutenants (attaque, défense, patrouille, position),
 // recrutement, lieutenants, améliorations et armurerie.
 
@@ -11,13 +11,12 @@ import {
   HQ_CAPTURE_MIN_DISTRICTS,
   LIEUTENANT_PRICES,
   MAFIA_NAME,
-  MAX_GANGSTERS,
-  MAX_LIEUTENANTS,
   ORDER_LABEL,
   ORDER_STATUS,
   RECRUIT_BUNDLES,
   UPGRADES,
   UPGRADE_BY_ID,
+  tierDef,
   type OrderType,
 } from '../../shared/constants';
 import {
@@ -25,10 +24,10 @@ import {
   DISTRICTS,
   DISTRICT_BY_ID,
   Faction,
-  HQ_BUILDING,
-  RIVER_Z,
+  RESIDENCES,
   WORLD_D,
   WORLD_W,
+  isWater,
   keyBuildings,
   buildingsInDistrict,
   type BuildingType,
@@ -59,36 +58,43 @@ interface Pending {
 }
 
 export const TYPE_LABEL: Record<BuildingType, string> = {
-  pub: 'Pub',
-  hq: 'Quartier général',
-  shop: 'Boutique',
-  gambling: 'Tripot',
-  theatre: 'Music-hall',
-  cafe: 'Café',
+  hideout: 'Planque',
+  garage: 'Garage',
+  loft: 'Loft',
+  penthouse: 'Penthouse',
+  tower: 'Tour',
+  club: 'Boîte de nuit',
+  jazz: 'Club de jazz',
+  casino: 'Casino',
+  theatre: 'Théâtre',
+  gym: 'Salle de boxe',
+  bodega: 'Bodega',
+  diner: 'Diner',
+  pharmacy: 'Pharmacie',
+  herbalist: 'Herboristerie',
+  teahouse: 'Maison de thé',
+  mahjong: 'Salle de mah-jong',
+  techmarket: 'Marché tech',
+  restaurant: 'Restaurant',
+  boathouse: 'Restaurant du lac',
+  hotel: 'Hôtel',
+  gallery: 'Galerie d’art',
   bank: 'Banque',
   exchange: 'Bourse',
-  offices: 'Bureaux',
-  jeweller: 'Joaillerie',
-  post: 'Bureau de poste',
-  church: 'Église',
-  lodging: 'Garni',
-  pawn: 'Prêteur sur gages',
-  butcher: 'Boucherie',
-  sweatshop: 'Atelier',
-  tenement: 'Immeuble',
-  police: 'Police',
-  mansion: 'Hôtel particulier',
-  club: 'Club',
-  clocktower: 'Tour de l’horloge',
-  foundry: 'Fonderie',
+  corp: 'Tour de bureaux',
+  security: 'Centre de sécurité',
+  studio: 'Studio holo-TV',
+  station: 'Gare',
+  showroom: 'Grand magasin',
+  depot: 'Dépôt logistique',
+  nightmarket: 'Marché de nuit',
+  factory: 'Usine',
   brewery: 'Brasserie',
-  mill: 'Filature',
-  housing: 'Logements ouvriers',
-  gasworks: 'Usine à gaz',
-  warehouse: 'Entrepôt',
-  customs: 'Douanes',
-  shipyard: 'Chantier naval',
-  bakery: 'Boulangerie',
+  junkyard: 'Casse',
+  tattoo: 'Salon de tatouage',
+  police: 'Commissariat',
+  landmark: 'Monument',
+  filler: 'Immeuble',
 };
 
 const OWNER_RGB: Record<number, string> = { [Faction.DADOU]: '176,30,38', [Faction.EVEN]: '42,74,138' };
@@ -195,7 +201,7 @@ export class StrategicMap {
       this.panX = 0;
       this.panZ = 0;
     }
-    this.title.textContent = this.remote ? 'Carte de Londres' : `Bureau ${DE_BOSS[this.gc.you]} — Carte stratégique`;
+    this.title.textContent = this.remote ? 'Carte stratégique de New York' : `Bureau ${DE_BOSS[this.gc.you]} — Carte stratégique`;
     this.resize();
     this.renderAll();
     this.body.scrollTop = 0;
@@ -385,7 +391,6 @@ export class StrategicMap {
       const f = b.footprint;
       if (x >= f[0] && x <= f[2] && z >= f[1] && z <= f[3]) return { kind: 'building', id: b.id };
     }
-    if (z > RIVER_Z) return null;
     for (const d of DISTRICTS) if (x >= d.rect[0] && x < d.rect[2] && z >= d.rect[1] && z < d.rect[3]) return { kind: 'district', id: d.id };
     return null;
   }
@@ -396,7 +401,7 @@ export class StrategicMap {
       const lt = this.pickHold;
       this.pickHold = null;
       this.banner.classList.add('hidden');
-      if (x > 0 && z > 0 && x < WORLD_W && z < RIVER_Z + 8) {
+      if (x > 0 && z > 0 && x < WORLD_W && z < WORLD_D && !isWater(x, z)) {
         this.gc.app.net.act({ a: 'order', lt, order: 'hold', x, z });
         audio.play('ui_click');
       }
@@ -425,7 +430,7 @@ export class StrategicMap {
       this.tooltip.appendChild(h('b', null, def.name));
       this.tooltip.appendChild(h('div', { class: 'dim' }, `${TYPE_LABEL[def.type]} — ${DISTRICT_BY_ID[def.district].name}`));
       this.tooltip.appendChild(h('div', null, this.ownerText(hv.id)));
-      if (def.capturable && def.income) this.tooltip.appendChild(h('div', { class: 'c-good' }, `+${def.income} £/min`));
+      if (def.capturable && def.income) this.tooltip.appendChild(h('div', { class: 'c-good' }, `+${def.income} $/min`));
     } else {
       const d = DISTRICT_BY_ID[hv.id];
       const owner = this.gc.pub.districts.find((x) => x.id === hv.id)?.owner ?? 0;
@@ -475,7 +480,7 @@ export class StrategicMap {
     for (const d of DISTRICTS) {
       const owner = pub.districts.find((x) => x.id === d.id)?.owner ?? 0;
       const r = d.rect;
-      const rz1 = Math.min(r[3], RIVER_Z);
+      const rz1 = r[3];
       const rgb = OWNER_RGB[owner];
       if (rgb) {
         c.fillStyle = `rgba(${rgb},0.13)`;
@@ -530,15 +535,18 @@ export class StrategicMap {
         c.lineWidth = (isSel ? 4 + Math.sin(now * 5) * 1.5 : 2.5) / S;
         c.strokeRect(x - 2 / S, y - 2 / S, w + 4 / S, hh + 4 / S);
       }
-      if (def.isKey || def.hq) {
-        const fs = Math.max(26, 30 / S) ;
-        c.font = `${fs}px serif`;
+      const hqOf = pub.hq.dadou === b.id ? 'dadou' : pub.hq.even === b.id ? 'even' : null;
+      const reserved = def.residence && st && st.owner === Faction.NEUTRAL;
+      if (def.isKey || hqOf || reserved) {
+        const fs = Math.max(26, 30 / S);
+        const glyph = hqOf ? '♛' : reserved ? '⌂' : '★';
+        c.font = `${fs}px sans-serif`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
         c.fillStyle = '#000';
-        c.fillText(def.hq ? '♛' : '★', x + w / 2 + 2, y + hh / 2 + 2);
-        c.fillStyle = def.hq ? (def.hq === 'dadou' ? '#ff6a5a' : '#8fb4ff') : '#f2c84a';
-        c.fillText(def.hq ? '♛' : '★', x + w / 2, y + hh / 2);
+        c.fillText(glyph, x + w / 2 + 2, y + hh / 2 + 2);
+        c.fillStyle = hqOf ? (hqOf === 'dadou' ? '#ff5a6a' : '#7fb8ff') : reserved ? (def.residence!.boss === 'dadou' ? 'rgba(255,90,106,0.7)' : 'rgba(127,184,255,0.7)') : '#ffd23c';
+        c.fillText(glyph, x + w / 2, y + hh / 2);
       }
     }
     // combats
@@ -570,7 +578,7 @@ export class StrategicMap {
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillStyle = raid ? '#2a4a9a' : '#a8740a';
-      c.fillText(raid ? '⚑' : '£', ev.x * M, ev.z * M);
+      c.fillText(raid ? '⚑' : '$', ev.x * M, ev.z * M);
       c.font = `600 ${13 / S}px 'EB Garamond', serif`;
       c.fillStyle = '#2a1a0c';
       c.fillText(raid ? 'Descente de police' : 'Contrebande', ev.x * M, ev.z * M + 22 / S);
@@ -703,7 +711,7 @@ export class StrategicMap {
     }
     const d = DISTRICTS.find((x) => x.name === name);
     if (d) return { x: d.label[0], z: d.label[1] };
-    if (name === 'le QG') return this.gc.world.buildings[HQ_BUILDING[this.gc.you].id].center;
+    if (name === 'le QG') return this.gc.world.buildings[this.gc.pub.hq[this.gc.you]].center;
     return null;
   }
 
@@ -847,19 +855,21 @@ export class StrategicMap {
     const def = BUILDINGS[id];
     const st = gc.pub.buildings[id];
     const mine = st && st.owner === gc.myFaction;
-    const enemyHq = def.hq && def.hq !== gc.you;
+    const hqOf = gc.pub.hq.dadou === id ? 'dadou' : gc.pub.hq.even === id ? 'even' : null;
+    const enemyHq = hqOf && hqOf !== gc.you ? hqOf : null;
+    const reserved = !!def.residence && st?.owner === Faction.NEUTRAL;
     const card = h('div', { class: 'sm-card' });
     card.appendChild(
       h(
         'div',
         { class: 'sm-card-title' },
-        def.hq ? h('span', { class: 'gold' }, '♛ ') : def.isKey ? h('span', { class: 'gold' }, '★ ') : null,
+        hqOf ? h('span', { class: 'gold' }, '♛ ') : def.isKey ? h('span', { class: 'gold' }, '★ ') : reserved ? h('span', { class: 'gold' }, '⌂ ') : null,
         def.name,
       ),
     );
-    card.appendChild(h('div', { class: 'dim' }, `${TYPE_LABEL[def.type]} — ${DISTRICT_BY_ID[def.district].name}${def.isKey && !def.hq ? ' — bâtiment clé' : ''}`));
+    card.appendChild(h('div', { class: 'dim' }, `${TYPE_LABEL[def.type]} — ${DISTRICT_BY_ID[def.district].name}${def.isKey ? ' — bâtiment clé' : ''}${hqOf ? ` — QG ${DE_BOSS[hqOf]}` : ''}`));
     card.appendChild(h('div', { class: 'sm-owner', style: `color:${OWNER_CSS[st?.owner ?? 0] ?? '#c8b890'}` }, this.ownerText(id)));
-    if (def.capturable && def.income) card.appendChild(h('div', null, 'Revenus : ', h('b', { class: 'c-good' }, `+${def.income} £/min`)));
+    if (def.capturable && def.income) card.appendChild(h('div', null, 'Revenus : ', h('b', { class: 'c-good' }, `+${def.income} $/min`)));
     card.appendChild(h('p', { class: 'sm-blurb' }, def.blurb));
     if (st && st.cap > 0) card.appendChild(h('div', { class: 'c-bad' }, `Capture en cours : ${Math.round(st.cap * 100)} %${st.contested ? ' (contesté)' : ''}`));
     if (enemyHq) {
@@ -869,10 +879,35 @@ export class StrategicMap {
           'div',
           { class: terr >= HQ_CAPTURE_MIN_DISTRICTS ? 'sm-note ok' : 'sm-note' },
           terr >= HQ_CAPTURE_MIN_DISTRICTS
-            ? `Vous contrôlez ${terr} quartiers : le QG ${DE_BOSS[def.hq!]} peut être pris. Sa capture vous donnera la victoire !`
-            : `Imprenable pour l’instant : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers (vous en avez ${terr}).`,
+            ? `Vous contrôlez ${terr} quartiers : le QG ${DE_BOSS[enemyHq]} peut être pris. Sa capture vous donnera la victoire !`
+            : `Imprenable pour l’instant : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 (vous en avez ${terr}).`,
         ),
       );
+    }
+    if (hqOf === gc.you) card.appendChild(h('div', { class: 'sm-note ok' }, `Votre quartier général (${tierDef(gc.priv.tier).name.toLowerCase()}). S’il tombe, la partie est perdue !`));
+    if (reserved) {
+      const res = def.residence!;
+      const td = tierDef(res.tier);
+      card.appendChild(h('div', { class: 'sm-sub' }, `Logement de l’ascension ${DE_BOSS[res.boss]} — palier ${res.tier} : ${td.name}`));
+      card.appendChild(h('ul', { class: 'sm-keys' }, ...td.perks.map((p) => h('li', null, p))));
+      if (res.boss !== gc.you) {
+        card.appendChild(h('p', { class: 'dim' }, `Réservé à ${BOSS_NAME[res.boss]} : impossible de l’acheter ou de le prendre tant qu’il est inoccupé.`));
+        return card;
+      }
+      const terr = gc.pub.territories[gc.you];
+      const next = res.tier === gc.priv.tier + 1;
+      const reasons: string[] = [];
+      if (res.tier <= gc.priv.tier) reasons.push('Vous habitez déjà plus prestigieux.');
+      else if (!next) reasons.push(`Emménagez d’abord ${RESIDENCES[gc.you][gc.priv.tier] ? `dans le palier ${gc.priv.tier + 1}` : ''}.`);
+      if (terr < td.districts) reasons.push(`Contrôlez au moins ${td.districts} quartier${td.districts > 1 ? 's' : ''} (vous en avez ${terr}).`);
+      if (gc.priv.money < def.price) reasons.push(`Il vous faut ${formatMoney(def.price)}.`);
+      for (const r of reasons) card.appendChild(h('div', { class: 'sm-note' }, r));
+      if (!this.remote && res.tier > gc.priv.tier) {
+        const actions = h('div', { class: 'sm-actions' });
+        actions.appendChild(this.actionBtn(`Emménager — ${formatMoney(def.price)}`, 'gold', () => this.act({ a: 'moveIn', b: id }, 'purchase'), reasons.length > 0));
+        card.appendChild(actions);
+      }
+      return card;
     }
     if (!def.capturable) {
       card.appendChild(h('p', { class: 'dim' }, 'Ce bâtiment ne peut pas être conquis.'));
@@ -882,9 +917,12 @@ export class StrategicMap {
     const actions = h('div', { class: 'sm-actions' });
     if (!mine) {
       actions.appendChild(
-        this.actionBtn(def.hq && def.hq !== gc.you ? 'Assaut sur le QG' : 'Attaquer', 'danger', () =>
+        this.actionBtn(enemyHq ? 'Assaut sur le QG' : 'Attaquer', 'danger', () =>
           this.choose({ order: 'attack_building', target: id, label: `${ORDER_LABEL.attack_building} : ${def.name}`, confirm: 'Lancer l’attaque' }),
         ),
+      );
+      actions.appendChild(
+        this.actionBtn('Par le métro', 'danger', () => this.choose({ order: 'subway', target: id, label: `${ORDER_LABEL.subway} : ${def.name}`, confirm: 'Lancer l’attaque souterraine' })),
       );
       if (st && st.owner === Faction.NEUTRAL && def.price > 0 && st.guards === 0) {
         actions.appendChild(
@@ -894,6 +932,8 @@ export class StrategicMap {
     } else {
       actions.appendChild(this.actionBtn('Défendre', '', () => this.choose({ order: 'defend_building', target: id, label: `${ORDER_LABEL.defend_building} : ${def.name}`, confirm: 'Envoyer en défense' })));
     }
+    if (gc.world.buildings[id]?.roofPts.length)
+      actions.appendChild(this.actionBtn('Tenir le toit', '', () => this.choose({ order: 'roof', target: id, label: `${ORDER_LABEL.roof} : ${def.name}`, confirm: 'Monter sur le toit' })));
     card.appendChild(actions);
     return card;
   }
@@ -931,7 +971,7 @@ export class StrategicMap {
             },
           },
           h('i', { style: `background:${OWNER_CSS[st?.owner ?? 0] ?? '#c8b890'}` }),
-          `${k.hq ? '♛' : '★'} ${k.name}`,
+          `${gc.pub.hq.dadou === k.id || gc.pub.hq.even === k.id ? '♛' : '★'} ${k.name}`,
           h('span', { class: 'dim' }, ` — ${this.ownerText(k.id)}`),
         ),
       );
@@ -943,8 +983,10 @@ export class StrategicMap {
     card.appendChild(h('div', { class: 'dim' }, `Autres bâtiments : ${ownedOthers}/${others.length} à vous`));
     if (this.remote) return card;
     const actions = h('div', { class: 'sm-actions' });
-    if (owner !== gc.myFaction)
+    if (owner !== gc.myFaction) {
       actions.appendChild(this.actionBtn('Attaquer le quartier', 'danger', () => this.choose({ order: 'attack_district', target: id, label: `${ORDER_LABEL.attack_district} : ${d.name}`, confirm: 'Lancer l’attaque' })));
+      actions.appendChild(this.actionBtn('Par le métro', 'danger', () => this.choose({ order: 'subway', target: id, label: `${ORDER_LABEL.subway} : ${d.name}`, confirm: 'Lancer l’attaque souterraine' })));
+    }
     actions.appendChild(this.actionBtn('Défendre', '', () => this.choose({ order: 'defend_district', target: id, label: `${ORDER_LABEL.defend_district} : ${d.name}`, confirm: 'Envoyer en défense' })));
     actions.appendChild(this.actionBtn('Patrouiller', '', () => this.choose({ order: 'patrol', target: id, label: `${ORDER_LABEL.patrol} : ${d.name}`, confirm: 'Lancer la patrouille' })));
     card.appendChild(actions);
@@ -1171,7 +1213,7 @@ export class StrategicMap {
       this.section(
         'Recruter des gangsters',
         h('p', { class: 'dim' }, `${barman} vous présente les gars du quartier, prêts à se battre pour ${MAFIA_NAME[this.gc.you].replace('La ', 'la ')}.`),
-        h('div', { class: 'sm-big' }, `Hommes : ${p.men} / ${MAX_GANGSTERS}`, h('span', { class: 'dim' }, ` — ${p.pool} au QG, ${p.escort} avec vous`)),
+        h('div', { class: 'sm-big' }, `Hommes : ${p.men} / ${p.maxMen}`, h('span', { class: 'dim' }, ` — ${p.pool} au QG, ${p.escort} avec vous`)),
         h(
           'div',
           { class: 'sm-recruit' },
@@ -1179,8 +1221,8 @@ export class StrategicMap {
             h(
               'button',
               {
-                class: `btn ${p.money < rb.price || p.men >= MAX_GANGSTERS ? 'disabled' : ''}`,
-                disabled: p.money < rb.price || p.men >= MAX_GANGSTERS,
+                class: `btn ${p.money < rb.price || p.men >= p.maxMen ? 'disabled' : ''}`,
+                disabled: p.money < rb.price || p.men >= p.maxMen,
                 on: { click: () => this.act({ a: 'recruit', n: rb.n }, 'recruit') },
               },
               h('div', null, `Recruter ${rb.n} gangster${rb.n > 1 ? 's' : ''}`),
@@ -1200,12 +1242,12 @@ export class StrategicMap {
     const n = p.lieutenants.length;
     const next = LIEUTENANT_NAMES[this.gc.you][n];
     const price = LIEUTENANT_PRICES[n] ?? 0;
-    const max = n >= MAX_LIEUTENANTS;
+    const max = n >= this.gc.priv.maxLt;
     b.appendChild(
       this.section(
         'Engager un lieutenant',
         max
-          ? h('p', { class: 'dim' }, `Vous avez déjà ${MAX_LIEUTENANTS} lieutenants : le maximum.`)
+          ? h('p', { class: 'dim' }, `Vous avez déjà ${this.gc.priv.maxLt} lieutenants : le maximum pour votre ${tierDef(this.gc.priv.tier).name.toLowerCase()}.${this.gc.priv.tier < 5 ? ' Un QG plus prestigieux en accueillera davantage.' : ''}`)
           : h(
               'div',
               { class: 'sm-hire' },

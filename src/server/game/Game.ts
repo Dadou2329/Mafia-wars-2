@@ -1,6 +1,6 @@
 // Simulation autoritaire d'une partie : entités, combats, territoires, économie.
 
-import { Anim, CharKind, FLAG, LIEUTENANT_NAMES, WEAPONS, Weapon } from '../../shared/characters';
+import { Anim, CharKind, FLAG, LIEUTENANT_NAMES, RECRUITER_NAME, WEAPONS, Weapon } from '../../shared/characters';
 import {
   BOSS_NAME,
   BOSS_SHOP,
@@ -12,8 +12,6 @@ import {
   LIEUTENANT_PRICES,
   LIEUTENANT_RECOVERY,
   MAFIA_NAME,
-  MAX_GANGSTERS,
-  MAX_LIEUTENANTS,
   NEWSPAPER,
   RECRUIT_BUNDLES,
   RESPAWN_PENALTY,
@@ -24,9 +22,27 @@ import {
   TICK_DT,
   UPGRADE_BY_ID,
   AMMO_PRICE,
+  TAXI_PRICE,
+  TIERS,
+  tierDef,
   type OrderType,
 } from '../../shared/constants';
-import { BUILDINGS, DISTRICTS, DISTRICT_BY_ID, Faction, HQ_BUILDING, districtAt, keyBuildings, type DistrictId } from '../../shared/city/plan';
+import {
+  BUILDINGS,
+  DISTRICTS,
+  DISTRICT_BY_ID,
+  Faction,
+  HQ_BUILDING,
+  INTERIOR_MAX_Y,
+  RESIDENCES,
+  WATER_Y,
+  WORLD_D,
+  WORLD_W,
+  districtAt,
+  isWater,
+  keyBuildings,
+  type DistrictId,
+} from '../../shared/city/plan';
 import type { BuildingInfo } from '../../shared/city/gen/context';
 import {
   BOSS_ENTITY_ID,
@@ -93,11 +109,19 @@ export class Game {
   private informantUntil: Record<Slot, number> = { dadou: -1, even: -1 };
   /** Instant de début de la dernière alerte « QG menacé » par camp. */
   private hqAlertAt: Record<Slot, number> = { dadou: -100, even: -100 };
+  /** Pluie (0..1), sa cible et le prochain changement de temps. */
+  rain = 0;
+  private rainTarget = 0;
+  private rainNextAt = 0;
 
   constructor(w: SharedWorld, settings: MatchSettings) {
     this.w = w;
     this.settings = settings;
-    this.dayTime = settings.daytime === 'night' ? 0.92 : settings.daytime === 'dusk' ? 0.77 : 0.74;
+    // la partie commence à la tombée de la nuit : les néons s'allument
+    this.dayTime = settings.daytime === 'night' ? 0.92 : settings.daytime === 'dusk' ? 0.77 : 0.79;
+    // une bruine au début (rues mouillées qui reflètent les néons), sauf temps sec
+    this.rain = this.rainTarget = settings.weather === 'clear' ? 0 : settings.weather === 'rain' ? 1 : 0.35;
+    this.rainNextAt = this.rng.range(150, 220);
     this.factions = {
       dadou: this.makeFaction('dadou'),
       even: this.makeFaction('even'),
@@ -138,13 +162,32 @@ export class Game {
       spotted: [],
       notifyAt: new Map(),
       custom: {},
+      tier: 1,
+      hqId: HQ_BUILDING[slot].id,
     };
   }
 
   // ======================================================================= mise en place
 
+  /** QG actuel (le logement le plus élevé de l'échelle). */
   hq(slot: Slot): BuildingInfo {
-    return this.w.byId.get(HQ_BUILDING[slot].id)!;
+    return this.w.byId.get(this.factions[slot].hqId)!;
+  }
+
+  /** Parrain dont ce bâtiment est le QG actuel, ou null. */
+  hqOwnerOf(bid: number): Slot | null {
+    for (const s of SLOTS) if (this.factions[s].hqId === bid) return s;
+    return null;
+  }
+
+  /** Logement réservé : pas encore acheté par son parrain (ni capturable, ni à vendre aux autres). */
+  isReserved(bid: number): boolean {
+    const def = BUILDINGS[bid];
+    return !!def.residence && this.bstate.get(bid)!.owner === Faction.NEUTRAL;
+  }
+
+  tierOf(slot: Slot) {
+    return tierDef(this.factions[slot].tier);
   }
 
   building(id: number): BuildingInfo {
@@ -165,22 +208,17 @@ export class Game {
         slot,
         x: sp.x,
         z: sp.z,
+        y: sp.y ?? hq.floorY,
         name: BOSS_NAME[slot],
         hp: HP.boss,
         weapon: Weapon.PISTOL,
       });
       boss.yaw = hq.desk ? hq.desk.yaw + Math.PI : 0;
-      // barman recruteur
-      if (hq.recruit) {
-        const bar = this.addEnt({ kind: CharKind.BARMAN, role: 'barman', faction: f.faction, slot, x: hq.recruit.x, z: hq.recruit.z, hp: 100, weapon: Weapon.FISTS, mode: 'guard' });
-        bar.invulnerable = true;
-        // derrière le comptoir : on recule un peu
-        const off = this.barmanOffset(hq);
-        bar.x = off.x;
-        bar.z = off.z;
-        bar.ai!.post = { x: off.x, z: off.z };
-        bar.name = slot === 'dadou' ? 'Bill le barman' : 'Molly la tenancière';
-      }
+      // le rabatteur qui recrute au QG
+      const rp = hq.recruit ?? hq.spawn[0] ?? hq.center;
+      const bar = this.addEnt({ kind: CharKind.BARMAN, role: 'barman', faction: f.faction, slot, x: rp.x, z: rp.z, y: rp.y ?? hq.floorY, hp: 100, weapon: Weapon.FISTS, mode: 'guard', name: RECRUITER_NAME[slot] });
+      bar.invulnerable = true;
+      bar.ai!.post = { x: rp.x, z: rp.z, y: rp.y ?? hq.floorY };
       // premier lieutenant gratuit et cinq gangsters
       this.hireLieutenant(slot, true);
       for (let i = 0; i < START_GANGSTERS; i++) this.spawnGangster(slot);
@@ -191,8 +229,10 @@ export class Game {
         const info = this.building(b.id);
         const st = this.bstate.get(b.id)!;
         const pts = [...info.defend].sort(() => this.rng.next() - 0.5);
+        // un guetteur sur le toit des bâtiments bien gardés
+        const roof = info.roofPts.length && b.guards >= 4 ? info.roofPts[this.rng.int(0, info.roofPts.length - 1)] : null;
         for (let i = 0; i < b.guards; i++) {
-          const p = pts[i % Math.max(1, pts.length)] ?? info.center;
+          const p = (i === 0 && roof) || (pts[i % Math.max(1, pts.length)] ?? info.center);
           const w = this.rng.pick([Weapon.PISTOL, Weapon.PISTOL, Weapon.CLUB, Weapon.KNIFE, Weapon.SHOTGUN]);
           const e = this.addEnt({
             kind: CharKind.THUG,
@@ -201,41 +241,19 @@ export class Game {
             gang: DISTRICT_BY_ID[b.district].index,
             x: p.x,
             z: p.z,
+            y: p.y ?? info.floorY,
             hp: HP.thug,
             weapon: w,
             mode: 'guard',
           });
           e.ai!.home = b.id;
-          e.ai!.post = { x: p.x, z: p.z };
+          e.ai!.post = { x: p.x, z: p.z, y: p.y ?? info.floorY };
           e.ai!.leash = 16;
           st.thugs.add(e.id);
         }
       }
     }
     spawnPolice(this, 6);
-  }
-
-  private barmanOffset(hq: BuildingInfo): Vec2 {
-    // le comptoir est le long du mur gauche de la salle : le barman se tient entre le mur et le comptoir
-    const r = hq.rooms.find((x) => x.kind === 'bar')!.rect;
-    const p = hq.recruit!;
-    // on cherche le point praticable le plus proche du mur côté opposé à la salle
-    let best = { x: p.x, z: p.z };
-    let bestD = -1;
-    for (let dx = -3; dx <= 3; dx += 0.5)
-      for (let dz = -3; dz <= 3; dz += 0.5) {
-        const x = p.x + dx;
-        const z = p.z + dz;
-        if (x < r[0] || x > r[2] || z < r[1] || z > r[3]) continue;
-        if (!this.w.nav.walkable(x, z, hq.floorY)) continue;
-        if (this.w.nav.lineWalkable(p.x, p.z, x, z, 1, hq.floorY)) continue; // de l'autre côté du comptoir
-        const d = Math.min(x - r[0], r[2] - x, z - r[1], r[3] - z);
-        if (bestD < 0 || d < bestD) {
-          bestD = d;
-          best = { x, z };
-        }
-      }
-    return best;
   }
 
   addEnt(o: {
@@ -348,8 +366,8 @@ export class Game {
     const f = this.factions[slot];
     const r = this.rng.next();
     if (f.upgrades.has('rifles') && r < 0.25) return Weapon.RIFLE;
-    if (f.upgrades.has('shotguns') && r < (f.upgrades.has('rifles') ? 0.55 : 0.33)) return Weapon.SHOTGUN;
-    if (f.upgrades.has('revolvers')) return Weapon.PISTOL;
+    if (f.upgrades.has('smgs') && r < (f.upgrades.has('rifles') ? 0.55 : 0.33)) return Weapon.SMG;
+    if (f.upgrades.has('pistols')) return r < 0.85 ? Weapon.PISTOL : Weapon.SHOTGUN;
     return r < 0.5 ? Weapon.PISTOL : r < 0.8 ? Weapon.CLUB : Weapon.KNIFE;
   }
 
@@ -360,13 +378,13 @@ export class Game {
   /** Point libre au QG pour un gangster de réserve. */
   poolPost(slot: Slot, i: number): Vec2 {
     const hq = this.hq(slot);
-    const inside = hq.spawn.length ? hq.spawn : hq.defend;
-    const all = [...hq.guardOut, ...inside];
+    // les hommes de réserve attendent devant et dans le QG (jamais au-delà de 60 postes : ils se serrent)
+    const all = [...hq.guardOut, ...hq.defend];
     return all[i % all.length];
   }
 
   spawnGangster(slot: Slot): Ent | null {
-    if (this.countMen(slot) >= MAX_GANGSTERS) return null;
+    if (this.countMen(slot) >= this.tierOf(slot).maxMen) return null;
     const f = this.factions[slot];
     const hq = this.hq(slot);
     const p = hq.spawn[this.rng.int(0, hq.spawn.length - 1)] ?? hq.center;
@@ -377,6 +395,7 @@ export class Game {
       slot,
       x: p.x + this.rng.range(-0.3, 0.3),
       z: p.z + this.rng.range(-0.3, 0.3),
+      y: p.y ?? hq.floorY,
       hp: this.gangHp(slot, HP.gangster),
       weapon: this.gangWeapon(slot),
       mode: 'pool',
@@ -412,7 +431,7 @@ export class Game {
 
   hireLieutenant(slot: Slot, free = false): Ent | null {
     const f = this.factions[slot];
-    if (f.lieutenants.length >= MAX_LIEUTENANTS) return null;
+    if (f.lieutenants.length >= this.tierOf(slot).maxLt) return null;
     const price = free ? 0 : LIEUTENANT_PRICES[f.lieutenants.length] ?? 99999;
     if (f.money < price) return null;
     f.money -= price;
@@ -426,6 +445,7 @@ export class Game {
       slot,
       x: p.x,
       z: p.z,
+      y: p.y ?? hq.floorY,
       hp: this.gangHp(slot, HP.lieutenant),
       weapon: f.upgrades.has('rifles') ? Weapon.RIFLE : Weapon.PISTOL,
       name,
@@ -506,13 +526,31 @@ export class Game {
     for (const b of this.w.buildings) {
       const f = b.footprint;
       if (x < f[0] || x > f[2] || z < f[1] || z > f[3]) continue;
-      for (const r of b.zone) {
+      for (const zn of b.zone) {
+        const r = zn.rect;
         if (x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3]) {
-          if (y === undefined || Math.abs(y - b.floorY) < 2.5) return b.id;
+          if (y === undefined || (y >= zn.y0 - 0.6 && y <= zn.y1)) return b.id;
         }
       }
     }
     return -1;
+  }
+
+  /** Dans le bâtiment ou sur son toit. */
+  inBuildingArea(b: BuildingInfo, x: number, y: number, z: number): boolean {
+    const f = b.footprint;
+    if (x < f[0] || x > f[2] || z < f[1] || z > f[3]) return false;
+    if (b.roofY !== null && y >= b.roofY - 0.6) return true;
+    return this.insideBuilding(b, x, y, z);
+  }
+
+  /** Le point est-il dans un des volumes intérieurs du bâtiment ? */
+  insideBuilding(b: BuildingInfo, x: number, y: number, z: number): boolean {
+    for (const zn of b.zone) {
+      const r = zn.rect;
+      if (x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3] && y >= zn.y0 - 0.6 && y <= zn.y1) return true;
+    }
+    return false;
   }
 
   // ======================================================================= hostilité
@@ -543,7 +581,7 @@ export class Game {
       const home = a.ai!.home;
       if (home < 0) return false;
       const hb = this.building(home);
-      if (this.buildingAt(b.x, b.z) === home) return true;
+      if (this.inBuildingArea(hb, b.x, b.y, b.z)) return true;
       // devant la porte du repaire
       const door = hb.doors[0];
       return Math.hypot(b.x - door.out.x, b.z - door.out.z) < 3.5;
@@ -558,7 +596,7 @@ export class Game {
       if (a.role === 'boss') return false;
       if (a.ai?.mode === 'escort' && a.slot) {
         const boss = this.ents.get(this.factions[a.slot].bossId)!;
-        if (Math.hypot(boss.x - b.x, boss.z - b.z) < 14 && this.buildingAt(boss.x, boss.z) === home) return true;
+        if (Math.hypot(boss.x - b.x, boss.z - b.z) < 14 && home >= 0 && this.inBuildingArea(this.building(home), boss.x, boss.y, boss.z)) return true;
       }
       // menace : un voyou qui vise un camarade proche
       return b.ai!.target >= 0 && this.ents.get(b.ai!.target)?.faction === af;
@@ -689,9 +727,9 @@ export class Game {
       this.teleport(slot, e.x, e.y, e.z, e.yaw);
       return;
     }
-    e.x = clamp(x, 0.5, 199.5);
-    e.y = clamp(y, -3, 45);
-    e.z = clamp(z, 0.5, 159.5);
+    e.x = clamp(x, 0.5, WORLD_W - 0.5);
+    e.y = clamp(y, -9, INTERIOR_MAX_Y + 20);
+    e.z = clamp(z, 0.5, WORLD_D - 0.5);
     e.yaw = yaw;
     e.pitch = clamp(pitch, -1.5, 1.5);
     e.vx = clamp(vx, -8, 8);
@@ -699,11 +737,10 @@ export class Game {
     e.anim = anim === Anim.DEAD ? Anim.IDLE : (anim as Anim);
     e.flags = flags & ~FLAG.WANTED;
     if (f.weapons.has(weapon as Weapon)) e.weapon = weapon as Weapon;
-    // tombé dans la Tamise
-    if (e.y < -1.6 && e.z > 139) {
-      this.notify(slot, 'Vous êtes tombé dans la Tamise ! On vous repêche…', 'info');
-      const hq = this.hq(slot);
-      this.respawnBoss(slot, hq, false);
+    // tombé dans l'East River
+    if (e.y < WATER_Y - 0.4 && e.y > WATER_Y - 4 && isWater(e.x, e.z)) {
+      this.notify(slot, 'Vous êtes tombé dans l’East River ! Un drone de secours vous repêche…', 'info');
+      this.respawnBoss(slot, this.hq(slot), false);
     }
   }
 
@@ -811,8 +848,11 @@ export class Game {
       case 'recruit': {
         const b = RECRUIT_BUNDLES.find((x) => x.n === act.n);
         if (!b) return;
-        const room = MAX_GANGSTERS - this.countMen(slot);
-        if (room <= 0) return this.notify(slot, 'Effectif maximal atteint.', 'bad');
+        const room = this.tierOf(slot).maxMen - this.countMen(slot);
+        if (room <= 0) {
+          const next = f.tier < TIERS.length ? ` Emménagez dans un logement plus grand pour en accueillir davantage.` : '';
+          return this.notify(slot, `Effectif maximal atteint (${this.tierOf(slot).maxMen} hommes).${next}`, 'bad');
+        }
         if (f.money < b.price) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(b.price)}.`, 'bad');
         f.money -= b.price;
         const n = Math.min(b.n, room);
@@ -822,7 +862,10 @@ export class Game {
         break;
       }
       case 'hire': {
-        if (f.lieutenants.length >= MAX_LIEUTENANTS) return this.notify(slot, 'Vous avez déjà le maximum de lieutenants.', 'bad');
+        if (f.lieutenants.length >= this.tierOf(slot).maxLt) {
+          const next = f.tier < TIERS.length ? ' Un QG plus prestigieux vous permettra d’en engager davantage.' : '';
+          return this.notify(slot, `Vous avez déjà le maximum de lieutenants (${this.tierOf(slot).maxLt}).${next}`, 'bad');
+        }
         const price = LIEUTENANT_PRICES[f.lieutenants.length];
         if (f.money < price) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(price)}.`, 'bad');
         const lt = this.hireLieutenant(slot);
@@ -852,6 +895,7 @@ export class Game {
         const u = UPGRADE_BY_ID[act.id];
         if (!u || f.upgrades.has(u.id)) return;
         if (u.requires && !f.upgrades.has(u.requires)) return this.notify(slot, `Il faut d’abord : ${UPGRADE_BY_ID[u.requires].name}.`, 'bad');
+        if (u.tier && f.tier < u.tier) return this.notify(slot, `Il faut un QG plus prestigieux (${tierDef(u.tier).name.toLowerCase()} ou mieux).`, 'bad');
         if (f.money < u.price) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(u.price)}.`, 'bad');
         f.money -= u.price;
         f.upgrades.add(u.id);
@@ -886,12 +930,43 @@ export class Game {
         const st = this.bstate.get(act.b);
         const def = BUILDINGS[act.b];
         if (!st || !def || !def.capturable) return;
+        if (def.residence) return this.action(slot, { a: 'moveIn', b: def.id });
         if (st.owner !== Faction.NEUTRAL) return this.notify(slot, 'Ce bâtiment n’est pas à vendre.', 'bad');
         if (def.price <= 0 || [...st.thugs].some((id) => this.ents.get(id)?.alive)) return this.notify(slot, 'Ce bâtiment est tenu par un gang : il faut le prendre par la force.', 'bad');
         if (f.money < def.price) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(def.price)}.`, 'bad');
         f.money -= def.price;
         this.setOwner(act.b, f.faction, slot);
-        this.notify(slot, `Vous avez acheté ${leNom(def.name)}. Revenus : +${def.income} £/min.`, 'money');
+        this.notify(slot, `Vous avez acheté ${leNom(def.name)}. Revenus : +${def.income} $/min.`, 'money');
+        break;
+      }
+      case 'moveIn': {
+        const def = BUILDINGS[act.b];
+        if (!def || !def.residence) return;
+        if (def.residence.boss !== slot) return this.notify(slot, `Ce logement est réservé à ${BOSS_NAME[def.residence.boss]}.`, 'bad');
+        const tier = def.residence.tier;
+        if (tier <= f.tier) return this.notify(slot, 'Vous avez déjà un QG plus prestigieux.', 'info');
+        if (tier !== f.tier + 1) return this.notify(slot, `Il faut d’abord emménager ${aNom(RESIDENCES[slot][f.tier].name)}.`, 'bad');
+        if (this.bstate.get(def.id)!.owner !== Faction.NEUTRAL) return;
+        const need = tierDef(tier).districts;
+        const have = this.territories(slot);
+        if (have < need) return this.notify(slot, `Pour emménager ${aNom(def.name)}, contrôlez au moins ${need} quartier${need > 1 ? 's' : ''} (vous en avez ${have}).`, 'bad');
+        if (f.money < def.price) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(def.price)}.`, 'bad');
+        f.money -= def.price;
+        this.moveHq(slot, def.id);
+        break;
+      }
+      case 'goHome': {
+        const boss = this.ents.get(f.bossId)!;
+        if (!boss.alive) return;
+        if (f.heat >= 1) return this.notify(slot, 'Impossible : la police vous recherche. Semez-la d’abord !', 'bad');
+        if (this.time - boss.lastDamageAt < 12) return this.notify(slot, 'Impossible en plein combat.', 'bad');
+        if (f.money < TAXI_PRICE) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(TAXI_PRICE)}.`, 'bad');
+        f.money -= TAXI_PRICE;
+        const hq = this.hq(slot);
+        const sp = hq.deskSeat ?? hq.spawn[0] ?? hq.center;
+        const y = this.w.nav.heightAt(sp.x, sp.z, sp.y ?? hq.floorY);
+        this.teleport(slot, sp.x, Number.isFinite(y) ? y : (sp.y ?? hq.floorY), sp.z, hq.desk ? hq.desk.yaw + Math.PI : 0);
+        this.notify(slot, `Un taxi volant vous dépose ${aNom(hq.def.name)} (−${formatMoney(TAXI_PRICE)}).`, 'money');
         break;
       }
       case 'quick':
@@ -918,7 +993,7 @@ export class Game {
           if (now - last < 0.3) return;
           this.civHitAt.set(slot, now);
           this.addHeat(slot, 1.25);
-          this.notify(slot, 'Un passant innocent a été abattu ! Scotland Yard est sur les dents.', 'alert', 'civilian', 25);
+          this.notify(slot, 'Un passant innocent a été abattu ! Le NYPD est sur les dents.', 'alert', 'civilian', 25);
         }
         break;
       }
@@ -926,7 +1001,7 @@ export class Game {
         const c = act.custom;
         const clean: Record<string, unknown> = {};
         for (const k of ['coat', 'vest', 'tie', 'hatband', 'accent']) if (typeof c[k] === 'number') clean[k] = c[k];
-        if (typeof c.hat === 'string' && ['bowler', 'top', 'flatcap'].includes(c.hat)) clean.hat = c.hat;
+        if (typeof c.hat === 'string' && ['bowler', 'top', 'flatcap', 'fedora'].includes(c.hat)) clean.hat = c.hat;
         f.custom = clean;
         const e = this.ents.get(f.bossId)!;
         this.emitAll({ t: 'spawn', e: this.info(e) });
@@ -935,6 +1010,69 @@ export class Game {
       default:
         break;
     }
+  }
+
+  /** Le parrain emménage dans le logement suivant : le QG, le rabatteur, la réserve et les gardes déménagent. */
+  moveHq(slot: Slot, bid: number): void {
+    const f = this.factions[slot];
+    const def = BUILDINGS[bid];
+    const prevHq = this.hq(slot);
+    f.tier = def.residence!.tier;
+    f.hqId = bid;
+    this.setOwner(bid, f.faction);
+    const hq = this.hq(slot);
+    // le rabatteur prend un taxi volant : il attend déjà au nouveau QG
+    for (const e of this.ents.values()) {
+      if (e.slot !== slot || !e.alive) continue;
+      if (e.role === 'barman') {
+        const rp = hq.recruit ?? hq.spawn[0] ?? hq.center;
+        e.x = rp.x;
+        e.z = rp.z;
+        e.y = rp.y ?? hq.floorY;
+        e.ai!.post = { x: rp.x, z: rp.z, y: rp.y ?? hq.floorY };
+        e.ai!.path = null;
+      }
+    }
+    // la réserve rejoint le nouveau QG à pied (vraiment, à travers la ville)
+    let i = 0;
+    for (const e of this.poolMembers(slot)) {
+      e.ai!.post = this.poolPost(slot, i++);
+      e.ai!.run = true;
+    }
+    // les lieutenants sans ordre aussi
+    f.lieutenants.forEach((id, k) => {
+      const sq = this.squads.get(id);
+      const lt = this.ents.get(id);
+      if (sq && lt && lt.alive && !sq.order) lt.ai!.post = this.poolPost(slot, 3 + k);
+    });
+    // les gardes d'élite déménagent
+    let g = 0;
+    for (const e of this.ents.values()) {
+      if (e.slot !== slot || !e.alive || e.role !== 'guard') continue;
+      e.ai!.post = this.guardPost(slot, g++);
+      e.ai!.home = hq.id;
+    }
+    f.guardRespawnAt = this.time + 5;
+    const td = this.tierOf(slot);
+    this.emitAll({ t: 'hq', slot, b: bid, tier: f.tier });
+    this.notify(slot, `Bienvenue chez vous : ${def.name} ! (${td.name} — ${td.perks.join(', ')})`, 'good');
+    this.notify(otherSlot(slot), `${BOSS_NAME[slot]} s’installe ${aNom(def.name)} : son nouveau quartier général.`, 'alert');
+    void prevHq;
+    const where = DISTRICT_BY_ID[def.district].name;
+    const titles: Record<number, string> = {
+      2: `${BOSS_NAME[slot].toUpperCase()} OUVRE UN GARAGE ${aNom(where).toUpperCase()}`,
+      3: `${BOSS_NAME[slot].toUpperCase()} S’OFFRE UN LOFT ${aNom(where).toUpperCase()}`,
+      4: `${BOSS_NAME[slot].toUpperCase()} EMMÉNAGE DANS UN PENTHOUSE DE LUXE`,
+      5: `${BOSS_NAME[slot].toUpperCase()} PREND POSSESSION ${deNom(def.name).toUpperCase()}`,
+    };
+    if (titles[f.tier]) this.news(titles[f.tier], `${MAFIA_NAME[slot]} prend du galon : son parrain règne désormais depuis ${leNom(def.name)}. ${BOSS_NAME[otherSlot(slot)]} n’a qu’à bien se tenir.`);
+  }
+
+  /** Poste d'un garde d'élite : la moitié dehors devant l'entrée, l'autre à l'intérieur. */
+  guardPost(slot: Slot, i: number): Vec2 {
+    const hq = this.hq(slot);
+    if (i % 2 === 0 || hq.defend.length === 0) return hq.guardOut[(i >> 1) % hq.guardOut.length];
+    return hq.defend[(i * 7) % hq.defend.length];
   }
 
   assignMen(sq: Squad, men: number): void {
@@ -975,9 +1113,9 @@ export class Game {
     const f = this.factions[slot];
     for (const e of this.ents.values()) {
       if (e.slot !== slot || !e.alive) continue;
-      if (e.role === 'gangster' && (id === 'revolvers' || id === 'shotguns' || id === 'rifles')) {
-        if (id === 'revolvers' && (e.weapon === Weapon.CLUB || e.weapon === Weapon.KNIFE)) e.weapon = Weapon.PISTOL;
-        else if (id !== 'revolvers' && this.rng.chance(id === 'rifles' ? 0.25 : 0.33)) e.weapon = id === 'rifles' ? Weapon.RIFLE : Weapon.SHOTGUN;
+      if (e.role === 'gangster' && (id === 'pistols' || id === 'smgs' || id === 'rifles')) {
+        if (id === 'pistols' && (e.weapon === Weapon.CLUB || e.weapon === Weapon.KNIFE || e.weapon === Weapon.FISTS)) e.weapon = Weapon.PISTOL;
+        else if (id !== 'pistols' && this.rng.chance(id === 'rifles' ? 0.25 : 0.33)) e.weapon = id === 'rifles' ? Weapon.RIFLE : Weapon.SMG;
         e.ammo = WEAPONS[e.weapon].magazine;
       }
       if (id === 'vests' && (e.role === 'gangster' || e.role === 'lieutenant')) {
@@ -988,7 +1126,6 @@ export class Game {
       }
       if (id === 'training' && e.ai) e.ai.accuracy *= 1.2;
     }
-    if (id === 'guards') f.guardRespawnAt = this.time;
     if (id === 'armory') {
       for (const w of f.weapons) {
         const def = WEAPONS[w];
@@ -1116,7 +1253,7 @@ export class Game {
     if (prevSlot) this.factions[prevSlot].lost++;
     if (newSlot && by !== undefined) {
       const bossName = BOSS_NAME[newSlot];
-      this.notify(newSlot, `Les hommes ${DE_BOSS[newSlot]} ont capturé ${leNom(def.name)} ! (+${def.income} £/min)`, 'good');
+      this.notify(newSlot, `Les hommes ${DE_BOSS[newSlot]} ont capturé ${leNom(def.name)} ! (+${def.income} $/min)`, 'good');
       if (prevSlot) this.notify(prevSlot, `${MAFIA_NAME[prevSlot]} a perdu ${leNom(def.name)} au profit ${DE_BOSS[newSlot]} !`, 'bad');
       else this.notify(otherSlot(newSlot), `Les hommes ${DE_BOSS[newSlot]} ont capturé ${leNom(def.name)}.`, 'info');
     }
@@ -1126,7 +1263,7 @@ export class Game {
         const t = this.ents.get(id);
         if (t && t.alive) {
           t.ai!.mode = 'flee';
-          t.ai!.post = { x: this.rng.range(10, 190), z: this.rng.range(10, 130) };
+          t.ai!.post = { x: clamp(t.x + this.rng.range(-40, 40), 4, WORLD_W - 4), z: clamp(t.z + this.rng.range(-40, 40), 4, WORLD_D - 4) };
           t.ai!.run = true;
           t.ai!.target = -1;
           t.removeAt = this.time + 20;
@@ -1136,9 +1273,10 @@ export class Game {
       }
       st.thugs.clear();
     }
-    // victoire : prise du QG adverse
-    if (def.hq && newSlot && def.hq !== newSlot) {
-      this.endGame(newSlot, `${BOSS_NAME[newSlot]} a pris le quartier général ${DE_BOSS[def.hq]} !`);
+    // victoire : prise du QG actuel du parrain adverse
+    const hqOf = this.hqOwnerOf(bid);
+    if (hqOf && newSlot && hqOf !== newSlot) {
+      this.endGame(newSlot, `${BOSS_NAME[newSlot]} a pris ${leNom(def.name)}, le quartier général ${DE_BOSS[hqOf]} !`);
     }
     this.recomputeDistricts(false);
   }
@@ -1158,8 +1296,8 @@ export class Game {
         const ns = factionSlot(owner);
         const ps = factionSlot(prev);
         if (ns) {
-          this.notify(ns, `${BOSS_NAME[ns]} contrôle désormais ${leNom(d.name)} ! (+${DISTRICT_BONUS} £/min)`, 'good');
-          this.notify(otherSlot(ns), `${BOSS_NAME[ns]} contrôle désormais ${leNom(d.name)} !`, 'alert');
+          this.notify(ns, `${BOSS_NAME[ns]} a pris le contrôle ${deNom(d.name)} ! (+${DISTRICT_BONUS} $/min)`, 'good');
+          this.notify(otherSlot(ns), `${BOSS_NAME[ns]} a pris le contrôle ${deNom(d.name)} !`, 'alert');
           if (this.rng.chance(0.6)) this.news(`${cap(leNom(d.name)).toUpperCase()} ${pluriel(d.name) ? 'PASSENT' : 'PASSE'} SOUS LA COUPE ${ns === 'dadou' ? 'DE DADOU' : 'D’EVEN'}`, `Les habitants ${deNom(d.name)} parlent à voix basse : ${MAFIA_NAME[ns].toLowerCase()} y fait désormais la loi.`);
         }
         if (ps && !ns) this.notify(ps, `${MAFIA_NAME[ps]} a perdu le contrôle ${deNom(d.name)}.`, 'bad');
@@ -1176,9 +1314,10 @@ export class Game {
 
   private updateCapture(dt: number): void {
     for (const def of BUILDINGS) {
-      if (!def.capturable) continue;
+      if (!def.capturable || this.isReserved(def.id)) continue;
       const st = this.bstate.get(def.id)!;
       const info = this.building(def.id);
+      const hqOf = this.hqOwnerOf(def.id);
       let c1 = 0;
       let c2 = 0;
       let cn = 0;
@@ -1186,11 +1325,8 @@ export class Game {
       const cz = (info.footprint[1] + info.footprint[3]) / 2;
       const r = Math.hypot(info.footprint[2] - info.footprint[0], info.footprint[3] - info.footprint[1]) / 2 + 1;
       this.near(cx, cz, r, (e) => {
-        if (!e.alive || e.role === 'barman' || e.role === 'police') return;
-        if (Math.abs(e.y - info.floorY) > 2.5) return;
-        let inside = false;
-        for (const z of info.zone) if (e.x >= z[0] && e.x <= z[2] && e.z >= z[1] && e.z <= z[3]) inside = true;
-        if (!inside) return;
+        if (!e.alive || e.role === 'barman' || e.role === 'police' || e.flags & FLAG.HIDDEN) return;
+        if (!this.insideBuilding(info, e.x, e.y, e.z)) return;
         if (e.faction === Faction.DADOU) c1++;
         else if (e.faction === Faction.EVEN) c2++;
         else if (e.role === 'thug' && e.ai!.home === def.id) cn++;
@@ -1200,14 +1336,14 @@ export class Game {
       const defenders = counts[owner] ?? 0;
       const attackers = [Faction.DADOU, Faction.EVEN].filter((f) => f !== owner && counts[f] > 0);
       st.attackers = attackers.reduce((s, f) => s + counts[f], 0);
-      const time = def.hq ? CAPTURE_TIME.hq : def.isKey ? CAPTURE_TIME.key : CAPTURE_TIME.normal;
+      const time = hqOf ? CAPTURE_TIME.hq : def.isKey ? CAPTURE_TIME.key : CAPTURE_TIME.normal;
       st.contested = false;
       if (attackers.length === 1 && defenders === 0) {
         const F = attackers[0];
         const fs = factionSlot(F)!;
-        if (def.hq && this.territories(fs) < HQ_CAPTURE_MIN_DISTRICTS) {
+        if (hqOf && this.territories(fs) < HQ_CAPTURE_MIN_DISTRICTS) {
           st.contested = true;
-          this.notify(fs, `Le QG ${DE_BOSS[def.hq]} est imprenable : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers (vous en avez ${this.territories(fs)}).`, 'info', 'hq-locked', 15);
+          this.notify(fs, `Le QG ${DE_BOSS[hqOf]} est imprenable : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 (vous en avez ${this.territories(fs)}).`, 'info', 'hq-locked', 15);
           continue;
         }
         if (st.capBy !== F) {
@@ -1221,7 +1357,8 @@ export class Game {
         if (os && this.time - st.alertAt > 25) {
           st.alertAt = this.time;
           this.notify(os, `ALERTE — ${BOSS_NAME[fs]} attaque ${leNom(def.name)} !`, 'alert');
-          if (def.hq) this.notify(os, `ATTENTION ! ${BOSS_NAME[fs]} est dans votre quartier général !`, 'alert');
+          if (hqOf === os) this.notify(os, `ATTENTION ! ${BOSS_NAME[fs]} est dans votre quartier général !`, 'alert');
+          else if (def.isKey) this.notify(os, `${MAFIA_NAME[os]} risque de perdre un bâtiment stratégique ${aNom(DISTRICT_BY_ID[def.district].name)} !`, 'alert', `key-${def.id}`, 60);
         }
         if (st.progress >= 1) this.setOwner(def.id, F, fs);
       } else if (attackers.length > 0) {
@@ -1250,6 +1387,7 @@ export class Game {
     updatePolice(this, dt);
     if (this.tick % 20 === 0) this.updateSpotted();
     this.updateEvents();
+    this.updateWeather(dt);
     // nettoyage
     for (const e of this.ents.values()) {
       if (e.removeAt <= this.time) {
@@ -1268,9 +1406,8 @@ export class Game {
       // revenus
       let inc = 0;
       for (const def of BUILDINGS) if (this.bstate.get(def.id)!.owner === f.faction) inc += def.income;
-      const terr = this.territories(slot);
-      inc += terr * (DISTRICT_BONUS + (f.upgrades.has('facade') ? 5 : 0));
-      if (f.upgrades.has('office')) inc *= 1.1;
+      inc += this.territories(slot) * DISTRICT_BONUS;
+      inc *= this.tierOf(slot).incomeMul;
       f.income = Math.round(inc);
       const gain = (inc / 60) * dt;
       f.money += gain;
@@ -1283,18 +1420,21 @@ export class Game {
       if (boss.alive && boss.hp < boss.maxHp && this.time - boss.lastDamageAt > 6) boss.hp = Math.min(boss.maxHp, boss.hp + 5 * dt);
       // récupération des lieutenants
       // (gérée dans updateSquad)
-      // gardes du QG
-      if (f.upgrades.has('guards') && this.time >= f.guardRespawnAt) {
+      // gardes d'élite du QG (selon le palier du logement)
+      const wantGuards = this.tierOf(slot).guards;
+      if (wantGuards > 0 && this.time >= f.guardRespawnAt) {
         f.guardRespawnAt = this.time + 45;
         let guards = 0;
         for (const e of this.ents.values()) if (e.alive && e.slot === slot && e.role === 'guard') guards++;
         const hq = this.hq(slot);
-        for (let i = guards; i < 4; i++) {
-          const p = hq.guardOut[i % hq.guardOut.length];
-          const g = this.addEnt({ kind: CharKind.GANGSTER, role: 'guard', faction: f.faction, slot, x: p.x, z: p.z, hp: HP.guard, weapon: f.upgrades.has('shotguns') ? Weapon.SHOTGUN : Weapon.PISTOL, mode: 'guard' });
-          g.ai!.post = { x: p.x, z: p.z };
+        for (let i = guards; i < wantGuards; i++) {
+          const p = this.guardPost(slot, i);
+          const w = f.tier >= 5 ? (i % 3 === 0 ? Weapon.RIFLE : Weapon.SMG) : f.tier >= 4 ? Weapon.SMG : Weapon.SHOTGUN;
+          const g = this.addEnt({ kind: CharKind.GANGSTER, role: 'guard', faction: f.faction, slot, x: p.x, z: p.z, y: p.y ?? 0, hp: HP.guard, weapon: w, mode: 'guard' });
+          g.ai!.post = { x: p.x, z: p.z, y: p.y ?? 0 };
           g.ai!.leash = 22;
           g.ai!.home = hq.id;
+          g.ai!.accuracy = 0.66;
         }
       }
       // alerte : ennemis près du QG
@@ -1374,6 +1514,24 @@ export class Game {
     }
   }
 
+  private updateWeather(dt: number): void {
+    const w = this.settings.weather;
+    if (this.activeEvent?.kind === 'storm') this.rainTarget = 1;
+    else if (w === 'rain') this.rainTarget = 1;
+    else if (w === 'clear') this.rainTarget = 0;
+    else if (this.time >= this.rainNextAt) {
+      // alternance : temps sec 4 à 8 min, averse 2 à 4 min
+      if (this.rainTarget > 0) {
+        this.rainTarget = 0;
+        this.rainNextAt = this.time + this.rng.range(240, 480);
+      } else {
+        this.rainTarget = this.rng.range(0.45, 1);
+        this.rainNextAt = this.time + this.rng.range(120, 240);
+      }
+    }
+    this.rain += clamp(this.rainTarget - this.rain, -dt / 25, dt / 25);
+  }
+
   private updateEvents(): void {
     if (this.time >= this.newsAt) {
       this.newsAt = this.time + this.rng.range(200, 320);
@@ -1413,13 +1571,29 @@ export class Game {
     if (this.time >= ev.until) this.endEvent();
   }
 
+  /** Commissariat le plus proche d'un point. */
+  precinctNear(x: number, z: number): BuildingInfo {
+    let best = this.w.buildings[0];
+    let bd = Infinity;
+    for (const b of this.w.buildings) {
+      if (b.def.type !== 'police') continue;
+      const d = Math.hypot(b.center.x - x, b.center.z - z);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
   /** Lance un événement aléatoire. */
   private startRandomEvent(): void {
-    const kinds = ['contraband', 'contraband', 'raid', 'fog', 'informant'];
+    const kinds = ['contraband', 'contraband', 'raid', 'storm', 'informant'];
     const kind = kinds[this.rng.int(0, kinds.length - 1)];
-    const districts = DISTRICTS.filter((d) => d.id !== 'soho' && d.id !== 'docks');
+    // pas de descente dans les fiefs de départ (Brooklyn et le Queens)
+    const districts = DISTRICTS.filter((d) => d.id !== HQ_BUILDING.dadou.district && d.id !== HQ_BUILDING.even.district);
     const d = kind === 'contraband' ? DISTRICTS[this.rng.int(0, DISTRICTS.length - 1)] : districts[this.rng.int(0, districts.length - 1)];
-    const inDistrict = BUILDINGS.filter((b) => b.district === d.id && !b.hq);
+    const inDistrict = BUILDINGS.filter((b) => b.district === d.id && !b.residence && b.type !== 'landmark');
     const b = this.building(inDistrict[this.rng.int(0, inDistrict.length - 1)].id);
     const out = b.doors[0].out;
     // point praticable dans la rue, un peu à l'écart de la porte
@@ -1429,18 +1603,20 @@ export class Game {
     if (n >= 0) [x, z] = this.w.nav.nodeCenter(n);
     switch (kind) {
       case 'contraband': {
-        const reward = 250 + 50 * this.rng.int(0, 4);
+        const reward = 300 + 60 * this.rng.int(0, 5);
+        const loot = this.rng.pick(['puces neurales', 'implants militaires', 'batteries à fusion', 'cartouches de crypto-monnaie']);
         this.activeEvent = { kind, x, z, until: this.time + 150, reward, district: d.id, police: [] };
-        const text = `Une cargaison de whisky de contrebande attend preneur près ${deNom(b.def.name)} (${d.name}) ! Le premier parrain sur place empoche ${formatMoney(reward)}.`;
+        const text = `Une cargaison de ${loot} de contrebande attend preneur près ${deNom(b.def.name)} (${d.name}) ! Le premier parrain sur place empoche ${formatMoney(reward)}.`;
         this.emitAll({ t: 'event', kind, text, x, z, until: this.time + 150 });
-        this.news('CONTREBANDE : LA DOUANE IMPUISSANTE', `Des tonneaux de whisky sans vignette auraient été aperçus du côté ${deNom(d.name)}. Les gangs de Dadou et d’Even sont sur le coup.`);
+        this.news('CONTREBANDE : LES DOUANES DÉBORDÉES', `Des caisses de ${loot} sans licence auraient été aperçues du côté ${deNom(d.name)}. Les gangs de Dadou et d’Even sont sur le coup.`);
         break;
       }
       case 'raid': {
         const police: number[] = [];
-        const yard = this.w.buildings.find((bb) => bb.def.type === 'police')!;
-        const route = BUILDINGS.filter((bb) => bb.district === d.id).map((bb) => this.building(bb.id).doors[0].out);
-        for (let i = 0; i < 4; i++) {
+        const c = districtCenterOf(d.id);
+        const yard = this.precinctNear(c.x, c.z);
+        const route = BUILDINGS.filter((bb) => bb.district === d.id && !bb.residence).map((bb) => this.building(bb.id).doors[0].out);
+        for (let i = 0; i < 5; i++) {
           const p = yard.doors[0].out;
           const e = this.addEnt({ kind: CharKind.POLICE, role: 'police', faction: Faction.POLICE, x: p.x + this.rng.range(-2, 2), z: p.z + this.rng.range(-2, 2), hp: HP.police, weapon: Weapon.PISTOL, mode: 'patrol' });
           e.ai!.patrol = [...route].sort(() => this.rng.next() - 0.5);
@@ -1449,21 +1625,21 @@ export class Game {
           e.ai!.run = true;
           police.push(e.id);
         }
-        this.activeEvent = { kind, x: districtCenterOf(d.id).x, z: districtCenterOf(d.id).z, until: this.time + 140, reward: 0, district: d.id, police };
-        this.emitAll({ t: 'event', kind, text: `Descente de police ${aNom(d.name)} ! Les bobbies arrêtent tous ceux qui se battent dans le quartier.`, x: this.activeEvent.x, z: this.activeEvent.z, until: this.time + 140 });
-        this.news('GRANDE DESCENTE DE POLICE', `Scotland Yard envoie ses meilleurs agents ${aNom(d.name)} pour rétablir l’ordre. Les gangs sont priés de se tenir tranquilles.`);
+        this.activeEvent = { kind, x: c.x, z: c.z, until: this.time + 140, reward: 0, district: d.id, police };
+        this.emitAll({ t: 'event', kind, text: `Descente du NYPD ${aNom(d.name)} ! Les agents arrêtent tous ceux qui se battent dans le quartier.`, x: c.x, z: c.z, until: this.time + 140 });
+        this.news('LE NYPD FRAPPE FORT', `La maire envoie ses unités d’élite ${aNom(d.name)} pour rétablir l’ordre. Les gangs sont priés de se tenir tranquilles.`);
         break;
       }
-      case 'fog': {
-        this.activeEvent = { kind, x: 100, z: 70, until: this.time + 150, reward: 0, district: d.id, police: [] };
-        this.emitAll({ t: 'event', kind, text: 'Un épais brouillard jaune — un vrai « pea-souper » — tombe sur Londres. Idéal pour une attaque surprise…', x: 100, z: 70, until: this.time + 150 });
+      case 'storm': {
+        this.activeEvent = { kind, x: WORLD_W / 2, z: WORLD_D / 2, until: this.time + 150, reward: 0, district: d.id, police: [] };
+        this.emitAll({ t: 'event', kind, text: 'Un orage magnétique s’abat sur New York : pluie battante, visibilité réduite, drones de police cloués au sol. Idéal pour une attaque surprise…', x: WORLD_W / 2, z: WORLD_D / 2, until: this.time + 150 });
         break;
       }
       case 'informant': {
         const s = SLOTS[this.rng.int(0, 1)];
         this.informantUntil[s] = this.time + 75;
-        this.activeEvent = { kind, x: 100, z: 70, until: this.time + 75, reward: 0, district: d.id, police: [] };
-        this.emitTo(s, { t: 'event', kind, text: `Un informateur vous vend les positions des hommes ${DE_BOSS[otherSlot(s)]} : elles apparaissent sur vos cartes pendant 75 secondes.`, x: 0, z: 0, until: this.time + 75 });
+        this.activeEvent = { kind, x: WORLD_W / 2, z: WORLD_D / 2, until: this.time + 75, reward: 0, district: d.id, police: [] };
+        this.emitTo(s, { t: 'event', kind, text: `Une hackeuse vous vend les positions des hommes ${DE_BOSS[otherSlot(s)]} : elles apparaissent sur vos cartes pendant 75 secondes.`, x: 0, z: 0, until: this.time + 75 });
         this.updateSpotted();
         break;
       }
@@ -1479,7 +1655,7 @@ export class Game {
       for (const id of ev.police) {
         const p = this.ents.get(id);
         if (p && p.alive) p.removeAt = this.time + 25;
-        if (p && p.ai) p.ai.patrol = [this.w.buildings.find((bb) => bb.def.type === 'police')!.doors[0].in];
+        if (p && p.ai) p.ai.patrol = [this.precinctNear(p.x, p.z).doors[0].in];
       }
       this.notify('all', 'La descente de police est terminée.', 'info');
     } else if (ev.kind === 'contraband' && this.time >= ev.until) {
@@ -1493,12 +1669,17 @@ export class Game {
     const te = this.territories('even');
     const kills = this.factions.dadou.kills + this.factions.even.kills;
     const options: [string, string][] = [
-      ['GUERRE DES GANGS : DADOU ET EVEN SE DISPUTENT LONDRES !', 'Fusillades nocturnes, établissements rackettés : deux parrains rivaux mettent la capitale à feu et à sang. Scotland Yard promet des arrestations.'],
+      ['GUERRE DES GANGS : DADOU ET EVEN SE DISPUTENT NEW YORK !', 'Fusillades sous les néons, établissements rackettés : deux parrains rivaux mettent la ville à feu et à sang. Le NYPD promet des arrestations.'],
+      ['LA VILLE QUI NE DORT JAMAIS RETIENT SON SOUFFLE', 'Des écrans de Times Square aux quais de Red Hook, tout New York parle de la guerre entre Dadou et Even.'],
     ];
-    if (td > te) options.push([`DADOU CONTRÔLE ${td} QUARTIER${td > 1 ? 'S' : ''} DE LA CAPITALE`, 'L’homme au chapeau melon étend son empire. Ses rivaux s’inquiètent ; Even prépare-t-il une riposte ?']);
+    if (td > te) options.push([`DADOU CONTRÔLE ${td} QUARTIER${td > 1 ? 'S' : ''} DE NEW YORK`, 'L’homme au chapeau melon étend son empire. Ses rivaux s’inquiètent ; Even prépare-t-il une riposte ?']);
     if (te > td) options.push([`EVEN TIENT ${te} QUARTIER${te > 1 ? 'S' : ''} SOUS SA COUPE`, 'L’élégant parrain au haut-de-forme impose sa loi. Dadou acceptera-t-il cet affront ?']);
-    if (kills > 10) options.push([`${kills} MORTS DANS LA GUERRE DES GANGS`, 'Les morgues débordent. Le préfet de police réclame des renforts à Westminster.']);
-    if (this.factions.dadou.heat > 2 || this.factions.even.heat > 2) options.push(['SCOTLAND YARD SUR LES DENTS', 'Les bobbies patrouillent par deux. Un témoin affirme avoir vu un parrain en personne, revolver à la main.']);
+    if (kills > 10) options.push([`${kills} MORTS DANS LA GUERRE DES GANGS`, 'Les morgues débordent. La maire réclame des drones de police supplémentaires.']);
+    if (this.factions.dadou.heat > 2 || this.factions.even.heat > 2) options.push(['LE NYPD SUR LES DENTS', 'Les drones de police quadrillent le ciel. Un témoin affirme avoir vu un parrain en personne, arme au poing.']);
+    for (const sl of SLOTS) {
+      const f = this.factions[sl];
+      if (f.tier >= 4) options.push([`${BOSS_NAME[sl].toUpperCase()} VIT AU SOMMET`, `Depuis ${leNom(this.hq(sl).def.name)}, le parrain contemple la ville qu’il veut faire sienne.`]);
+    }
     const [title, body] = options[this.rng.int(0, options.length - 1)];
     this.news(title, body);
   }
@@ -1584,6 +1765,9 @@ export class Game {
         this.activeEvent && this.activeEvent.kind !== 'informant'
           ? { kind: this.activeEvent.kind, x: this.activeEvent.x, z: this.activeEvent.z, until: this.activeEvent.until }
           : null,
+      hq: { dadou: this.factions.dadou.hqId, even: this.factions.even.hqId },
+      tier: { dadou: this.factions.dadou.tier, even: this.factions.even.tier },
+      rain: Math.round(this.rain * 100) / 100,
     };
   }
 
@@ -1606,7 +1790,7 @@ export class Game {
       men,
       pool,
       escort,
-      maxMen: MAX_GANGSTERS,
+      maxMen: this.tierOf(slot).maxMen,
       lieutenants: lts,
       upgrades: [...f.upgrades],
       weapons: [...f.weapons],
@@ -1618,7 +1802,10 @@ export class Game {
       kills: f.kills,
       deaths: f.deaths,
       captured: f.captured,
-      nextLtPrice: f.lieutenants.length < MAX_LIEUTENANTS ? LIEUTENANT_PRICES[f.lieutenants.length] : -1,
+      nextLtPrice: f.lieutenants.length < this.tierOf(slot).maxLt ? LIEUTENANT_PRICES[f.lieutenants.length] : -1,
+      maxLt: this.tierOf(slot).maxLt,
+      tier: f.tier,
+      hq: f.hqId,
       spotted: f.spotted,
     };
   }

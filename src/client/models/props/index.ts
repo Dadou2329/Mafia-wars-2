@@ -3,6 +3,9 @@
 
 import { PROP_DEFS, type PropKind } from '../../../shared/city/props';
 import { SLOT, VoxelModel, jitter } from '../voxelModel';
+import { HOME_MODELS } from './home';
+import { STREET_MODELS } from './street';
+import { VENUE_MODELS } from './venues';
 
 export interface PropModelEntry {
   variants: number;
@@ -10,7 +13,7 @@ export interface PropModelEntry {
 }
 
 /** Familles de modèles enregistrées (voir les fichiers de ce dossier). */
-const REGISTRY: Partial<Record<PropKind, PropModelEntry>> = {};
+const REGISTRY: Partial<Record<PropKind, PropModelEntry>> = { ...STREET_MODELS, ...HOME_MODELS, ...VENUE_MODELS };
 
 export function registerModels(entries: Partial<Record<PropKind, PropModelEntry>>): void {
   Object.assign(REGISTRY, entries);

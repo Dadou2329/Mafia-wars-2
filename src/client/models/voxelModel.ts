@@ -11,6 +11,15 @@ export const SLOT = {
   GLOW: 0xf00004, // flamme / verre de lampe (émissif chaud)
   FIRE: 0xf00005, // feu vif
   GLASS: 0xf00006, // vitre sombre réfléchissante
+  NEON: 0xf00007, // néon de la couleur de la variante de l'objet (NEON_COLORS[variante % 8])
+  LED: 0xf00008, // LED blanc froid (bandeaux, voyants, dalles lumineuses)
+  SCREEN: 0xf00009, // écran animé (publicités, moniteurs)
+  NEON_PINK: 0xf0000a, // néons de couleur fixe
+  NEON_CYAN: 0xf0000b,
+  NEON_RED: 0xf0000c,
+  NEON_GREEN: 0xf0000d,
+  NEON_AMBER: 0xf0000e,
+  NEON_BLUE: 0xf0000f,
   SKIN: 0xf00010, // personnages : peau
   HAIR: 0xf00011,
   COAT: 0xf00012,
@@ -36,6 +45,15 @@ export const SLOT_INDEX: Record<number, number> = {
   [SLOT.GLOW]: 4,
   [SLOT.FIRE]: 5,
   [SLOT.GLASS]: 6,
+  [SLOT.NEON]: 7,
+  [SLOT.LED]: 8,
+  [SLOT.SCREEN]: 9,
+  [SLOT.NEON_PINK]: 10,
+  [SLOT.NEON_CYAN]: 11,
+  [SLOT.NEON_RED]: 12,
+  [SLOT.NEON_GREEN]: 13,
+  [SLOT.NEON_AMBER]: 14,
+  [SLOT.NEON_BLUE]: 15,
   [SLOT.SKIN]: 16,
   [SLOT.HAIR]: 17,
   [SLOT.COAT]: 18,

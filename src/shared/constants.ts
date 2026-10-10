@@ -108,6 +108,8 @@ export const BOSS_SHOP: { weapon: Weapon; price: number }[] = [
 ];
 
 export const AMMO_PRICE = 50;
+/** Taxi volant vers le QG (téléphone). */
+export const TAXI_PRICE = 60;
 
 /** Véhicules achetables (au garage, à partir du palier indiqué). */
 export interface VehicleDef {

@@ -1,9 +1,9 @@
-// Enseignes peintes des bâtiments (nom en lettres dorées), plaques « Bureau de Dadou » /
-// « Bureau d’Even » sur la porte du bureau et plaque nominative sur le bureau du parrain.
-// Les enseignes portent un liseré aux couleurs du propriétaire actuel.
+// Enseignes lumineuses des bâtiments (néons sur plaque sombre) et étiquette holographique
+// « Bureau de Dadou » / « Bureau d’Even » au-dessus du bureau de chaque logement du parrain.
+// Les enseignes portent les marques du propriétaire actuel (D ou E, rouge ou bleu).
 
 import * as THREE from 'three';
-import { DE_BOSS } from '../../shared/constants';
+import { DE_BOSS, tierDef } from '../../shared/constants';
 import type { BuildingInfo } from '../../shared/city/gen/context';
 import { Faction, type BuildingType } from '../../shared/city/plan';
 import type { Slot } from '../../shared/protocol';
@@ -11,40 +11,59 @@ import { envUniforms } from '../render/env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL } from '../render/shaderChunks';
 
 interface Board {
+  /** Plaque de fond. */
   bg: string;
-  bg2: string;
-  ink: string;
-  edge: string;
+  /** Couleur du néon. */
+  neon: string;
+  /** Police (Orbitron, Rajdhani). */
   font: string;
-  shadow: string;
+  weight: number;
 }
 
+const F_TITLE = 'Orbitron';
+const F_BODY = 'Rajdhani';
+
 const BOARDS: Partial<Record<BuildingType, Board>> = {
-  pub: { bg: '#173022', bg2: '#0f2018', ink: '#e9c766', edge: '#b48a34', font: 'Cinzel', shadow: '#000' },
-  cafe: { bg: '#3a1418', bg2: '#260c0f', ink: '#f2d58a', edge: '#c9a24a', font: 'Cinzel', shadow: '#000' },
-  gambling: { bg: '#141414', bg2: '#0a0a0a', ink: '#e8c25a', edge: '#b48a34', font: 'Cinzel Decorative', shadow: '#000' },
-  theatre: { bg: '#4a0f14', bg2: '#30080c', ink: '#f6e2a0', edge: '#d4a640', font: 'Cinzel Decorative', shadow: '#000' },
-  bank: { bg: '#141414', bg2: '#060606', ink: '#e3c574', edge: '#9a7a3a', font: 'Cinzel', shadow: '#000' },
-  exchange: { bg: '#141414', bg2: '#060606', ink: '#e3c574', edge: '#9a7a3a', font: 'Cinzel', shadow: '#000' },
-  jeweller: { bg: '#10203a', bg2: '#0a1426', ink: '#f0d488', edge: '#c9a24a', font: 'Cinzel', shadow: '#000' },
-  shop: { bg: '#1c2a3a', bg2: '#101a26', ink: '#efe0b8', edge: '#a88a4a', font: 'Cinzel', shadow: '#000' },
-  bakery: { bg: '#e8dcc0', bg2: '#d4c49e', ink: '#5a2a14', edge: '#7a5a2a', font: 'Cinzel', shadow: 'rgba(0,0,0,0.25)' },
-  butcher: { bg: '#e8e2d4', bg2: '#cfc6b2', ink: '#7a1a14', edge: '#5a4a3a', font: 'Cinzel', shadow: 'rgba(0,0,0,0.25)' },
-  pawn: { bg: '#2a2a1a', bg2: '#1a1a0e', ink: '#e8c25a', edge: '#8a7a3a', font: 'Cinzel', shadow: '#000' },
-  post: { bg: '#8a1414', bg2: '#5a0c0c', ink: '#f2e2b0', edge: '#d4a640', font: 'Cinzel', shadow: '#000' },
-  warehouse: { bg: '#3a2c22', bg2: '#2a2018', ink: '#e8e0cc', edge: '#5a4a3a', font: 'Cinzel', shadow: '#000' },
-  foundry: { bg: '#2a2622', bg2: '#1a1714', ink: '#e8e0cc', edge: '#4a4440', font: 'Cinzel', shadow: '#000' },
-  brewery: { bg: '#2a3a22', bg2: '#1a2614', ink: '#efe0b8', edge: '#7a6a3a', font: 'Cinzel', shadow: '#000' },
-  police: { bg: '#141c2e', bg2: '#0a101c', ink: '#e8ecf2', edge: '#8a96aa', font: 'Cinzel', shadow: '#000' },
+  club: { bg: '#0b0610', neon: '#ff3cc8', font: F_TITLE, weight: 800 },
+  jazz: { bg: '#100a04', neon: '#ffb020', font: F_BODY, weight: 700 },
+  casino: { bg: '#0e0608', neon: '#ffd040', font: F_TITLE, weight: 900 },
+  theatre: { bg: '#0e0606', neon: '#ff5a3c', font: F_TITLE, weight: 800 },
+  gym: { bg: '#0a0a0a', neon: '#ff2a40', font: F_BODY, weight: 700 },
+  bodega: { bg: '#06100a', neon: '#40ff80', font: F_BODY, weight: 700 },
+  diner: { bg: '#100606', neon: '#ff4060', font: F_BODY, weight: 700 },
+  pharmacy: { bg: '#060c10', neon: '#40ff9a', font: F_BODY, weight: 700 },
+  herbalist: { bg: '#100604', neon: '#ff6a2a', font: F_BODY, weight: 700 },
+  teahouse: { bg: '#100406', neon: '#ff3040', font: F_BODY, weight: 700 },
+  mahjong: { bg: '#100406', neon: '#ffd040', font: F_BODY, weight: 700 },
+  techmarket: { bg: '#04080e', neon: '#3ce8ff', font: F_TITLE, weight: 700 },
+  restaurant: { bg: '#0c0806', neon: '#ffc070', font: F_BODY, weight: 600 },
+  boathouse: { bg: '#060a0c', neon: '#9fe8ff', font: F_BODY, weight: 600 },
+  hotel: { bg: '#0c0a06', neon: '#ffe0a0', font: F_TITLE, weight: 700 },
+  gallery: { bg: '#0a0a0a', neon: '#f0f0ff', font: F_BODY, weight: 600 },
+  bank: { bg: '#06080c', neon: '#bcdcff', font: F_TITLE, weight: 700 },
+  exchange: { bg: '#06080c', neon: '#40c8ff', font: F_TITLE, weight: 700 },
+  corp: { bg: '#04060c', neon: '#7ab8ff', font: F_TITLE, weight: 700 },
+  security: { bg: '#04080c', neon: '#40a0ff', font: F_TITLE, weight: 700 },
+  studio: { bg: '#06040c', neon: '#a848ff', font: F_TITLE, weight: 800 },
+  station: { bg: '#0a0a08', neon: '#ffe8b0', font: F_TITLE, weight: 700 },
+  showroom: { bg: '#06060c', neon: '#ff8ae0', font: F_TITLE, weight: 700 },
+  depot: { bg: '#0a0a08', neon: '#ffb020', font: F_BODY, weight: 700 },
+  nightmarket: { bg: '#0c0408', neon: '#ff3cc8', font: F_BODY, weight: 700 },
+  factory: { bg: '#080a0a', neon: '#40ff80', font: F_BODY, weight: 700 },
+  brewery: { bg: '#0c0806', neon: '#ffb020', font: F_BODY, weight: 700 },
+  junkyard: { bg: '#0a0806', neon: '#ff8a20', font: F_BODY, weight: 700 },
+  tattoo: { bg: '#0a040a', neon: '#a848ff', font: F_BODY, weight: 700 },
+  police: { bg: '#04081a', neon: '#4a8aff', font: F_TITLE, weight: 800 },
+  garage: { bg: '#0a0808', neon: '#ff8a20', font: F_BODY, weight: 700 },
 };
 
-const DEFAULT_BOARD: Board = { bg: '#1e1a16', bg2: '#12100c', ink: '#e8cf86', edge: '#9a7a3a', font: 'Cinzel', shadow: '#000' };
+const DEFAULT_BOARD: Board = { bg: '#08080c', neon: '#3ce8ff', font: F_BODY, weight: 700 };
 
-const OWNER_COLOR: Record<number, string> = { [Faction.DADOU]: '#b01e26', [Faction.EVEN]: '#2a4a8a' };
+const OWNER_COLOR: Record<number, string> = { [Faction.DADOU]: '#ff2a3c', [Faction.EVEN]: '#4a8aff' };
 
-/** Matériau éclairé par le volume de lumière du monde (comme les accessoires). */
-function signMaterial(map: THREE.Texture): THREE.MeshLambertMaterial {
-  const mat = new THREE.MeshLambertMaterial({ map });
+/** Matériau éclairé par le volume de lumière du monde, avec émission (néons, hologrammes). */
+function signMaterial(map: THREE.Texture, glow = 1, transparent = false): THREE.MeshLambertMaterial {
+  const mat = new THREE.MeshLambertMaterial({ map, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: glow, transparent, depthWrite: !transparent, side: transparent ? THREE.DoubleSide : THREE.FrontSide });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, envUniforms);
     shader.vertexShader = shader.vertexShader
@@ -65,7 +84,7 @@ reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(sL, sn, vSWPos
       )
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vSWPos);');
   };
-  mat.customProgramCacheKey = () => 'sign-v1';
+  mat.customProgramCacheKey = () => `sign-v2-${transparent ? 't' : 'o'}`;
   return mat;
 }
 
@@ -78,23 +97,18 @@ interface Sign {
   owner: number;
   x: number;
   z: number;
-}
-
-function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.arcTo(x + w, y, x + w, y + h, r);
-  c.arcTo(x + w, y + h, x, y + h, r);
-  c.arcTo(x, y + h, x, y, r);
-  c.arcTo(x, y, x + w, y, r);
-  c.closePath();
+  /** Étiquette du bureau : visible seulement quand le logement appartient à son parrain. */
+  deskOf?: Slot;
+  /** Hologramme : léger flottement. */
+  holo?: boolean;
+  baseY?: number;
 }
 
 /** Ajuste la taille de police pour que le texte tienne dans la largeur. */
 function fitFont(c: CanvasRenderingContext2D, text: string, family: string, weight: number, maxW: number, maxH: number): number {
   let size = maxH;
   for (; size > 8; size -= 2) {
-    c.font = `${weight} ${size}px '${family}', serif`;
+    c.font = `${weight} ${size}px '${family}', sans-serif`;
     if (c.measureText(text).width <= maxW) break;
   }
   return size;
@@ -104,19 +118,19 @@ export class SignSystem {
   readonly group = new THREE.Group();
   private signs: Sign[] = [];
   private byBuilding = new Map<number, Sign[]>();
+  private t = 0;
 
   constructor(buildings: BuildingInfo[], you: Slot) {
     void you;
     this.group.name = 'enseignes';
     for (const b of buildings) {
-      if (b.sign && b.def.type !== 'church') this.addFascia(b);
-      if (b.plaque) this.addPlaque(b);
-      if (b.def.hq && b.desk && b.deskSeat) this.addDeskPlate(b);
+      if (b.sign && b.def.type !== 'landmark' && b.def.type !== 'filler') this.addFascia(b);
+      if (b.def.residence && b.desk) this.addDeskHolo(b);
     }
     // les polices web arrivent parfois après la création : on redessine
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
     if (fonts) {
-      Promise.all([fonts.load("700 64px 'Cinzel'"), fonts.load("700 64px 'Cinzel Decorative'"), fonts.load("600 40px 'EB Garamond'")])
+      Promise.all([fonts.load(`800 64px '${F_TITLE}'`), fonts.load(`700 64px '${F_BODY}'`)])
         .then(() => this.redrawAll())
         .catch(() => undefined);
     }
@@ -133,14 +147,14 @@ export class SignSystem {
   private addFascia(b: BuildingInfo): void {
     const sg = b.sign!;
     const def = b.def;
-    const hq = def.hq;
-    const board: Board = hq === 'dadou'
-      ? { bg: '#5a0c12', bg2: '#3a060a', ink: '#f0d488', edge: '#d4a640', font: 'Cinzel Decorative', shadow: '#000' }
-      : hq === 'even'
-        ? { bg: '#14284e', bg2: '#0a1630', ink: '#e8eef6', edge: '#c9d1dc', font: 'Cinzel Decorative', shadow: '#000' }
+    const boss = def.residence?.boss;
+    const board: Board = boss === 'dadou'
+      ? { bg: '#0c0204', neon: '#ff2a3c', font: F_TITLE, weight: 900 }
+      : boss === 'even'
+        ? { bg: '#02050c', neon: '#7ab8ff', font: F_TITLE, weight: 900 }
         : BOARDS[def.type] ?? DEFAULT_BOARD;
     // longueur raisonnable : l'enseigne ne couvre pas toute la façade des grands bâtiments
-    const w = Math.min(sg.w, Math.max(3.2, def.name.length * 0.36 + 1.2));
+    const w = Math.min(sg.w, Math.max(3.2, def.name.length * 0.34 + 1.2));
     const h = sg.h;
     const pxPerM = 150;
     const cw = Math.min(2048, Math.round(w * pxPerM));
@@ -151,72 +165,70 @@ export class SignSystem {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
-    const text = def.name;
+    const text = def.name.toUpperCase();
     const draw = (owner: number) => {
       const c = canvas.getContext('2d')!;
       c.clearRect(0, 0, cw, ch);
-      const g = c.createLinearGradient(0, 0, 0, ch);
-      g.addColorStop(0, board.bg);
-      g.addColorStop(1, board.bg2);
-      c.fillStyle = g;
+      // plaque sombre brossée
+      c.fillStyle = board.bg;
       c.fillRect(0, 0, cw, ch);
-      // veinage léger
-      c.globalAlpha = 0.06;
-      for (let i = 0; i < 18; i++) {
+      c.globalAlpha = 0.05;
+      for (let i = 0; i < 24; i++) {
         c.fillStyle = i % 2 ? '#fff' : '#000';
-        c.fillRect(0, (i / 18) * ch, cw, 2);
+        c.fillRect(0, (i / 24) * ch, cw, 1);
       }
       c.globalAlpha = 1;
-      // double filet doré
-      c.strokeStyle = board.edge;
-      c.lineWidth = ch * 0.06;
-      c.strokeRect(ch * 0.05, ch * 0.05, cw - ch * 0.1, ch - ch * 0.1);
-      c.lineWidth = ch * 0.02;
-      c.strokeRect(ch * 0.14, ch * 0.14, cw - ch * 0.28, ch - ch * 0.28);
-      // liseré du propriétaire
+      // tube néon du cadre
+      c.shadowColor = board.neon;
+      c.shadowBlur = ch * 0.12;
+      c.strokeStyle = board.neon;
+      c.globalAlpha = 0.85;
+      c.lineWidth = ch * 0.035;
+      c.strokeRect(ch * 0.08, ch * 0.08, cw - ch * 0.16, ch - ch * 0.16);
+      c.globalAlpha = 1;
+      // marques du propriétaire
       const oc = OWNER_COLOR[owner];
       let pad = ch * 0.3;
-      if (oc && !hq) {
+      if (oc && !boss) {
+        c.shadowColor = oc;
         c.fillStyle = oc;
-        c.fillRect(ch * 0.18, ch * 0.18, ch * 0.38, ch - ch * 0.36);
-        c.fillRect(cw - ch * 0.56, ch * 0.18, ch * 0.38, ch - ch * 0.36);
-        c.fillStyle = board.edge;
-        c.font = `700 ${Math.round(ch * 0.34)}px 'Cinzel', serif`;
+        c.fillRect(ch * 0.18, ch * 0.2, ch * 0.36, ch - ch * 0.4);
+        c.fillRect(cw - ch * 0.54, ch * 0.2, ch * 0.36, ch - ch * 0.4);
+        c.shadowBlur = 0;
+        c.fillStyle = '#ffffff';
+        c.font = `900 ${Math.round(ch * 0.32)}px '${F_TITLE}', sans-serif`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
         const mark = owner === Faction.DADOU ? 'D' : 'E';
-        c.fillText(mark, ch * 0.37, ch * 0.52);
-        c.fillText(mark, cw - ch * 0.37, ch * 0.52);
+        c.fillText(mark, ch * 0.36, ch * 0.52);
+        c.fillText(mark, cw - ch * 0.36, ch * 0.52);
         pad = ch * 0.7;
       }
-      // texte doré avec ombre portée
-      const size = fitFont(c, text.toUpperCase(), board.font, 700, cw - pad * 2, ch * 0.56);
-      c.font = `700 ${size}px '${board.font}', serif`;
+      // texte néon : halo coloré puis cœur presque blanc
+      const size = fitFont(c, text, board.font, board.weight, cw - pad * 2, ch * 0.52);
+      c.font = `${board.weight} ${size}px '${board.font}', sans-serif`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillStyle = board.shadow;
-      c.fillText(text.toUpperCase(), cw / 2 + size * 0.05, ch / 2 + size * 0.07);
-      const tg = c.createLinearGradient(0, ch * 0.25, 0, ch * 0.75);
-      tg.addColorStop(0, '#fff6d0');
-      tg.addColorStop(0.45, board.ink);
-      tg.addColorStop(1, board.edge);
-      c.fillStyle = board.ink.startsWith('#e') || board.ink.startsWith('#f') ? tg : board.ink;
-      c.fillText(text.toUpperCase(), cw / 2, ch / 2 + size * 0.02);
+      c.shadowColor = board.neon;
+      c.shadowBlur = size * 0.45;
+      c.fillStyle = board.neon;
+      c.fillText(text, cw / 2, ch / 2 + size * 0.04);
+      c.shadowBlur = size * 0.15;
+      c.fillStyle = mixWhite(board.neon, 0.55);
+      c.fillText(text, cw / 2, ch / 2 + size * 0.04);
+      c.shadowBlur = 0;
       tex.needsUpdate = true;
     };
     draw(def.startOwner);
     const geo = new THREE.PlaneGeometry(w, h);
-    const mesh = new THREE.Mesh(geo, signMaterial(tex));
+    const mesh = new THREE.Mesh(geo, signMaterial(tex, 1.1));
     // la façade fait face à l'extérieur : la normale du plan (+Z) doit pointer vers la rue
     mesh.position.set(sg.x, sg.y, sg.z);
     mesh.rotation.y = sg.yaw;
     mesh.receiveShadow = true;
-    // fond de planche (épaisseur)
-    const backing = new THREE.Mesh(
-      new THREE.BoxGeometry(w + 0.06, h + 0.06, 0.06),
-      signMaterial(this.solidTexture(board.bg2)),
-    );
-    backing.position.set(0, 0, -0.035);
+    // caisson (épaisseur)
+    const backing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, h + 0.06, 0.08), signMaterial(this.solidTexture('#0a0c10'), 0));
+    backing.position.set(0, 0, -0.045);
     mesh.add(backing);
     this.register({ building: b.id, canvas, tex, mesh, draw, owner: def.startOwner, x: sg.x, z: sg.z });
   }
@@ -232,98 +244,67 @@ export class SignSystem {
     return t;
   }
 
-  /** Petite plaque de laiton gravée (porte du bureau, bureau du parrain). */
-  private brassPlate(lines: string[], w: number, h: number, dark = false): { mesh: THREE.Mesh; canvas: HTMLCanvasElement; tex: THREE.CanvasTexture; draw: () => void } {
-    const pxPerM = 900;
+  /** Étiquette holographique flottant au-dessus du bureau : « Bureau de Dadou », palier et touche E. */
+  private addDeskHolo(b: BuildingInfo): void {
+    const desk = b.desk!;
+    const boss = b.def.residence!.boss;
+    const color = boss === 'dadou' ? '#ff4050' : '#6aa8ff';
+    const w = 1.5;
+    const hgt = 0.5;
+    const pxPerM = 500;
     const cw = Math.round(w * pxPerM);
-    const ch = Math.round(h * pxPerM);
+    const ch = Math.round(hgt * pxPerM);
     const canvas = document.createElement('canvas');
     canvas.width = cw;
     canvas.height = ch;
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
+    const title = `Bureau ${DE_BOSS[boss]}`;
+    const sub = `${tierDef(b.def.residence!.tier).name} — carte stratégique [E]`;
     const draw = () => {
       const c = canvas.getContext('2d')!;
-      const g = c.createLinearGradient(0, 0, cw, ch);
-      if (dark) {
-        g.addColorStop(0, '#2a1a10');
-        g.addColorStop(1, '#140c06');
-      } else {
-        g.addColorStop(0, '#f2d78a');
-        g.addColorStop(0.45, '#c9a24a');
-        g.addColorStop(0.55, '#b48a34');
-        g.addColorStop(1, '#e6c66e');
-      }
+      c.clearRect(0, 0, cw, ch);
+      // cadre holographique translucide
+      const g = c.createLinearGradient(0, 0, 0, ch);
+      g.addColorStop(0, 'rgba(10,20,40,0.15)');
+      g.addColorStop(1, 'rgba(10,20,40,0.45)');
       c.fillStyle = g;
       c.fillRect(0, 0, cw, ch);
-      // biseau
-      c.strokeStyle = dark ? '#c9a24a' : 'rgba(90,60,20,0.8)';
-      c.lineWidth = ch * 0.06;
-      roundRect(c, ch * 0.08, ch * 0.08, cw - ch * 0.16, ch - ch * 0.16, ch * 0.08);
-      c.stroke();
-      // vis
-      c.fillStyle = dark ? '#c9a24a' : '#7a5a24';
-      for (const sx of [ch * 0.2, cw - ch * 0.2]) {
-        c.beginPath();
-        c.arc(sx, ch / 2, ch * 0.06, 0, Math.PI * 2);
-        c.fill();
-      }
+      c.strokeStyle = color;
+      c.shadowColor = color;
+      c.shadowBlur = 18;
+      c.lineWidth = 4;
+      c.strokeRect(6, 6, cw - 12, ch - 12);
+      // lignes de balayage
+      c.shadowBlur = 0;
+      c.globalAlpha = 0.18;
+      c.fillStyle = color;
+      for (let y = 10; y < ch; y += 6) c.fillRect(8, y, cw - 16, 1);
+      c.globalAlpha = 1;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      const n = lines.length;
-      for (let i = 0; i < n; i++) {
-        const lh = (ch * 0.62) / n;
-        const size = fitFont(c, lines[i], i === 0 ? 'Cinzel' : 'EB Garamond', i === 0 ? 700 : 600, cw - ch * 0.7, lh * 0.95);
-        c.font = `${i === 0 ? 700 : 600} ${size}px '${i === 0 ? 'Cinzel' : 'EB Garamond'}', serif`;
-        const y = ch * 0.19 + lh * (i + 0.5);
-        if (!dark) {
-          c.fillStyle = 'rgba(255,240,200,0.6)';
-          c.fillText(lines[i], cw / 2 + 1.5, y + 1.5);
-        }
-        c.fillStyle = dark ? '#f0d488' : '#2a1a0a';
-        c.fillText(lines[i], cw / 2, y);
-      }
+      c.shadowColor = color;
+      c.shadowBlur = 22;
+      c.fillStyle = '#ffffff';
+      const s1 = fitFont(c, title.toUpperCase(), F_TITLE, 900, cw - 60, ch * 0.42);
+      c.font = `900 ${s1}px '${F_TITLE}', sans-serif`;
+      c.fillText(title.toUpperCase(), cw / 2, ch * 0.38);
+      c.shadowBlur = 10;
+      c.fillStyle = color;
+      const s2 = fitFont(c, sub, F_BODY, 700, cw - 60, ch * 0.26);
+      c.font = `700 ${s2}px '${F_BODY}', sans-serif`;
+      c.fillText(sub, cw / 2, ch * 0.74);
+      c.shadowBlur = 0;
       tex.needsUpdate = true;
     };
     draw();
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), signMaterial(tex));
-    return { mesh, canvas, tex, draw };
-  }
-
-  private addPlaque(b: BuildingInfo): void {
-    const pq = b.plaque!;
-    const text = b.def.hq ? `Bureau ${DE_BOSS[b.def.hq]}` : 'Direction';
-    const plate = this.brassPlate([text], 0.62, 0.17);
-    plate.mesh.position.set(pq.x, pq.y, pq.z);
-    plate.mesh.rotation.y = pq.yaw;
-    // la plaque fait face au couloir (côté opposé à la pièce) : on vérifie l'orientation
-    this.register({ building: b.id, canvas: plate.canvas, tex: plate.tex, mesh: plate.mesh, draw: plate.draw, owner: 0, x: pq.x, z: pq.z });
-  }
-
-  private addDeskPlate(b: BuildingInfo): void {
-    const desk = b.desk!;
-    const seat = b.deskSeat!;
-    // du fauteuil vers le visiteur
-    let vx = desk.x - seat.x;
-    let vz = desk.z - seat.z;
-    const l = Math.hypot(vx, vz) || 1;
-    vx /= l;
-    vz /= l;
-    const boss = b.def.hq!;
-    const plate = this.brassPlate([`Bureau ${DE_BOSS[boss]}`, boss === 'dadou' ? 'Parrain de Soho' : 'Parrain des Docks'], 0.5, 0.15, true);
-    const holder = new THREE.Group();
-    // socle en noyer incliné
-    const block = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.12, 0.07), signMaterial(this.solidTexture('#3a2414')));
-    block.position.set(0, 0.06, -0.02);
-    holder.add(block);
-    plate.mesh.position.set(0, 0.075, 0.017);
-    plate.mesh.scale.setScalar(0.95);
-    plate.mesh.rotation.x = -0.25;
-    holder.add(plate.mesh);
-    holder.position.set(desk.x + vx * 0.42, b.floorY + 0.88, desk.z + vz * 0.42);
-    holder.rotation.y = Math.atan2(vx, vz);
-    this.register({ building: b.id, canvas: plate.canvas, tex: plate.tex, mesh: holder, draw: plate.draw, owner: 0, x: desk.x, z: desk.z });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, hgt), signMaterial(tex, 1.4, true));
+    const y = (desk.y ?? b.floorY) + 1.75;
+    mesh.position.set(desk.x, y, desk.z);
+    mesh.renderOrder = 5;
+    const owner = boss === 'dadou' ? Faction.DADOU : Faction.EVEN;
+    mesh.visible = b.def.startOwner === owner;
+    this.register({ building: b.id, canvas, tex, mesh, draw: () => draw(), owner: b.def.startOwner, x: desk.x, z: desk.z, deskOf: boss, holo: true, baseY: y });
   }
 
   private redrawAll(): void {
@@ -340,11 +321,31 @@ export class SignSystem {
     }
   }
 
-  update(camPos: THREE.Vector3): void {
+  update(camPos: THREE.Vector3, dt = 1 / 60): void {
+    this.t += dt;
     for (const s of this.signs) {
       const dx = s.x - camPos.x;
       const dz = s.z - camPos.z;
-      s.mesh.visible = dx * dx + dz * dz < 110 * 110;
+      const near = dx * dx + dz * dz < 110 * 110;
+      if (s.deskOf) {
+        const mine = s.owner === (s.deskOf === 'dadou' ? Faction.DADOU : Faction.EVEN);
+        s.mesh.visible = near && mine && dx * dx + dz * dz < 30 * 30;
+        if (s.mesh.visible) {
+          // l'hologramme tourne vers la caméra et flotte doucement
+          s.mesh.rotation.y = Math.atan2(camPos.x - s.x, camPos.z - s.z);
+          s.mesh.position.y = (s.baseY ?? 0) + Math.sin(this.t * 1.6) * 0.04;
+        }
+      } else s.mesh.visible = near;
     }
   }
+}
+
+/** Mélange une couleur CSS #rrggbb avec du blanc. */
+function mixWhite(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const m = (v: number) => Math.round(v + (255 - v) * k);
+  return `rgb(${m(r)},${m(g)},${m(b)})`;
 }

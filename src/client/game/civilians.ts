@@ -28,7 +28,7 @@ interface Civ {
   ty: number;
 }
 
-const SEAT_TYPES = new Set(['pub', 'cafe', 'gambling', 'theatre', 'club', 'hq', 'church']);
+const SEAT_TYPES = new Set(['club', 'jazz', 'casino', 'theatre', 'diner', 'teahouse', 'mahjong', 'restaurant', 'boathouse', 'hotel', 'station']);
 const ID_BASE = 50000;
 
 export class Civilians {
@@ -55,7 +55,7 @@ export class Civilians {
     for (let vz = 4; vz < world.gd; vz += 8)
       for (let vx = 4; vx < gw; vx += 8) {
         const g = gm[vz * gw + vx];
-        if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PIER) continue;
+        if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PLAZA && g !== GM.PARK) continue;
         const x = vx * 0.25;
         const z = vz * 0.25;
         const n = world.nav.nodeAt(x, z, 0, 0.6);
@@ -63,10 +63,10 @@ export class Civilians {
         pts.push(x, z);
       }
     this.spots = new Float32Array(pts);
-    // sièges des pubs, cafés et salles de spectacle
+    // sièges des bars, restaurants, maisons de thé et salles de spectacle
     const chair = PROP_INDEX.CHAIR;
-    const stool = PROP_INDEX.STOOL;
-    const bench = PROP_INDEX.PEW;
+    const stool = PROP_INDEX.BAR_STOOL;
+    const bench = PROP_INDEX.SEAT_ROW;
     const byId = new Map(world.buildings.map((b) => [b.id, b]));
     for (const p of world.props) {
       if (p.kind !== chair && p.kind !== stool && p.kind !== bench) continue;
@@ -137,7 +137,7 @@ export class Civilians {
       const vz = Math.floor(z * 4);
       if (vx < 0 || vz < 0 || vx >= this.world.gw || vz >= this.world.gd) continue;
       const g = this.world.groundMap[vz * this.world.gw + vx];
-      if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PIER && g !== GM.ROAD) continue;
+      if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PLAZA && g !== GM.PARK && g !== GM.ROAD) continue;
       const n = nav.nodeAt(x, z, 0, 0.6);
       if (n < 0 || nav.clear[n] < 1) continue;
       return [x, z];

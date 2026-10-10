@@ -128,6 +128,10 @@ export interface Squad {
   lostNotified: number;
   reinfNotified: boolean;
   lastCombat: number;
+  /** Étapes avant l'objectif (quais de métro pour une attaque souterraine). */
+  via: Vec2[];
+  /** Tenir le toit du bâtiment visé plutôt que l'intérieur. */
+  roof: boolean;
 }
 
 export interface FactionState {
@@ -159,6 +163,9 @@ export interface FactionState {
   /** Anti-spam des notifications : clé → instant. */
   notifyAt: Map<string, number>;
   custom: Record<string, unknown>;
+  /** Palier du logement (1 planque … 5 tour) et bâtiment du QG actuel. */
+  tier: number;
+  hqId: number;
 }
 
 export interface BState {

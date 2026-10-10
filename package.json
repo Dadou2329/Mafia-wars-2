@@ -29,6 +29,8 @@
     "@fontsource/cinzel": "5.2.6",
     "@fontsource/cinzel-decorative": "5.2.6",
     "@fontsource/eb-garamond": "5.2.6",
+    "@fontsource/orbitron": "^5.2.8",
+    "@fontsource/rajdhani": "^5.2.7",
     "@fontsource/unifrakturmaguntia": "5.2.6",
     "@resvg/resvg-js": "2.6.2",
     "@types/node": "22.15.3",

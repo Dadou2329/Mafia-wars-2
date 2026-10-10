@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
 import { GM } from '../../shared/city/gen/city';
-import { RIVER_Z, WORLD_W } from '../../shared/city/plan';
+import { WORLD_D, WORLD_W } from '../../shared/city/plan';
 import { Rng, angleDiff } from '../../shared/util';
 import { audio } from '../audio/AudioEngine';
 import type { CharView } from '../characters/characterRenderer';
@@ -204,7 +204,7 @@ export class Carriages {
   private cabs: Cab[] = [];
   private road: Uint8Array;
   private gw = Math.floor(WORLD_W / CELL);
-  private gd = Math.floor(RIVER_Z / CELL);
+  private gd = Math.floor(WORLD_D / CELL);
   private material = createObjectMaterial({ key: 'carriages' });
   private geos = new Map<string, THREE.BufferGeometry>();
   private rng = new Rng((Date.now() >> 3) & 0xffff);

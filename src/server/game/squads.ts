@@ -2,14 +2,12 @@
 
 import { Anim } from '../../shared/characters';
 import { BOSS_NAME, ORDER_LABEL, type OrderType } from '../../shared/constants';
-import { BUILDINGS, DISTRICT_BY_ID, Faction, HQ_BUILDING, buildingsInDistrict, type DistrictId } from '../../shared/city/plan';
-
-const HOME_DISTRICT = { dadou: HQ_BUILDING.dadou.district, even: HQ_BUILDING.even.district };
+import { BUILDINGS, DISTRICT_BY_ID, Faction, SUBWAY_STATIONS, SUBWAY_Y, buildingsInDistrict, type DistrictId, type SubwayStation } from '../../shared/city/plan';
 import type { LieutenantStatus, Slot } from '../../shared/protocol';
 import { formatTime } from '../../shared/util';
 import { type Game, otherSlot, slotFaction } from './Game';
 import type { Ent, Squad, Vec2 } from './types';
-import { aNom, cap, leNom, pluriel } from '../../shared/french';
+import { aNom, cap, deNom as deNomB, leNom, pluriel } from '../../shared/french';
 
 export function createSquad(g: Game, lt: Ent, slot: Slot): Squad {
   const sq: Squad = {
@@ -34,6 +32,8 @@ export function createSquad(g: Game, lt: Ent, slot: Slot): Squad {
     lostNotified: 0,
     reinfNotified: false,
     lastCombat: -100,
+    via: [],
+    roof: false,
   };
   g.squads.set(lt.id, sq);
   lt.ai!.squad = lt.id;
@@ -90,8 +90,8 @@ function assignPosts(g: Game, sq: Squad, assault: boolean): void {
   let outside: Vec2[] = [];
   if (sq.goalBuilding >= 0) {
     const b = g.building(sq.goalBuilding);
-    inside = [...b.defend].sort(() => g.rng.next() - 0.5);
-    outside = b.guardOut;
+    inside = [...(sq.roof && b.roofPts.length ? b.roofPts : b.defend)].sort(() => g.rng.next() - 0.5);
+    outside = sq.roof && b.roofPts.length ? b.roofPts : b.guardOut;
   } else if (sq.goal) {
     for (let i = 0; i < Math.max(4, ms.length); i++) {
       const a = (i / Math.max(4, ms.length)) * Math.PI * 2;
@@ -116,7 +116,7 @@ function assignPosts(g: Game, sq: Squad, assault: boolean): void {
   if (sq.goalBuilding >= 0) {
     const b = g.building(sq.goalBuilding);
     // le lieutenant dirige l'assaut depuis l'entrée ; ses hommes entrent les premiers
-    lt.ai!.post = assault ? b.doors[0].out : b.doors[0].in;
+    lt.ai!.post = sq.roof && b.roofPts.length ? b.roofPts[0] : assault ? b.doors[0].out : b.doors[0].in;
     lt.ai!.run = assault;
   } else if (sq.goal) lt.ai!.post = sq.goal;
 }
@@ -124,6 +124,40 @@ function assignPosts(g: Game, sq: Squad, assault: boolean): void {
 function districtCenter(d: DistrictId): Vec2 {
   const def = DISTRICT_BY_ID[d];
   return { x: def.label[0], z: def.label[1] };
+}
+
+function nearestStation(p: Vec2): SubwayStation {
+  let best = SUBWAY_STATIONS[0];
+  let bd = Infinity;
+  for (const s of SUBWAY_STATIONS) {
+    const d = Math.hypot((s.rect[0] + s.rect[2]) / 2 - p.x, (s.rect[1] + s.rect[3]) / 2 - p.z);
+    if (d < bd) {
+      bd = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
+/** Point praticable au milieu du quai. */
+function platform(g: Game, s: SubwayStation): Vec2 {
+  return nearestWalkable(g, { x: (s.rect[0] + s.rect[2]) / 2, z: (s.rect[1] + s.rect[3]) / 2, y: SUBWAY_Y });
+}
+
+/** Bâtiments à prendre dans un quartier (clés d'abord, puis les plus proches ; le QG adverse en dernier). */
+function attackList(g: Game, sq: Squad, d: DistrictId, from: Vec2) {
+  const mine = slotFaction(sq.slot);
+  const list = buildingsInDistrict(d).filter((b) => b.capturable && !g.isReserved(b.id) && g.bstate.get(b.id)!.owner !== mine);
+  list.sort((a, b) => {
+    const ha = g.hqOwnerOf(a.id) ? 1 : 0;
+    const hb = g.hqOwnerOf(b.id) ? 1 : 0;
+    if (ha !== hb) return ha - hb;
+    if (!!a.isKey !== !!b.isKey) return a.isKey ? -1 : 1;
+    const ia = g.building(a.id).center;
+    const ib = g.building(b.id).center;
+    return Math.hypot(ia.x - from.x, ia.z - from.z) - Math.hypot(ib.x - from.x, ib.z - from.z);
+  });
+  return list;
 }
 
 export function giveOrder(g: Game, sq: Squad, type: OrderType, target?: number | string, x?: number, z?: number): void {
@@ -138,29 +172,74 @@ export function giveOrder(g: Game, sq: Squad, type: OrderType, target?: number |
   sq.goal = null;
   sq.goalBuilding = -1;
   sq.patrolPts = [];
+  sq.via = [];
+  sq.roof = false;
   switch (type) {
     case 'attack_district': {
       const d = String(target) as DistrictId;
       const def = DISTRICT_BY_ID[d];
       if (!def) return;
       targetName = def.name;
-      const list = buildingsInDistrict(d).filter((b) => b.capturable && g.bstate.get(b.id)!.owner !== mine);
+      const list = attackList(g, sq, d, lt);
       if (list.length === 0) {
         g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${cap(leNom(def.name))} ${pluriel(def.name) ? 'vous appartiennent' : 'vous appartient'} déjà entièrement : ${sq.name} va ${pluriel(def.name) ? 'les' : 'le'} défendre.` });
         return giveOrder(g, sq, 'defend_district', d);
       }
-      list.sort((a, b) => {
-        if (!!a.isKey !== !!b.isKey) return a.isKey ? -1 : 1;
-        const ia = g.building(a.id).center;
-        const ib = g.building(b.id).center;
-        return Math.hypot(ia.x - lt.x, ia.z - lt.z) - Math.hypot(ib.x - lt.x, ib.z - lt.z);
-      });
       sq.queue = list.map((b) => b.id);
+      break;
+    }
+    case 'subway': {
+      // attaque souterraine : on descend à la station la plus proche, on prend la rame, on ressort près de la cible
+      let dest: Vec2;
+      if (typeof target === 'number' || /^\d+$/.test(String(target))) {
+        const b = BUILDINGS[Number(target)];
+        if (!b || !b.capturable || g.isReserved(b.id)) return;
+        if (g.bstate.get(b.id)!.owner === mine) {
+          g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${b.name} vous appartient déjà : ${sq.name} va le défendre.` });
+          return giveOrder(g, sq, 'defend_building', b.id);
+        }
+        targetName = b.name;
+        sq.queue = [b.id];
+        dest = g.building(b.id).center;
+      } else {
+        const d = String(target) as DistrictId;
+        const def = DISTRICT_BY_ID[d];
+        if (!def) return;
+        targetName = def.name;
+        dest = districtCenter(d);
+        const list = attackList(g, sq, d, dest);
+        if (list.length === 0) {
+          g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${cap(leNom(def.name))} ${pluriel(def.name) ? 'vous appartiennent' : 'vous appartient'} déjà entièrement : ${sq.name} va ${pluriel(def.name) ? 'les' : 'le'} défendre.` });
+          return giveOrder(g, sq, 'defend_district', d);
+        }
+        sq.queue = list.map((b) => b.id);
+      }
+      const from = nearestStation(lt);
+      const to = nearestStation(dest);
+      if (from !== to) sq.via = [platform(g, from), platform(g, to)];
+      break;
+    }
+    case 'roof': {
+      const b = BUILDINGS[Number(target)];
+      if (!b) return;
+      const info = g.building(b.id);
+      if (!info.roofPts.length) {
+        g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${b.name} n’a pas de toit accessible.` });
+        return;
+      }
+      targetName = `le toit ${deNomB(b.name)}`;
+      sq.goalBuilding = b.id;
+      sq.roof = true;
+      sq.goal = info.doors[0].out;
       break;
     }
     case 'attack_building': {
       const b = BUILDINGS[Number(target)];
       if (!b || !b.capturable) return;
+      if (g.isReserved(b.id)) {
+        g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${b.name} n’est pas à prendre : ce logement est réservé à ${BOSS_NAME[b.residence!.boss]}.` });
+        return;
+      }
       targetName = b.name;
       if (g.bstate.get(b.id)!.owner === mine) {
         g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${b.name} vous appartient déjà : ${sq.name} va le défendre.` });
@@ -275,7 +354,7 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
       lt.anim = Anim.IDLE;
       lt.x = p.x;
       lt.z = p.z;
-      lt.y = hq.floorY;
+      lt.y = p.y ?? hq.floorY;
       lt.removeAt = Infinity;
       lt.ai!.target = -1;
       lt.ai!.aggro.clear();
@@ -324,6 +403,7 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
         switch (o.type) {
           case 'attack_district':
           case 'attack_building':
+          case 'subway':
             if (nextTarget(g, sq)) setState(g, sq, 'move');
             else finish(g, sq);
             break;
@@ -348,23 +428,39 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
         break;
       }
       const o = sq.order!;
+      const attack = o.type === 'attack_district' || o.type === 'attack_building' || o.type === 'subway';
+      // étapes intermédiaires (quais de métro)
+      const via = sq.via.length ? sq.via[0] : null;
+      if (via) {
+        sq.status = sq.via.length === 2 ? 'Descend dans le métro' : `Prend le métro vers ${leNom(sq.goalBuilding >= 0 ? BUILDINGS[sq.goalBuilding].name : o.targetName)}`;
+        // les wagons attendent tout le monde
+        const far = ms.filter((m) => Math.hypot(m.x - lt.x, m.z - lt.z) > 12 || Math.abs(m.y - lt.y) > 3).length;
+        lt.ai!.post = far > ms.length * 0.4 && g.time - sq.lastCombat > 3 ? null : via;
+        lt.ai!.run = false;
+        sq.progress = sq.via.length === 2 ? 0.1 : 0.3;
+        if (ltd(via) < 4 && Math.abs(lt.y - (via.y ?? 0)) < 2.5) {
+          sq.via.shift();
+          if (sq.via.length === 0) g.notify(sq.slot, `${sq.name} sort du métro et fonce vers ${leNom(sq.goalBuilding >= 0 ? BUILDINGS[sq.goalBuilding].name : o.targetName)}.`, 'info');
+        }
+        break;
+      }
       sq.status = `En route vers ${leNom(sq.goalBuilding >= 0 ? BUILDINGS[sq.goalBuilding].name : o.targetName)}`;
       // on attend les traînards
       const far = ms.filter((m) => Math.hypot(m.x - lt.x, m.z - lt.z) > 16).length;
       const waiting = far > ms.length * 0.4 && g.time - sq.lastCombat > 3;
       lt.ai!.post = waiting ? null : sq.goal;
       lt.ai!.run = false;
-      if (o.type.startsWith('attack')) sq.progress = sq.queueTotal ? sq.done / sq.queueTotal : 0;
+      if (attack) sq.progress = sq.queueTotal ? sq.done / sq.queueTotal : 0;
       else sq.progress = 0.5;
-      if (ltd(sq.goal) < 3.2) {
-        if (o.type === 'attack_district' || o.type === 'attack_building') {
+      if (ltd(sq.goal) < 3.2 && Math.abs(lt.y - (sq.goal.y ?? 0)) < 2.5) {
+        if (attack) {
           setState(g, sq, 'assault');
           const b = BUILDINGS[sq.goalBuilding];
           const owner = g.bstate.get(b.id)!.owner;
           const os = owner === Faction.DADOU ? 'dadou' : owner === Faction.EVEN ? 'even' : null;
           g.notify(sq.slot, `${sq.name} lance l’assaut sur ${b.name} !`, 'info');
           if (os && os !== sq.slot) g.notify(os, `ALERTE — ${BOSS_NAME[sq.slot]} attaque ${leNom(b.name)} (${DISTRICT_BY_ID[b.district].name}) !`, 'alert', `atk-${b.id}`, 30);
-          else if (g.districtOwner.get(b.district) !== mine && HOME_DISTRICT[sq.slot] !== b.district)
+          else if (g.districtOwner.get(b.district) !== mine && g.hq(sq.slot).def.district !== b.district)
             g.notify(otherSlot(sq.slot), `${BOSS_NAME[sq.slot]} attaque ${leNom(DISTRICT_BY_ID[b.district].name)} !`, 'alert', `atkd-${b.district}`, 90);
         } else {
           setState(g, sq, 'hold');
@@ -394,7 +490,13 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
     }
     case 'hold': {
       const o = sq.order;
-      sq.status = o ? (o.type === 'hold' ? 'Tient la position' : `Défend ${leNom(sq.goalBuilding >= 0 ? BUILDINGS[sq.goalBuilding].name : o.targetName)}`) : 'En position';
+      sq.status = o
+        ? o.type === 'hold'
+          ? 'Tient la position'
+          : o.type === 'roof'
+            ? `Tient ${o.targetName}`
+            : `Défend ${leNom(sq.goalBuilding >= 0 ? BUILDINGS[sq.goalBuilding].name : o.targetName)}`
+        : 'En position';
       sq.progress = 1;
       break;
     }
@@ -474,7 +576,7 @@ function DISTRICT_NAME(e: Ent): string {
   for (const d of Object.values(DISTRICT_BY_ID)) {
     if (e.x >= d.rect[0] && e.x < d.rect[2] && e.z >= d.rect[1] && e.z < d.rect[3]) return d.name;
   }
-  return 'Londres';
+  return 'New York';
 }
 
 export function squadStatus(g: Game, sq: Squad): LieutenantStatus {

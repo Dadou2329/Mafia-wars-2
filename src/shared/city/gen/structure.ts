@@ -159,21 +159,29 @@ export function stairShaft(
     f.fill(dx, F, z0 - 2, dx + 5, F + 9, z0, 0);
     doors.push({ lx: dx + 2.5, lz: z0 - 1, ly: F });
     if (i === levels.length - 1) break;
+    // grandes hauteurs (hall de gare, rez-de-chaussée de prestige) : plusieurs paires de volées
     const H = levels[i + 1] - F;
-    const h1 = Math.ceil(H / 2);
-    // volée 1 : moitié gauche, vers le fond
-    for (let k = 1; k <= h1; k++) {
-      const z = z0 + PLAT + k - 1;
-      f.fill(x0, F + k - 3, z, x0 + half, F + k, z + 1, stepMat);
-    }
-    // palier intermédiaire (fond)
-    const lz0 = z0 + PLAT + h1;
-    f.fill(x0, F + h1 - 3, lz0, x1, F + h1, Math.min(z1, lz0 + 4), stepMat);
-    // volée 2 : moitié droite, vers l'avant, jusqu'au niveau suivant
-    for (let j = 0; j < h1; j++) {
-      const z = z0 + PLAT + h1 - 1 - j;
-      const h = F + h1 + Math.round(((j + 1) * (H - h1)) / h1);
-      f.fill(x0 + half, h - 3, z, x1, h, z + 1, stepMat);
+    const pairs = H <= 22 ? 1 : Math.ceil(H / 20);
+    for (let p = 0; p < pairs; p++) {
+      const Fp = F + Math.round((p * H) / pairs);
+      const Hp = F + Math.round(((p + 1) * H) / pairs) - Fp;
+      const h1 = Math.ceil(Hp / 2);
+      // volée 1 : moitié gauche, vers le fond
+      for (let k = 1; k <= h1; k++) {
+        const z = z0 + PLAT + k - 1;
+        f.fill(x0, Fp + k - 3, z, x0 + half, Fp + k, z + 1, stepMat);
+      }
+      // palier intermédiaire (fond)
+      const lz0 = z0 + PLAT + h1;
+      f.fill(x0, Fp + h1 - 3, lz0, x1, Fp + h1, Math.min(z1, lz0 + 4), stepMat);
+      // volée 2 : moitié droite, vers l'avant
+      for (let j = 0; j < h1; j++) {
+        const z = z0 + PLAT + h1 - 1 - j;
+        const h = Fp + h1 + Math.round(((j + 1) * (Hp - h1)) / h1);
+        f.fill(x0 + half, h - 3, z, x1, h, z + 1, stepMat);
+      }
+      // palier avant intermédiaire (sans porte) entre deux paires
+      if (p < pairs - 1) f.fill(x0, Fp + Hp - 2, z0, x1, Fp + Hp, z0 + PLAT, stepMat);
     }
     // éclairage du palier
     f.prop('BARE_BULB', x0 + half, F + 10, z0 + 2, 0, 0);

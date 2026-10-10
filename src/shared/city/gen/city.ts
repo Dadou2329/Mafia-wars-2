@@ -22,6 +22,7 @@ import {
 } from '../plan';
 import { GenContext, type BuildingInfo } from './context';
 import { generateBuilding } from './buildings';
+import { repairConnectivity } from './connect';
 import { buildBoundaries, buildBridges, buildSubway } from './infra';
 import { Frame } from './frame';
 import { FACADE_DEFAULT, cladFace, curtainBlock, hollowBlock, ledRing, piers, windowRow, type Facade, type Wall } from './facade';
@@ -127,7 +128,12 @@ export function generateCity(seed = CITY_SEED): City {
   oneTimesSquare(ctx);
 
   // ------------------------------------------------------------------ bâtiments
-  for (const def of BUILDINGS) generateBuilding(ctx, def);
+  for (const def of BUILDINGS) {
+    const from = ctx.props.length;
+    const info = generateBuilding(ctx, def);
+    // aucune pièce ne doit rester enfermée derrière des chaises ou des tables
+    repairConnectivity(ctx, info, from);
+  }
   for (const f of FILLERS) buildFiller(ctx, f, rng.fork(hash32(f.rect[0] * 131 + f.rect[1])));
 
   // ------------------------------------------------------------------ mobilier urbain

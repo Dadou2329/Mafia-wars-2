@@ -21,6 +21,6 @@ export function getWorld(): SharedWorld {
   const nav = buildCityNav(city);
   const buildings = [...city.buildings].sort((a, b) => a.id - b.id);
   cached = { city, nav, buildings, byId: new Map(buildings.map((b) => [b.id, b])) };
-  console.log(`[monde] Londres généré en ${Date.now() - t0} ms (${buildings.length} bâtiments)`);
+  console.log(`[monde] New York généré en ${Date.now() - t0} ms (${buildings.length} bâtiments)`);
   return cached;
 }

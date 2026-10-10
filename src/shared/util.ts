@@ -61,13 +61,13 @@ export function hash3(x: number, y: number, z: number): number {
   return hash32(Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791));
 }
 
-/** Formate un montant en livres à la française : « 1 250 £ ». */
+/** Formate un montant en livres à la française : « 1 250 $ ». */
 export function formatMoney(n: number): string {
   const v = Math.round(n);
   const s = Math.abs(v)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${v < 0 ? '−' : ''}${s} £`;
+  return `${v < 0 ? '−' : ''}${s} $`;
 }
 
 export function formatTime(seconds: number): string {

@@ -2,13 +2,24 @@
 // missions des lieutenants, fil des morts, capture, discussion, journal, mort, pause.
 
 import { WEAPONS, Weapon } from '../../shared/characters';
-import { BOSS_NAME, MAFIA_NAME, NEWSPAPER, ORDER_STATUS } from '../../shared/constants';
+import { BOSS_NAME, MAFIA_NAME, NEWSPAPER, ORDER_STATUS, tierDef } from '../../shared/constants';
 import type { LieutenantStatus, PrivateState, PublicState, Slot } from '../../shared/protocol';
 import { formatMoney, formatTime } from '../../shared/util';
 import { h, clear } from '../ui/dom';
 import { settings } from '../settings';
 
-const FACTION_COLOR: Record<Slot, string> = { dadou: '#c8323a', even: '#3a62a8' };
+const FACTION_COLOR: Record<Slot, string> = { dadou: '#ff2a3c', even: '#4a8aff' };
+
+/** Noms courts des armes (emplacements). */
+const WEAPON_SHORT: Record<Weapon, string> = {
+  [Weapon.FISTS]: 'Poings',
+  [Weapon.PISTOL]: 'Pistolet',
+  [Weapon.SHOTGUN]: 'Pompe',
+  [Weapon.RIFLE]: 'Rail',
+  [Weapon.KNIFE]: 'Lame',
+  [Weapon.CLUB]: 'Matraque',
+  [Weapon.SMG]: 'PM',
+};
 
 export class Hud {
   readonly el: HTMLElement;
@@ -16,6 +27,9 @@ export class Hud {
   private income!: HTMLElement;
   private men!: HTMLElement;
   private terr!: HTMLElement;
+  private home!: HTMLElement;
+  private bannerEl!: HTMLElement;
+  private bannerTimer = 0;
   private objective!: HTMLElement;
   private eventLine!: HTMLElement;
   private notices!: HTMLElement;
@@ -61,6 +75,7 @@ export class Hud {
     this.income = h('b', { class: 'pos' });
     this.men = h('b');
     this.terr = h('b');
+    this.home = h('b');
     this.objective = h('div', { class: 'hud-objective' });
     this.eventLine = h('div', { class: 'hud-event hidden' });
     this.el.appendChild(
@@ -72,12 +87,20 @@ export class Hud {
         h('div', { class: 'row' }, h('span', null, 'Revenus'), this.income),
         h('div', { class: 'row' }, h('span', null, 'Hommes'), this.men),
         h('div', { class: 'row' }, h('span', null, 'Territoires'), this.terr),
+        h('div', { class: 'row' }, h('span', null, 'QG'), this.home),
         this.objective,
         this.eventLine,
       ),
     );
     this.notices = h('div', { class: 'hud-notices' });
     this.el.appendChild(this.notices);
+    // grande annonce (nouveau QG…)
+    this.bannerEl = h('div', {
+      class: 'hud-banner',
+      style:
+        'position:absolute;left:50%;top:22%;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .6s ease;font-family:var(--font-title);text-shadow:0 0 18px rgba(60,220,255,.8),0 2px 4px #000;',
+    });
+    this.el.appendChild(this.bannerEl);
     this.captureLbl = h('div');
     this.captureFill = h('div', { class: 'fill' });
     this.capture = h('div', { class: 'hud-capture hidden' }, this.captureLbl, h('div', { class: 'bar' }, this.captureFill));
@@ -144,7 +167,8 @@ export class Hud {
     this.money.textContent = formatMoney(p.money);
     this.income.textContent = `+${formatMoney(p.income)}/min`;
     this.men.textContent = `${p.men}${p.pool ? ` (${p.pool} au QG)` : ''}`;
-    if (pub) this.terr.textContent = `${pub.territories[this.slot]}/6`;
+    if (pub) this.terr.textContent = `${pub.territories[this.slot]}/7`;
+    this.home.textContent = tierDef(p.tier).name;
     // étoiles de recherche
     if (p.wanted !== this.lastWanted || this.stars.childElementCount === 0) {
       clear(this.stars);
@@ -219,7 +243,7 @@ export class Hud {
     if (this.slots.dataset.key !== key) {
       this.slots.dataset.key = key;
       clear(this.slots);
-      for (const ow of owned) this.slots.appendChild(h('span', { class: `slot${ow === w ? ' on' : ''}` }, WEAPONS[ow].name.split(' ')[0]));
+      for (const ow of owned) this.slots.appendChild(h('span', { class: `slot${ow === w ? ' on' : ''}` }, WEAPON_SHORT[ow]));
     }
   }
 
@@ -359,12 +383,22 @@ export class Hud {
     } else this.chatInput.blur();
   }
 
+  /** Grande annonce centrale (nouveau QG…). */
+  banner(title: string, sub = ''): void {
+    clear(this.bannerEl);
+    this.bannerEl.appendChild(h('div', { style: 'font-size:34px;font-weight:900;letter-spacing:.08em;color:#eafcff' }, title));
+    if (sub) this.bannerEl.appendChild(h('div', { style: 'font-family:var(--font-body);font-size:19px;font-weight:600;color:#9fe8ff;margin-top:6px' }, sub));
+    this.bannerEl.style.opacity = '1';
+    clearTimeout(this.bannerTimer);
+    this.bannerTimer = window.setTimeout(() => (this.bannerEl.style.opacity = '0'), 5200);
+  }
+
   newspaper(title: string, body: string): void {
-    const d = new Date(1888, 9, 1 + Math.floor(Math.random() * 28));
+    const d = new Date(2085, 9, 1 + Math.floor(Math.random() * 28));
     clear(this.news);
-    this.news.appendChild(h('div', { class: 'mast' }, NEWSPAPER.split(' ').map((w) => w[0] + w.slice(1).toLowerCase()).join(' ')));
+    this.news.appendChild(h('div', { class: 'mast' }, NEWSPAPER));
     this.news.appendChild(
-      h('div', { class: 'date' }, h('span', null, `Londres, ${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`), h('span', null, 'Un penny')),
+      h('div', { class: 'date' }, h('span', null, `New York, ${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`), h('span', null, 'En direct')),
     );
     this.news.appendChild(h('h2', null, title));
     this.news.appendChild(h('p', null, body));

@@ -256,7 +256,7 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
       // (re)calcul du chemin si besoin
       const goalMoved = Math.hypot(goal.x - ai.pathGoalX, goal.z - ai.pathGoalZ) > Math.max(1.2, gd * 0.25) || Math.abs(gy - ai.pathGoalY) > 1.2;
       if (!ai.path || goalMoved || ai.pathI >= ai.path.length / PATH_STRIDE || (g.time > ai.repathAt && ai.stuck > 0.5)) {
-        if (Math.abs(gy - e.y) < 1.0 && nav.lineWalkable(e.x, e.z, goal.x, goal.z, 1, e.y)) {
+        if (Math.abs(gy - e.y) < 1.0 && nav.lineWalkable(e.x, e.z, goal.x, goal.z, 1, e.y, gy)) {
           ai.path = [goal.x, goal.z, gy, -1];
           ai.pathI = 0;
         } else if (g.pathBudget > 0) {
@@ -277,6 +277,13 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
         let o = ai.pathI * PATH_STRIDE;
         let px = path[o];
         let pz = path[o + 1];
+        if (Math.hypot(px - e.x, pz - e.z) < 0.45 && Math.abs(path[o + 2] - e.y) > 2) {
+          // bon endroit, mauvais niveau (sous une trémie, sur le quai sous la rue) : on recalcule
+          ai.path = null;
+          ai.repathAt = 0;
+          ai.stuck = 1;
+          return;
+        }
         if (Math.hypot(px - e.x, pz - e.z) < 0.45) {
           const portal = path[o + 3];
           if (portal >= 0 && ai.pathI < n - 1) {

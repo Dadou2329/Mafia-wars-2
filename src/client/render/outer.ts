@@ -1,9 +1,10 @@
-// Sol lointain autour de la ville (au-delà des limites jouables), noyé dans le brouillard.
+// Sol lointain autour de la ville (au-delà des limites jouables) : le reste de Manhattan au nord,
+// le Queens et Brooklyn à l'est, noyés dans le brouillard. L'Hudson et la baie sont de l'eau (water.ts).
 
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
-import { RIVER_Z, WORLD_D, WORLD_W } from '../../shared/city/plan';
+import { RIVER_X0, RIVER_X1, WORLD_D, WORLD_W } from '../../shared/city/plan';
 
 const VERT = /* glsl */ `
 varying vec3 vWPos;
@@ -29,7 +30,7 @@ void main() {
   col *= 0.4 + 0.6 * (1.0 - uNight * 0.8);
   // quelques fenêtres lointaines la nuit
   float win = step(0.992, h12(floor(p * 0.5))) * uNight;
-  col += vec3(1.0, 0.65, 0.3) * win * 0.35;
+  col += mix(vec3(1.0, 0.65, 0.3), vec3(0.3, 0.8, 1.0), step(0.5, h12(c + 3.0))) * win * 0.45;
   col = applyHeightFog(col, vWPos + vec3(0.0, 4.0, 0.0));
   gl_FragColor = vec4(col, 1.0);
 }
@@ -49,9 +50,9 @@ export function createOuterGround(): THREE.Group {
     g.add(m);
   };
   const far = 700;
-  add(-far, -far, WORLD_W + far, 0); // nord
-  add(-far, 0, 0, RIVER_Z); // ouest
-  add(WORLD_W, 0, WORLD_W + far, RIVER_Z); // est
-  add(-far, WORLD_D + 22, WORLD_W + far, WORLD_D + far); // rive sud
+  add(0, -far, RIVER_X0, 0); // Manhattan au nord (Upper Manhattan, le Bronx)
+  add(RIVER_X1, -far, WORLD_W + far, 0); // le Queens au nord-est
+  add(WORLD_W, 0, WORLD_W + far, WORLD_D); // le Queens et Brooklyn à l'est
+  add(RIVER_X1, WORLD_D, WORLD_W + far, WORLD_D + far); // Brooklyn au sud
   return g;
 }

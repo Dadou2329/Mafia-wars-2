@@ -19,14 +19,13 @@ export interface Settings {
   volSfx: number;
   volAmbience: number;
   bindings: Bindings;
-  tutorialDone: boolean;
   crosshair: 'point' | 'croix' | 'cercle';
   subtitlesNews: boolean;
   /** Personnalisation des parrains (couleurs secondaires, chapeau). */
   custom: { dadou: Record<string, unknown>; even: Record<string, unknown> };
 }
 
-const KEY = 'mafiawars.settings.v1';
+const KEY = 'mafiawars2.settings.v1';
 
 export function defaultSettings(): Settings {
   return {
@@ -44,7 +43,6 @@ export function defaultSettings(): Settings {
     volSfx: 0.85,
     volAmbience: 0.7,
     bindings: defaultBindings(),
-    tutorialDone: false,
     crosshair: 'croix',
     subtitlesNews: true,
     custom: { dadou: {}, even: {} },

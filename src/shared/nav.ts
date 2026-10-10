@@ -441,7 +441,12 @@ export class NavGrid {
   }
 
   /** Ligne droite praticable entre deux points, en suivant le sol depuis l'altitude ay. */
-  lineWalkable(ax: number, az: number, bx: number, bz: number, minClear = 1, ay = 0): boolean {
+  /**
+   * Ligne droite praticable de (ax, ay, az) à (bx, bz) en restant sur des niveaux continus.
+   * Si `by` est donné, la ligne doit aussi arriver à cette altitude (et pas, par exemple, sur le
+   * quai du métro sous la rue, ou à l'étage du dessous d'une trémie d'escalier).
+   */
+  lineWalkable(ax: number, az: number, bx: number, bz: number, minClear = 1, ay = 0, by?: number): boolean {
     const dx = bx - ax;
     const dz = bz - az;
     const len = Math.hypot(dx, dz);
@@ -461,6 +466,7 @@ export class NavGrid {
       prev = node;
       prevCell = cell;
     }
+    if (by !== undefined && Math.abs(this.nodeY(prev) - by) > 1.0) return false;
     return true;
   }
 
@@ -672,7 +678,7 @@ export class NavGrid {
         let next = anchor + 1;
         for (let j = Math.min(s - 1, anchor + 40); j > anchor + 1; j--) {
           const [bx, bz] = this.nodeCenter(nodes[j]);
-          if (this.lineWalkable(ax, az, bx, bz, 1, ay)) {
+          if (this.lineWalkable(ax, az, bx, bz, 1, ay, this.nodeY(nodes[j]))) {
             next = j;
             break;
           }

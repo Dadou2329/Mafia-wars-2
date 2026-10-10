@@ -16,6 +16,8 @@ interface Inst {
   building: number;
   interior: boolean;
   tinted: boolean;
+  /** Couleur de néon de l'instance (NEON_COLORS). */
+  neon: number;
 }
 
 interface Group {
@@ -77,7 +79,7 @@ export class PropRenderer {
         const interior = !!fp && p.x > fp[0] + 0.3 && p.x < fp[2] - 0.3 && p.z > fp[1] + 0.3 && p.z < fp[3] - 0.3;
         const s = p.scale ?? 1;
         const matrix = new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), tmpQ.setFromAxisAngle(up, p.yaw), new THREE.Vector3(s, s, s));
-        return { matrix, x: p.x, z: p.z, building: p.building, interior, tinted: !!def.tinted };
+        return { matrix, x: p.x, z: p.z, building: p.building, interior, tinted: !!def.tinted, neon: p.variant % 8 };
       });
       const big = def.size[1] > 2.5 || kind === 'STREET_LIGHT' || kind === 'STREET_LIGHT_DOUBLE' || kind === 'TRAFFIC_LIGHT' || kind === 'PARK_LAMP' || kind === 'NEON_SIGN';
       this.groups.push({ kind, mesh, owner, items, maxDist: big ? 150 : 70, big });
@@ -132,7 +134,7 @@ export class PropRenderer {
           if (dx * dx + dz * dz > md2) continue;
         }
         it.matrix.toArray(arr, n * 16);
-        own[n] = it.building >= 0 ? this.buildingOwner.get(it.building) ?? 0 : 0;
+        own[n] = (it.building >= 0 ? this.buildingOwner.get(it.building) ?? 0 : 0) + 4 * it.neon;
         n++;
       }
       g.mesh.count = n;

@@ -19,7 +19,9 @@ export type ActionId =
   | 'weapon2'
   | 'weapon3'
   | 'weapon4'
+  | 'weapon5'
   | 'weaponNext'
+  | 'phone'
   | 'chat'
   | 'scores';
 
@@ -41,17 +43,19 @@ export const ACTIONS: ActionDef[] = [
   { id: 'fire', label: 'Tirer / frapper', group: 'Combat', def: ['Mouse0'] },
   { id: 'aim', label: 'Viser', group: 'Combat', def: ['Mouse2'] },
   { id: 'reload', label: 'Recharger', group: 'Combat', def: ['KeyR'] },
-  { id: 'weapon1', label: 'Poings', group: 'Combat', def: ['Digit1'] },
-  { id: 'weapon2', label: 'Revolver', group: 'Combat', def: ['Digit2'] },
-  { id: 'weapon3', label: 'Arme longue (fusil / carabine)', group: 'Combat', def: ['Digit3'] },
-  { id: 'weapon4', label: 'Arme blanche (couteau / matraque)', group: 'Combat', def: ['Digit4'] },
+  { id: 'weapon1', label: 'Mains nues / lame thermique / matraque', group: 'Combat', def: ['Digit1'] },
+  { id: 'weapon2', label: 'Pistolet', group: 'Combat', def: ['Digit2'] },
+  { id: 'weapon3', label: 'Pistolet-mitrailleur', group: 'Combat', def: ['Digit3'] },
+  { id: 'weapon4', label: 'Fusil à pompe', group: 'Combat', def: ['Digit4'] },
+  { id: 'weapon5', label: 'Fusil à rail', group: 'Combat', def: ['Digit5'] },
   { id: 'weaponNext', label: 'Arme suivante', group: 'Combat', def: ['WheelDown'] },
   { id: 'interact', label: 'Interagir', group: 'Commandement', def: ['KeyE'] },
   { id: 'wheel', label: 'Menu des ordres rapides', group: 'Commandement', def: ['KeyQ'] },
-  { id: 'map', label: 'Carte de la ville', group: 'Commandement', def: ['KeyM'] },
+  { id: 'map', label: 'Carte stratégique', group: 'Commandement', def: ['KeyM'] },
+  { id: 'phone', label: 'Téléphone', group: 'Commandement', def: ['Tab'] },
   { id: 'view', label: 'Vue 1re / 3e personne', group: 'Interface', def: ['KeyV'] },
   { id: 'chat', label: 'Discuter', group: 'Interface', def: ['Enter'] },
-  { id: 'scores', label: 'Bilan de la partie', group: 'Interface', def: ['Tab'] },
+  { id: 'scores', label: 'Bilan de la partie', group: 'Interface', def: ['KeyB'] },
 ];
 
 export type Bindings = Record<ActionId, string[]>;

@@ -54,11 +54,12 @@ export function drawMinimap(
         c.strokeRect(f[0] * MAP_SCALE, f[1] * MAP_SCALE, (f[2] - f[0]) * MAP_SCALE, (f[3] - f[1]) * MAP_SCALE);
         c.setLineDash([]);
       }
-      if (BUILDINGS[b.id].isKey) {
-        c.fillStyle = '#f2c84a';
-        c.font = `${28}px serif`;
+      const hqOf = pub.hq.dadou === b.id ? 'dadou' : pub.hq.even === b.id ? 'even' : null;
+      if (BUILDINGS[b.id].isKey || hqOf) {
+        c.fillStyle = hqOf === 'dadou' ? '#ff5a6a' : hqOf === 'even' ? '#7fb8ff' : '#ffd23c';
+        c.font = `${28}px sans-serif`;
         c.textAlign = 'center';
-        c.fillText(BUILDINGS[b.id].hq ? '♛' : '★', ((f[0] + f[2]) / 2) * MAP_SCALE, ((f[1] + f[3]) / 2) * MAP_SCALE + 10);
+        c.fillText(hqOf ? '♛' : '★', ((f[0] + f[2]) / 2) * MAP_SCALE, ((f[1] + f[3]) / 2) * MAP_SCALE + 10);
       }
     }
     // combats en cours

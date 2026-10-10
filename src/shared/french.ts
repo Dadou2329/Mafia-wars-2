@@ -8,41 +8,56 @@ type Art = 'le' | 'la' | 'les' | 'l’' | '';
 const COMMON: Record<string, Art> = {
   Atelier: 'l’',
   Banque: 'la',
-  Bijouterie: 'la',
-  Boucherie: 'la',
-  Boulangerie: 'la',
+  Bodega: 'la',
+  Boathouse: 'le',
+  Bourse: 'la',
   Brasserie: 'la',
   Café: 'le',
-  Chantier: 'le',
-  Chapellerie: 'la',
+  Casino: 'le',
+  Casse: 'la',
+  Centre: 'le',
+  Chrysler: 'le',
   Club: 'le',
-  Compagnie: 'la',
-  Cour: 'la',
-  Douanes: 'les',
+  Commissariat: 'le',
+  Concession: 'la',
+  Dépôt: 'le',
+  Diner: 'le',
+  Empire: 'l’',
   Entrepôt: 'l’',
-  Filature: 'la',
-  Fonderie: 'la',
-  Garni: 'le',
+  Entrepôts: 'les',
+  Galerie: 'la',
+  Garage: 'le',
+  'Grand magasin': 'le',
+  Herboristerie: 'l’',
   Hôtel: 'l’',
-  Jardin: 'le',
-  Jardins: 'les',
-  Logements: 'les',
-  Manoir: 'le',
+  Hub: 'le',
+  Loft: 'le',
+  Maison: 'la',
   Marché: 'le',
-  'Music-hall': 'le',
+  Penthouse: 'le',
+  Pharmacie: 'la',
   Place: 'la',
-  Prêteur: 'le',
+  Planque: 'la',
   Quartier: 'le',
-  Taudis: 'le',
+  Queens: 'le',
+  Salle: 'la',
+  Siège: 'le',
+  Studio: 'le',
+  Tavern: 'le',
+  Théâtre: 'le',
   Tour: 'la',
   Usine: 'l’',
 };
+
+/** Clés de plusieurs mots (« Grand magasin ») : testées avant le premier mot. */
+const MULTI = Object.keys(COMMON).filter((k) => k.includes(' '));
 
 function split(name: string): { art: Art; rest: string } {
   const m = /^(Le|La|Les) (.+)$/.exec(name);
   if (m) return { art: m[1].toLowerCase() as Art, rest: m[2] };
   const e = /^L[’'](.+)$/.exec(name);
   if (e) return { art: 'l’', rest: e[1] };
+  for (const k of MULTI) if (name.startsWith(k + ' ')) return { art: COMMON[k], rest: name };
   const first = name.split(' ')[0];
   return { art: COMMON[first] ?? '', rest: name };
 }
