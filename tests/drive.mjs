@@ -25,7 +25,7 @@ await A.waitForSelector('text=Créer une partie', { timeout: 120000 });
 await A.click('text=Créer une partie');
 await A.waitForFunction(() => window.__app?.net?.room?.code, null, { timeout: 30000 });
 const code = await A.evaluate(() => window.__app.net.room.code);
-const bot = spawn(process.execPath, ['tests/bot.mjs', code, 'even', new globalThis.URL(URL).origin.replace('5173', '3000')], { stdio: 'ignore' });
+const bot = spawn(process.execPath, ['tests/bot.mjs', code, 'even', process.env.SERVER ?? new globalThis.URL(URL).origin.replace('5173', '3000')], { stdio: 'ignore' });
 await A.waitForFunction(() => Object.keys(window.__app.net.room?.players ?? {}).length === 2, null, { timeout: 60000 });
 await A.evaluate(() => window.__app.net.pick('dadou'));
 await sleep(800);

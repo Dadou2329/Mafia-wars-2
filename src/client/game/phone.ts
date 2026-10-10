@@ -4,14 +4,14 @@
 
 import '../ui/phone.css';
 import { DISTRICTS, RESIDENCES } from '../../shared/city/plan';
-import { RECRUIT_BUNDLES, TAXI_PRICE, UPGRADE_BY_ID, VEHICLES, tierDef } from '../../shared/constants';
+import { DE_BOSS, RECRUIT_BUNDLES, TAXI_PRICE, UPGRADE_BY_ID, VEHICLES, tierDef } from '../../shared/constants';
 import { formatMoney } from '../../shared/util';
 import { audio } from '../audio/AudioEngine';
 import { h, clear } from '../ui/dom';
 import type { GameClient } from './GameClient';
 import { aNom, deNom } from '../../shared/french';
 
-type AppId = 'home' | 'alerts' | 'garage' | 'taxi' | 'crew' | 'recruit' | 'estate' | 'drones' | 'map';
+type AppId = 'home' | 'alerts' | 'garage' | 'taxi' | 'crew' | 'recruit' | 'estate' | 'drones' | 'convoys' | 'map';
 
 const ICONS: Record<Exclude<AppId, 'home'>, string> = {
   alerts: '<path d="M12 3a5 5 0 0 0-5 5v4l-2 3h14l-2-3V8a5 5 0 0 0-5-5z"/><path d="M10 18a2 2 0 0 0 4 0"/>',
@@ -21,6 +21,7 @@ const ICONS: Record<Exclude<AppId, 'home'>, string> = {
   recruit: '<circle cx="10" cy="8" r="3"/><path d="M4 19c0-3 3-5 6-5s6 2 6 5"/><path d="M18 8v6M15 11h6"/>',
   estate: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/><path d="M4 20h16"/>',
   drones: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/><path d="M8 8l1.5 1.5M16 8l-1.5 1.5M8 16l1.5-1.5M16 16l-1.5-1.5"/>',
+  convoys: '<rect x="2" y="7" width="12" height="9" rx="1"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/><path d="M6 11.5h4"/>',
   map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
 };
 
@@ -32,6 +33,7 @@ const LABEL: Record<Exclude<AppId, 'home'>, string> = {
   recruit: 'Recruter',
   estate: 'Immobilier',
   drones: 'Drones',
+  convoys: 'Convois',
   map: 'Carte',
 };
 
@@ -257,6 +259,41 @@ export class Phone {
           this.body.appendChild(
             h('div', { class: 'phone-card' }, h('div', { class: 'row' }, h('h3', { style: 'flex:1' }, d.name), this.btn('Envoyer', () => this.act({ a: 'drone', d: d.id }), p.droneIn > 0))),
           );
+        }
+        break;
+      }
+      case 'convoys': {
+        const convoys = gc.pub.convoys ?? [];
+        const mine = convoys.find((c) => c.slot === gc.you);
+        const send = h(
+          'div',
+          { class: 'phone-card' },
+          h('h3', null, 'Envoyer un convoi'),
+          h('p', null, 'Un camion blindé part de votre bâtiment logistique le plus éloigné (dépôt, usine, casse, brasserie, marché…) et rapporte l’argent à votre QG. L’adversaire est prévenu : escortez-le.'),
+        );
+        send.appendChild(h('div', { class: 'row' }, this.btn(mine ? 'Convoi en route' : p.convoyIn > 0 ? `Prêt dans ${p.convoyIn} s` : 'Envoyer', () => this.act({ a: 'convoy' }), !!mine || p.convoyIn > 0)));
+        this.body.appendChild(send);
+        if (convoys.length === 0) this.body.appendChild(h('p', { class: 'phone-note' }, 'Aucun convoi sur les routes pour l’instant.'));
+        const lts = p.lieutenants.filter((l) => l.alive);
+        for (const cv of convoys) {
+          const own = cv.slot === gc.you;
+          const name = !cv.slot ? 'Convoi de la Banque Fédérale' : own ? 'Votre convoi' : `Convoi ${DE_BOSS[cv.slot]}`;
+          const me = gc.player.pos;
+          const dist = Math.round(Math.hypot(cv.x - me.x, cv.z - me.z));
+          const card = h('div', { class: 'phone-card' }, h('h3', null, name), h('p', null, `${formatMoney(cv.reward)} à bord · vers ${cv.dest} · à ${dist} m`));
+          card.appendChild(h('div', { class: 'phone-bar' }, h('i', { style: `width:${Math.round(cv.p * 100)}%` })));
+          if (!this.remote) card.appendChild(h('p', { class: 'phone-note' }, 'Ordres à distance dès le loft (palier 3) ou avec la liaison cryptée — sinon, depuis votre bureau.'));
+          else if (lts.length === 0) card.appendChild(h('p', { class: 'phone-note' }, 'Aucun lieutenant disponible.'));
+          else {
+            const row = h('div', { class: 'row' });
+            for (const lt of lts) row.appendChild(this.btn(`${own ? 'Escorte' : 'Interception'} : ${lt.name}`, () => this.act({ a: 'order', lt: lt.id, order: own ? 'escort' : 'intercept', target: cv.id })));
+            card.appendChild(row);
+          }
+          this.body.appendChild(card);
+        }
+        for (const l of gc.pub.loot ?? []) {
+          const me = gc.player.pos;
+          this.body.appendChild(h('div', { class: 'phone-card' }, h('h3', null, `Butin : ${formatMoney(l.reward)}`), h('p', null, `Sur la chaussée, à ${Math.round(Math.hypot(l.x - me.x, l.z - me.z))} m (balise verte). Premier arrivé, premier servi !`)));
         }
         break;
       }

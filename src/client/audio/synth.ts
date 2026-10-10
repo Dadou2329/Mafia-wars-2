@@ -44,8 +44,12 @@ export function biquad(
   return f;
 }
 
+/**
+ * Borne une fréquence dans [0,01 Hz, 0,45·fs]. Le plancher est très bas exprès : les LFO
+ * (rafales de vent à 0,05 Hz, vibratos à 5 Hz) passent aussi par ici.
+ */
 export function clampFreq(ctx: BaseAudioContext, f: number): number {
-  return Math.min(Math.max(f, 10), ctx.sampleRate * 0.45);
+  return Math.min(Math.max(f, 0.01), ctx.sampleRate * 0.45);
 }
 
 /** Relie des nœuds en série ; le dernier élément peut être un AudioParam (modulation). */

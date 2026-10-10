@@ -11,6 +11,8 @@ import { BUILDINGS, BUILDING_BY_KEY, DISTRICTS, Faction, HQ_BUILDING, RESIDENCES
 import { decodeSnapshot, encodeSnapshot, type GameEvent } from '../src/shared/protocol';
 import { DE_BOSS, HQ_CAPTURE_MIN_DISTRICTS, LIEUTENANT_PRICES, MAFIA_NAME, RECRUIT_BUNDLES, START_GANGSTERS, START_MONEY, TIERS } from '../src/shared/constants';
 import { formatMoney } from '../src/shared/util';
+import { MAT_BREAKABLE, firstGlass } from '../src/shared/glass';
+import { GROUND_VY, VOXEL } from '../src/shared/voxel';
 
 let passed = 0;
 let failed = 0;
@@ -298,6 +300,33 @@ section('Sécurité, piratage, braquage, drone');
 }
 
 // ---------------------------------------------------------------------------- convois
+section('Verre destructible');
+{
+  const vw = w.city.world;
+  check('les vitres (vitrines, baies) sont cassables', MAT_BREAKABLE.reduce((a, b) => a + b, 0) >= 3);
+  // une vitrine à hauteur d'homme : on cherche du verre avec de l'air devant (côté rue)
+  let pane: { x: number; y: number; z: number } | null = null;
+  for (let y = GROUND_VY + 5; y < GROUND_VY + 8 && !pane; y++)
+    for (let z = 4; z < vw.sz - 4 && !pane; z += 3)
+      for (let x = 4; x < vw.sx - 4; x += 1) {
+        if (!MAT_BREAKABLE[vw.get(x, y, z)] || vw.get(x, y, z - 8) !== 0 || vw.get(x, y, z - 1) !== 0) continue;
+        pane = { x: (x + 0.5) * VOXEL, y: (y - GROUND_VY + 0.5) * VOXEL, z: (z + 0.5) * VOXEL };
+        break;
+      }
+  check('une vitrine trouvée dans la ville', !!pane);
+  if (pane) {
+    const hit = firstGlass(vw, pane.x, pane.y, pane.z - 3, 0, 0, 1, 10, (k) => g.brokenGlass.has(k));
+    check('une balle tirée vers la vitrine la rencontre', !!hit && Math.abs(hit.z - pane.z) < 0.5);
+    const n0 = g.glassLog.length;
+    g.shatter(pane.x, pane.y, pane.z, 0.6);
+    check('la vitre se brise (serveur, diffusé aux clients)', g.glassLog.length === n0 + 1 && g.brokenGlass.size > 0);
+    check('le monde partagé entre les salons reste intact', MAT_BREAKABLE[vw.get(Math.floor(pane.x / VOXEL), Math.floor(pane.y / VOXEL) + GROUND_VY, Math.floor(pane.z / VOXEL))] === 1);
+    g.shatter(pane.x, pane.y, pane.z, 0.6);
+    check('une vitre déjà brisée ne se brise pas deux fois', g.glassLog.length === n0 + 1);
+    check('la balle suivante passe par le trou', !firstGlass(vw, pane.x, pane.y, pane.z - 3, 0, 0, 1, 3.2, (k) => g.brokenGlass.has(k)));
+  }
+}
+
 section('Convois blindés');
 {
   // Dadou possède la Brasserie de Williamsburg (bâtiment logistique) : il envoie un convoi

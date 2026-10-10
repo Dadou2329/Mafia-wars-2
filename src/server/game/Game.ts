@@ -68,6 +68,7 @@ import { closed, driveInput, explodeVehicle, launchDrone, leaveVehicle, setupVeh
 import { hackAction, hackedList, heistAction, heists, isHacked, securityOnCapture, setupSecurity, updateSecurity } from './security';
 import { convoyHostile, convoyReadyIn, convoys, loots, neutralConvoy, sendConvoy, updateConvoys } from './convoys';
 import { aNom, cap, deNom, leNom, pluriel } from '../../shared/french';
+import { firstGlass, glassInSphere, voxelKey } from '../../shared/glass';
 
 export const SLOTS: Slot[] = ['dadou', 'even'];
 export const otherSlot = (s: Slot): Slot => (s === 'dadou' ? 'even' : 'dadou');
@@ -833,6 +834,26 @@ export class Game {
     this.emitTo(slot, { t: 'tp', x, y, z, yaw });
   }
 
+  /** Verre brisé pendant la partie (indices de voxels) et journal des bris (clients qui arrivent). */
+  readonly brokenGlass = new Set<number>();
+  readonly glassLog: [number, number, number, number][] = [];
+
+  /** Brise le verre autour d'un point (balle, explosion) et prévient les clients. */
+  shatter(x: number, y: number, z: number, r: number): void {
+    const world = this.w.city.world;
+    let n = 0;
+    glassInSphere(world, x, y, z, r, (vx, vy, vz) => {
+      const k = voxelKey(world, vx, vy, vz);
+      if (this.brokenGlass.has(k)) return;
+      this.brokenGlass.add(k);
+      n++;
+    });
+    if (n === 0) return;
+    const ev: [number, number, number, number] = [Math.round(x * 100) / 100, Math.round(y * 100) / 100, Math.round(z * 100) / 100, r];
+    this.glassLog.push(ev);
+    this.emitAll({ t: 'glass', x: ev[0], y: ev[1], z: ev[2], r });
+  }
+
   /** Tir du joueur : le client indique les impacts, le serveur les vérifie. */
   playerFire(slot: Slot, data: { w: number; o: number[]; d: number[]; hits: number[][] }): void {
     const f = this.factions[slot];
@@ -858,6 +879,9 @@ export class Game {
     const uz = dz / len;
     let end = this.w.city.world.raycast(ox, oy, oz, ux, uy, uz, def.range);
     if (end < 0) end = def.range;
+    // la balle brise la première vitre qu'elle traverse
+    const pane = firstGlass(this.w.city.world, ox, oy, oz, ux, uy, uz, end, (k) => this.brokenGlass.has(k));
+    if (pane) this.shatter(pane.x, pane.y, pane.z, w === Weapon.SHOTGUN ? 0.9 : 0.55);
     let firstHit = -1;
     let hitCount = 0;
     for (const h of data.hits.slice(0, def.pellets)) {
@@ -1071,9 +1095,13 @@ export class Game {
       case 'debugTp': {
         // réservé aux tests automatisés (rendu logiciel trop lent pour marcher jusqu'au but)
         if (process.env.MW_DEBUG !== '1') return;
-        const y = this.w.nav.heightAt(act.x, act.z);
+        const y = this.w.nav.heightAt(act.x, act.z, act.y);
         this.teleport(slot, act.x, Number.isFinite(y) ? y : 0, act.z, act.yaw ?? 0);
         if (typeof act.dayTime === 'number') this.dayTime = ((act.dayTime % 1) + 1) % 1;
+        if (typeof act.rain === 'number') {
+          this.rain = this.rainTarget = clamp(act.rain, 0, 1);
+          this.rainNextAt = this.time + 900;
+        }
         break;
       }
       case 'debugEnd': {
@@ -1873,7 +1901,7 @@ export class Game {
       hacked: hackedList(this),
       convoys: convoys(this).map((c) => {
         const e = this.ents.get(c.id);
-        return { id: c.id, slot: c.owner, x: e ? Math.round(e.x * 10) / 10 : 0, z: e ? Math.round(e.z * 10) / 10 : 0, reward: c.reward };
+        return { id: c.id, slot: c.owner, x: e ? Math.round(e.x * 10) / 10 : 0, z: e ? Math.round(e.z * 10) / 10 : 0, reward: c.reward, dest: c.dest, p: Math.round((c.i / Math.max(1, c.pts.length - 1)) * 100) / 100 };
       }),
       loot: loots(this).map((l) => ({ x: l.x, z: l.z, reward: l.reward })),
       heists: heists(this).map((h) => ({ b: h.b, slot: h.slot, p: Math.min(1, h.progress) })),

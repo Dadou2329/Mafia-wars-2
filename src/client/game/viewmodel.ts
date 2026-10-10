@@ -1,10 +1,11 @@
 // Vue subjective : avant-bras du parrain et arme tenue en main, dessinés par-dessus la
 // scène (tampon de profondeur vidé). Modèles détaillés au 1/64 m (models/viewmodels.ts),
-// mains rigidement liées à l'arme ; animation procédurale : balancement de marche,
-// respiration, inertie de visée, recul à ressort, visée aux organes de visée, course,
-// réception de saut, changement d'arme, rechargements (bascule du Webley, du fusil, levier du
-// Martini-Henry, douilles éjectées) et coups (direct alterné, taille au couteau, coup de
-// matraque par le haut).
+// mains rigidement liées à l'arme ou à ses pièces mobiles ; animation procédurale :
+// balancement de marche, respiration, inertie de visée, recul à ressort, visée aux organes de
+// visée, course, réception de saut, changement d'arme, cycle de tir (culasse du Vektor, pompe
+// du Hammer, recharge des bobines du Longbow), rechargements (chargeur du Vektor, chargeur
+// supérieur et levier du Wasp, cartouches du Hammer, cellule d'énergie du Longbow) et coups
+// (direct alterné, taille à la lame thermique, coup de matraque électrique par le haut).
 
 import * as THREE from 'three';
 import { CharKind, WEAPONS, Weapon } from '../../shared/characters';
@@ -15,6 +16,7 @@ import { meshModel } from '../models/modelMesher';
 import * as VM from '../models/viewmodels';
 import { envUniforms } from '../render/env';
 import { createObjectMaterial } from '../render/voxelObjectMaterial';
+import { SLOT } from '../models/voxelModel';
 import type { PlayerController } from './player';
 import type { WeaponSystem } from './weapons';
 
@@ -29,23 +31,72 @@ interface PoseDef {
   rot: V3;
 }
 
+/** Pièces mobiles des armes. */
+type PartName = 'slide' | 'mag' | 'pump' | 'cell' | 'handle';
+
 /**
- * Une main rigidement attachée à l'arme ou à sa pièce mobile ; son avant-bras part du poignet
- * et s'oriente à chaque image vers le coude calculé (cinématique inverse, voir solveArms).
+ * Une main rigidement attachée à l'arme ou à l'une de ses pièces mobiles ; son avant-bras part
+ * du poignet et s'oriente à chaque image vers le coude calculé (cinématique inverse).
  */
 interface HandSlot {
   pose: VM.HandPose;
   side: 'R' | 'L';
-  /** Attachée à la pièce mobile (canons du fusil) plutôt qu'au corps de l'arme. */
-  onPivot?: boolean;
+  /** Pièce mobile qui porte la main (la pompe du fusil), sinon le corps de l'arme. */
+  part?: PartName;
   /** Position et orientation (Euler XYZ) du repère de la main dans le repère du porteur. */
   pos: V3;
   rot: V3;
   /** Roulis de la manche autour de son axe. */
   roll: number;
+  /** Main d'appui : lâche l'arme pendant que la main d'appoint recharge. */
+  support?: boolean;
   /** Épaule (repère caméra) et direction du coude, si différentes des valeurs par défaut. */
   shoulder?: V3;
   pole?: V3;
+}
+
+/** Image clé de pose : [t, dx, dy, dz, rx, ry, rz, transition]. */
+type Key = [number, number, number, number, number, number, number, Ease?];
+/** Image clé d'une piste scalaire (décalage d'une pièce, m) : [t, valeur, transition]. */
+type TKey = [number, number, Ease?];
+/** Image clé de la main d'appoint : [t, x, y, z, rx, ry, rz, visibilité (0 rien, 1 main, 2 main + objet), transition]. */
+type HKey = [number, number, number, number, number, number, number, number, Ease?];
+type Ease = 'io' | 'in' | 'out' | 'lin';
+
+interface PartDef {
+  name: PartName;
+  /** Position et orientation de la pièce au repos dans le repère de l'arme. */
+  pos: V3;
+  rot: V3;
+  /** Direction de la course (repère de l'arme, normée). */
+  dir: V3;
+  /** Échelle d'affichage (chargeur logé dans la poignée : légèrement réduit, sans faces confondues). */
+  scale?: number;
+}
+
+/** Objet éjecté : douille, chargeur, cellule. Position dans le repère de la pièce (ou de l'arme). */
+interface EjectDef {
+  at: number;
+  kind: VM.CasingKind;
+  part?: PartName;
+  from: V3;
+  vel: V3;
+}
+
+interface AnimDef {
+  /** Décalages de pose de l'arme. */
+  keys: Key[];
+  /** Pistes des pièces mobiles (décalage le long de `dir`, m). */
+  parts?: Partial<Record<PartName, TKey[]>>;
+  /** Intervalles pendant lesquels une pièce est cachée (chargeur retiré). */
+  hidden?: Partial<Record<PartName, [number, number][]>>;
+  /** Main d'appoint (gauche) qui apporte un chargeur, une cartouche ou une cellule. */
+  helper?: { pose: VM.HandPose; item: VM.CasingKind | null; handPos: V3; handRot: V3; keys: HKey[] };
+  /** La main d'appui lâche l'arme pendant cet intervalle. */
+  freeSupport?: [number, number];
+  ejects?: EjectDef[];
+  /** Petites secousses (insertion d'un chargeur, d'une cartouche). */
+  jolts?: number[];
 }
 
 interface RigDef {
@@ -54,29 +105,35 @@ interface RigDef {
   ads?: PoseDef;
   sprint: PoseDef;
   hands: HandSlot[];
-  /** Recul : translation arrière (m), relevé du canon (rad), montée (m), roulis (rad). */
-  recoil: { back: number; climb: number; up: number; roll: number };
+  parts?: PartDef[];
+  /** Recul : translation arrière (m), relevé du canon (rad), montée (m), roulis (rad), dispersion latérale (rad). */
+  recoil: { back: number; climb: number; up: number; roll: number; jitter?: number };
   /** Point autour duquel l'arme pivote au recul et dans les gestes (≈ poignet), repère de l'arme. */
   pivot: V3;
-  /**
-   * Main gauche qui vient glisser les cartouches pendant le rechargement : images clés
-   * [t, x, y, z, rx, ry, rz, visible] dans le repère de l'arme (m, rad).
-   */
-  helper?: { pose: VM.HandPose; cartridge: 'pistol' | 'rifle' | 'shell'; keys: Key[] };
+  /** Cycle après chaque tir (culasse, pompe) : délai et durée (s), animation (t normalisé). */
+  cycle?: { delay: number; dur: number; anim: AnimDef };
+}
+
+interface PartObj {
+  obj: THREE.Object3D;
+  base: THREE.Vector3;
+  dir: THREE.Vector3;
 }
 
 interface Rig {
   def: RigDef;
   /** Repère de l'arme (placé dans le repère de la caméra à chaque image). */
   root: THREE.Group;
-  /** Pièce mobile (canon basculant, canons, levier), placée sur son pivot. */
-  moving: THREE.Group | null;
-  rims: THREE.Mesh | null;
+  parts: Map<PartName, PartObj>;
+  /** Bobines du fusil à rail (éteintes / allumées). */
+  rings: { dark: THREE.Mesh[]; lit: THREE.Mesh[] } | null;
   arms: THREE.Object3D[];
   /** Avant-bras orientés à chaque image par la cinématique inverse épaule-coude-poignet. */
-  forearms: { mesh: THREE.Object3D; slot: HandSlot; onMoving: boolean }[];
-  /** Main d'appoint du rechargement (main, cartouche), son avant-bras et la position de son poignet. */
-  helper: { hand: THREE.Group; fore: THREE.Mesh; wrist: THREE.Vector3 } | null;
+  forearms: { mesh: THREE.Object3D; slot: HandSlot; parent: THREE.Object3D }[];
+  /** Main(s) d'appui (cachées pendant que la main d'appoint recharge). */
+  support: THREE.Object3D[];
+  /** Main d'appoint : groupe (main + objet tenu), objet, avant-bras. */
+  helper: { group: THREE.Group; item: THREE.Mesh | null; fore: THREE.Mesh; anim: AnimDef } | null;
 }
 
 const S = VM.VM_RES;
@@ -85,55 +142,185 @@ const SHOULDER_R: V3 = [0.21, -0.32, 0.05];
 const SHOULDER_L: V3 = [-0.21, -0.32, 0.05];
 const POLE_R: V3 = [0.5, -1, 0.1];
 const POLE_L: V3 = [-0.5, -1, 0.1];
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const SPRINT_LONG: PoseDef = { pos: [0.08, -0.135, -0.3], rot: [0.12, 0.9, 0.75] };
+
+// ------------------------------------------------------------------ images clés
+
+function ease(e: Ease | undefined, t: number): number {
+  switch (e) {
+    case 'lin':
+      return t;
+    case 'in':
+      return t * t * t;
+    case 'out':
+      return 1 - (1 - t) ** 3;
+    default:
+      return t * t * (3 - 2 * t);
+  }
+}
+
+/** Échantillonne une suite d'images clés de n canaux (colonnes 1..n, transition en colonne `ei`). */
+function sampleN(keys: readonly (readonly (number | string | undefined)[])[], n: number, t: number, out: number[], ei = n + 1): void {
+  let i = 1;
+  while (i < keys.length - 1 && (keys[i][0] as number) < t) i++;
+  const a = keys[i - 1];
+  const b = keys[i];
+  const u = ease(b[ei] as Ease | undefined, clamp((t - (a[0] as number)) / Math.max(1e-6, (b[0] as number) - (a[0] as number)), 0, 1));
+  for (let k = 1; k <= n; k++) {
+    const va = a[k] as number;
+    out[k - 1] = va + ((b[k] as number) - va) * u;
+  }
+}
+
+/** Valeur d'une piste scalaire. */
+function sampleTrack(keys: TKey[], t: number): number {
+  const o = [0];
+  sampleN(keys, 1, t, o);
+  return o[0];
+}
+
+/** Visibilité de la main d'appoint : valeur de la dernière image clé atteinte (pas d'interpolation). */
+function stepVis(keys: HKey[], t: number): number {
+  let v = 0;
+  for (const k of keys) if (k[0] <= t) v = k[7];
+  return v;
+}
+
+const inIntervals = (iv: [number, number][] | undefined, t: number) => !!iv && iv.some(([a, b]) => t >= a && t < b);
+
+// ------------------------------------------------------------------ armes
+
+const PI = Math.PI;
+const gR = VM.PISTOL.gripRot[0];
+/** Axe de la poignée du Vektor dans le repère de l'arme (le chargeur glisse le long). */
+const PISTOL_AXIS: V3 = [0, Math.cos(gR), Math.sin(gR)];
+const SMG_MAG_DIR: V3 = [0, 0.8, 0.6];
+const SMG_MAG_C: V3 = [0, 5 * S, -6 * S];
+const RIFLE_CELL_C: V3 = [0, -4 * S, -10 * S];
+
+/** Main d'appoint du Hammer : quatre cartouches glissées une à une dans la fenêtre de chargement. */
+function shotgunHelperKeys(): HKey[] {
+  const keys: HKey[] = [[0, -0.07, -0.13, 0.03, 0, 0, 0, 0]];
+  const below: [number, number, number] = [-0.07, -0.13, 0.03];
+  for (let i = 0; i < 4; i++) {
+    const c = 0.13 + i * 0.17;
+    keys.push([c, ...below, 0.2, 0, 0, 2]);
+    keys.push([c + 0.07, 0, -3.5 * S, -2 * S, 0, 0, 0, 2, 'out']);
+    keys.push([c + 0.11, 0, 0, -8 * S, 0, 0, 0, 2, 'in']);
+    keys.push([c + 0.115, 0, 0, -8 * S, 0, 0, 0, 1]);
+    keys.push([c + 0.165, ...below, 0.2, 0, 0, 1, 'io']);
+  }
+  keys.push([0.82, ...below, 0.2, 0, 0, 0]);
+  keys.push([1, ...below, 0.2, 0, 0, 0]);
+  return keys;
+}
 
 const RIGS: Record<Weapon, RigDef> = {
   [Weapon.PISTOL]: {
-    meta: VM.REVOLVER,
-    hip: { pos: [0.135, -0.12, -0.38], rot: [0.03, 0.34, 0.22] },
-    ads: { pos: [0, -VM.REVOLVER.sightY, -0.44], rot: [0, 0, 0] },
+    meta: VM.PISTOL,
+    hip: { pos: [0.13, -0.115, -0.37], rot: [0.03, 0.3, 0.2] },
+    ads: { pos: [0, -VM.PISTOL.sightY, -0.42], rot: [0, 0, 0] },
     sprint: { pos: [0.12, -0.16, -0.34], rot: [-0.55, 0.6, 0.35] },
-    hands: [{ pose: 'pistol', side: 'R', pos: [0, 0, 0], rot: VM.REVOLVER.gripRot, roll: 0.2 }],
-    recoil: { back: 0.05, climb: 0.38, up: 0.014, roll: 0.05 },
+    hands: [{ pose: 'pistol', side: 'R', pos: [0, 0, 0], rot: VM.PISTOL.gripRot, roll: 0.2 }],
+    parts: [
+      { name: 'slide', pos: [0, 0, 0], rot: [0, 0, 0], dir: [0, 0, 1] },
+      { name: 'mag', pos: [0, 0, 0], rot: VM.PISTOL.gripRot, dir: [0, -1, 0], scale: 0.97 },
+    ],
+    recoil: { back: 0.05, climb: 0.36, up: 0.014, roll: 0.05 },
     pivot: [0, -2 * S, 5 * S],
-    // la main gauche glisse les six cartouches dans les chambres présentées vers le haut
-    helper: {
-      pose: 'fist',
-      cartridge: 'pistol',
-      keys: [
-        [0, -0.12, -0.16, 0.08, -0.6, 0, 1.57, 0],
-        [0.37, -0.12, -0.16, 0.08, -0.6, 0, 1.57, 1],
-        [0.46, -0.004, 0.135, -0.058, -1.2, 0, 1.57, 1, 'out'],
-        [0.74, -0.004, 0.13, -0.06, -1.2, 0, 1.57, 1],
-        [0.8, -0.1, -0.12, 0.06, -0.6, 0, 1.57, 1, 'in'],
-        [0.81, -0.1, -0.12, 0.06, -0.6, 0, 1.57, 0],
-        [1, -0.1, -0.12, 0.06, -0.6, 0, 1.57, 0],
-      ],
+    cycle: {
+      delay: 0,
+      dur: 0.11,
+      anim: {
+        keys: [
+          [0, 0, 0, 0, 0, 0, 0],
+          [1, 0, 0, 0, 0, 0, 0],
+        ],
+        parts: {
+          slide: [
+            [0, 0],
+            [0.3, VM.PISTOL_SLIDE_TRAVEL, 'out'],
+            [1, 0, 'io'],
+          ],
+        },
+        ejects: [{ at: 0.25, kind: 'pistol', part: 'slide', from: [1.5 * S, 5 * S, -4.5 * S], vel: [1.5, 1.1, 0.35] }],
+      },
+    },
+  },
+  [Weapon.SMG]: {
+    meta: VM.SMG,
+    hip: { pos: [0.13, -0.145, -0.34], rot: [0.03, 0.2, 0.1] },
+    ads: { pos: [0, -VM.SMG.sightY, -0.3], rot: [0, 0, 0] },
+    sprint: { pos: [0.1, -0.15, -0.3], rot: [-0.3, 0.75, 0.55] },
+    hands: [
+      { pose: 'pistol', side: 'R', pos: [0, 0, 0], rot: VM.SMG.gripRot, roll: 0.15 },
+      { pose: 'pistol', side: 'L', pos: VM.SMG.support!, rot: VM.SMG.supportRot, roll: -0.25, support: true },
+    ],
+    parts: [
+      { name: 'mag', pos: [0, 0, 0], rot: [0, 0, 0], dir: SMG_MAG_DIR },
+      { name: 'handle', pos: [0, 0, 0], rot: [0, 0, 0], dir: [0, 0, 1] },
+    ],
+    recoil: { back: 0.018, climb: 0.075, up: 0.003, roll: 0.03, jitter: 0.012 },
+    pivot: [0, 0, 6 * S],
+    cycle: {
+      delay: 0,
+      dur: 0.07,
+      anim: {
+        keys: [
+          [0, 0, 0, 0, 0, 0, 0],
+          [1, 0, 0, 0, 0, 0, 0],
+        ],
+        ejects: [{ at: 0.2, kind: 'pistol', from: [1.5 * S, 2 * S, -4 * S], vel: [1.4, -0.2, 0.5] }],
+      },
     },
   },
   [Weapon.SHOTGUN]: {
     meta: VM.SHOTGUN,
-    hip: { pos: [0.12, -0.125, -0.3], rot: [0.04, 0.2, 0.08] },
-    ads: { pos: [0, -VM.SHOTGUN.sightY, -0.35], rot: [0, 0, 0] },
-    sprint: { pos: [0.08, -0.135, -0.3], rot: [0.12, 0.9, 0.75] },
+    hip: { pos: [0.115, -0.125, -0.3], rot: [0.04, 0.19, 0.08] },
+    ads: { pos: [0, -VM.SHOTGUN.sightY, -0.38], rot: [0, 0, 0] },
+    sprint: SPRINT_LONG,
     hands: [
-      { pose: 'stock', side: 'R', pos: [0, 0, 0], rot: VM.SHOTGUN.gripRot, roll: 0.1 },
-      // la main gauche tient la longuesse, solidaire des canons quand ils basculent
-      { pose: 'support', side: 'L', onPivot: true, pos: sub(VM.SHOTGUN.support!, VM.SHOTGUN.pivot!), rot: VM.SHOTGUN.supportRot, roll: -0.3 },
+      { pose: 'pistol', side: 'R', pos: [0, 0, 0], rot: VM.SHOTGUN.gripRot, roll: 0.1 },
+      // la main gauche tient la pompe et la suit quand elle coulisse
+      { pose: 'support', side: 'L', part: 'pump', pos: VM.SHOTGUN.support!, rot: VM.SHOTGUN.supportRot, roll: -0.3, support: true },
     ],
+    parts: [{ name: 'pump', pos: [0, 0, 0], rot: [0, 0, 0], dir: [0, 0, 1] }],
     recoil: { back: 0.075, climb: 0.2, up: 0.01, roll: 0.03 },
     pivot: [0, 0, 18 * S],
+    cycle: {
+      // pompe : on ramène la pompe d'un coup sec (la douille est éjectée), puis on la repousse
+      delay: 0.16,
+      dur: 0.36,
+      anim: {
+        keys: [
+          [0, 0, 0, 0, 0, 0, 0],
+          [0.45, 0.004, -0.008, 0.012, 0.05, 0.02, 0.06, 'out'],
+          [1, 0, 0, 0, 0, 0, 0, 'io'],
+        ],
+        parts: {
+          pump: [
+            [0, 0],
+            [0.42, VM.SHOTGUN_PUMP_TRAVEL, 'out'],
+            [0.55, VM.SHOTGUN_PUMP_TRAVEL],
+            [0.9, 0, 'in'],
+            [1, 0],
+          ],
+        },
+        ejects: [{ at: 0.42, kind: 'shell', from: [1.5 * S, 4 * S, -5.5 * S], vel: [1.3, 1.0, 0.45] }],
+      },
+    },
   },
   [Weapon.RIFLE]: {
     meta: VM.RIFLE,
-    hip: { pos: [0.12, -0.12, -0.29], rot: [0.04, 0.19, 0.08] },
-    ads: { pos: [0, -VM.RIFLE.sightY, -0.31], rot: [0, 0, 0] },
-    sprint: { pos: [0.08, -0.135, -0.3], rot: [0.12, 0.9, 0.75] },
+    hip: { pos: [0.12, -0.14, -0.29], rot: [0.04, 0.18, 0.08] },
+    ads: { pos: [0, -VM.RIFLE.sightY, -0.24], rot: [0, 0, 0] },
+    sprint: SPRINT_LONG,
     hands: [
-      { pose: 'stock', side: 'R', pos: [0, 0, 0], rot: VM.RIFLE.gripRot, roll: 0.1 },
-      { pose: 'support', side: 'L', pos: VM.RIFLE.support!, rot: VM.RIFLE.supportRot, roll: -0.3 },
+      { pose: 'pistol', side: 'R', pos: [0, 0, 0], rot: VM.RIFLE.gripRot, roll: 0.1 },
+      { pose: 'support', side: 'L', pos: VM.RIFLE.support!, rot: VM.RIFLE.supportRot, roll: -0.3, support: true },
     ],
-    recoil: { back: 0.08, climb: 0.16, up: 0.012, roll: 0.025 },
+    parts: [{ name: 'cell', pos: [0, 0, 0], rot: [0, 0, 0], dir: [0, -1, 0] }],
+    recoil: { back: 0.085, climb: 0.15, up: 0.012, roll: 0.02 },
     pivot: [0, 0, 18 * S],
   },
   [Weapon.KNIFE]: {
@@ -153,17 +340,13 @@ const RIGS: Record<Weapon, RigDef> = {
     pivot: [1 * S, 0, 3 * S],
   },
   [Weapon.FISTS]: {
-    // (pas de bouche de canon : les métadonnées du couteau ne servent que de valeur par défaut)
+    // (pas de bouche de canon : les métadonnées de la lame ne servent que de valeur par défaut)
     meta: VM.KNIFE,
     hip: { pos: [0.11, -0.115, -0.33], rot: [0.0, -0.22, -0.5] },
     sprint: { pos: [0.115, -0.14, -0.31], rot: [-0.2, -0.15, -0.8] },
     hands: [{ pose: 'fist', side: 'R', pos: [0, 0, 0], rot: [0, 0, 0], roll: 0 }],
     recoil: { back: 0, climb: 0, up: 0, roll: 0 },
     pivot: [0, 0, 3 * S],
-  },
-  // pistolet-mitrailleur : provisoirement la prise en main du pistolet
-  get [Weapon.SMG]() {
-    return RIGS[Weapon.PISTOL];
   },
 };
 
@@ -177,74 +360,189 @@ const FIST_L: RigDef = {
   pivot: [0, 0, 3 * S],
 };
 
-// ------------------------------------------------------------------ images clés
-
-/** Clé : [t, dx, dy, dz, rx, ry, rz, partie mobile, transition vers cette clé]. */
-type Key = [number, number, number, number, number, number, number, number, Ease?];
-type Ease = 'io' | 'in' | 'out' | 'lin';
-
-function ease(e: Ease | undefined, t: number): number {
-  switch (e) {
-    case 'lin':
-      return t;
-    case 'in':
-      return t * t * t;
-    case 'out':
-      return 1 - (1 - t) ** 3;
-    default:
-      return t * t * (3 - 2 * t);
-  }
-}
-
-/** Échantillonne une suite d'images clés : décalage de position, angles, pièce mobile. */
-function sampleKeys(keys: Key[], t: number, out: number[]): void {
-  let i = 1;
-  while (i < keys.length - 1 && keys[i][0] < t) i++;
-  const a = keys[i - 1];
-  const b = keys[i];
-  const u = ease(b[8], clamp((t - a[0]) / Math.max(1e-6, b[0] - a[0]), 0, 1));
-  for (let k = 1; k <= 7; k++) {
-    const va = a[k] as number;
-    out[k - 1] = va + ((b[k] as number) - va) * u;
-  }
-}
-
 // Rechargements (t normalisé sur la durée de WEAPONS[w].reload).
-const RELOAD_KEYS: Partial<Record<Weapon, Key[]>> = {
-  // Webley : on incline le revolver, on bascule le canon, canon en l'air (les douilles
-  // tombent), on présente les chambres, on recharge, on referme d'un coup sec.
-  [Weapon.PISTOL]: [
-    [0, 0, 0, 0, 0, 0, 0, 0],
-    [0.1, -0.06, 0.035, 0.0, 0.25, 0.45, -0.25, 0, 'io'],
-    [0.16, -0.06, 0.035, 0.0, 0.2, 0.47, -0.27, -1.25, 'out'],
-    [0.3, -0.05, 0.075, 0.02, 1.2, 0.35, -0.2, -1.25, 'io'],
-    [0.42, -0.02, -0.01, 0.0, -0.1, 0.3, 1.05, -1.2, 'io'],
-    [0.78, -0.02, -0.005, 0.0, -0.08, 0.28, 1.0, -1.2, 'io'],
-    [0.85, -0.04, 0.03, 0.0, 0.3, 0.3, -0.1, 0, 'out'],
-    [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
-  ],
-  // Fusil : on incline l'arme, les canons basculent (la main gauche suit), éjection, deux
-  // cartouches, fermeture d'un coup de poignet.
-  [Weapon.SHOTGUN]: [
-    [0, 0, 0, 0, 0, 0, 0, 0],
-    [0.1, -0.05, 0.02, 0.03, 0.02, 0.3, 0.45, 0, 'io'],
-    [0.17, -0.055, 0.025, 0.03, -0.02, 0.32, 0.48, -0.5, 'out'],
-    [0.26, -0.06, 0.03, 0.04, -0.08, 0.34, 0.52, -0.52, 'io'],
-    [0.74, -0.06, 0.03, 0.04, -0.06, 0.34, 0.5, -0.52, 'io'],
-    [0.8, -0.03, 0.02, 0.02, 0.15, 0.24, 0.3, 0, 'out'],
-    [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
-  ],
-  // Martini-Henry : on penche la carabine, levier abaissé (le bloc tombe, la douille est
-  // éjectée), on glisse la cartouche, levier relevé.
-  [Weapon.RIFLE]: [
-    [0, 0, 0, 0, 0, 0, 0, 0],
-    [0.12, -0.035, 0.03, 0.01, 0.12, 0.28, -0.85, 0, 'io'],
-    [0.2, -0.035, 0.03, 0.01, 0.1, 0.28, -0.9, 0.8, 'out'],
-    [0.3, -0.04, 0.025, 0.02, 0.05, 0.3, -0.92, 0.8, 'io'],
-    [0.7, -0.04, 0.025, 0.02, 0.06, 0.3, -0.9, 0.8, 'io'],
-    [0.78, -0.02, 0.01, 0.01, 0.05, 0.2, -0.45, 0, 'out'],
-    [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
-  ],
+const RELOADS: Partial<Record<Weapon, AnimDef>> = {
+  // Vektor : on incline le pistolet, le chargeur vide tombe (culasse bloquée en arrière), la
+  // main gauche glisse un chargeur plein, une claque, puis la culasse revient d'un coup sec.
+  [Weapon.PISTOL]: {
+    keys: [
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.12, -0.07, 0.05, 0.02, 0.14, 0.42, -0.55, 'io'],
+      [0.2, -0.07, 0.056, 0.02, 0.2, 0.42, -0.55, 'out'],
+      [0.55, -0.07, 0.05, 0.02, 0.16, 0.4, -0.55, 'io'],
+      [0.6, -0.07, 0.042, 0.02, 0.12, 0.4, -0.55, 'out'],
+      [0.78, -0.05, 0.045, 0.02, 0.18, 0.3, -0.3, 'io'],
+      [0.84, -0.02, 0.055, 0.0, 0.36, 0.14, -0.08, 'out'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
+    ],
+    parts: {
+      slide: [
+        [0, 0],
+        [0.07, VM.PISTOL_SLIDE_TRAVEL, 'out'],
+        [0.8, VM.PISTOL_SLIDE_TRAVEL],
+        [0.83, 0, 'in'],
+        [1, 0],
+      ],
+      mag: [
+        [0, 0],
+        [0.15, 0],
+        [0.23, 0.09, 'in'],
+        [0.24, 0],
+        [1, 0],
+      ],
+    },
+    hidden: { mag: [[0.23, 0.57]] },
+    helper: {
+      pose: 'fist',
+      item: 'mag',
+      handPos: [0.5 * S, -5 * S, 1 * S],
+      handRot: [0, 0, PI],
+      keys: [
+        [0, -0.11, -0.2, 0.09, gR, 0, 0, 0],
+        [0.25, -0.11, -0.2, 0.09, gR + 0.4, 0, 0.3, 2],
+        [0.46, 0, -0.06 * PISTOL_AXIS[1], -0.06 * PISTOL_AXIS[2], gR, 0, 0, 2, 'out'],
+        [0.56, 0, 0, 0, gR, 0, 0, 2, 'in'],
+        [0.57, 0, 0, 0, gR, 0, 0, 1],
+        [0.61, 0, 0.005, -0.001, gR, 0, 0, 1, 'out'],
+        [0.74, -0.1, -0.18, 0.08, gR + 0.3, 0, 0.3, 1, 'in'],
+        [0.75, -0.1, -0.18, 0.08, gR, 0, 0, 0],
+        [1, -0.1, -0.18, 0.08, gR, 0, 0, 0],
+      ],
+    },
+    ejects: [{ at: 0.22, kind: 'mag', part: 'mag', from: [0, 0, 0], vel: [0.1, -1.3, 0.25] }],
+    jolts: [0.57, 0.61],
+  },
+  // Wasp : on penche l'arme, la main gauche arrache le chargeur supérieur et le jette, en
+  // apporte un plein, le claque en place, puis tire le levier d'armement.
+  [Weapon.SMG]: {
+    keys: [
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.12, -0.05, 0.015, 0.03, 0.1, 0.28, 0.3, 'io'],
+      [0.3, -0.05, 0.02, 0.03, 0.14, 0.28, 0.32, 'out'],
+      [0.6, -0.05, 0.015, 0.03, 0.1, 0.28, 0.3, 'io'],
+      [0.64, -0.05, 0.008, 0.03, 0.06, 0.28, 0.3, 'out'],
+      [0.74, -0.04, 0.02, 0.02, 0.08, 0.32, 0.2, 'io'],
+      [0.8, -0.045, 0.018, 0.025, 0.04, 0.34, 0.18, 'out'],
+      [0.86, -0.03, 0.03, 0.015, 0.12, 0.26, 0.12, 'out'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
+    ],
+    parts: {
+      mag: [
+        [0, 0],
+        [0.2, 0],
+        [0.3, 0.06, 'out'],
+        [0.31, 0],
+        [1, 0],
+      ],
+      handle: [
+        [0, 0],
+        [0.74, 0],
+        [0.8, 4 * S, 'out'],
+        [0.83, 0, 'in'],
+        [1, 0],
+      ],
+    },
+    hidden: { mag: [[0.3, 0.62]] },
+    helper: {
+      pose: 'fist',
+      item: 'smgMag',
+      handPos: [-2.5 * S, 0, 1 * S],
+      handRot: [0, 0, PI / 2],
+      keys: [
+        [0, -0.13, -0.14, 0.1, 0, 0, 0, 0],
+        [0.15, -0.13, -0.14, 0.1, 0, 0, 0, 0],
+        [0.16, -0.05, 0.02, -0.02, 0, 0, 0, 1],
+        [0.2, ...SMG_MAG_C, 0, 0, 0, 1, 'out'],
+        [0.3, SMG_MAG_C[0], SMG_MAG_C[1] + 0.06 * 0.8, SMG_MAG_C[2] + 0.06 * 0.6, 0, 0, 0, 1, 'out'],
+        [0.42, -0.14, -0.15, 0.1, 0.4, 0, 0.3, 1, 'in'],
+        [0.43, -0.14, -0.15, 0.1, 0.4, 0, 0.3, 2],
+        [0.55, SMG_MAG_C[0], SMG_MAG_C[1] + 0.03, SMG_MAG_C[2] + 0.02, 0, 0, 0, 2, 'out'],
+        [0.61, ...SMG_MAG_C, 0, 0, 0, 2, 'in'],
+        [0.62, ...SMG_MAG_C, 0, 0, 0, 1],
+        [0.65, SMG_MAG_C[0], SMG_MAG_C[1] - 0.004, SMG_MAG_C[2], 0, 0, 0, 1, 'out'],
+        [0.74, -2.2 * S, 3 * S, 1 * S, 0, 0, 0, 1, 'io'],
+        [0.8, -2.2 * S, 3 * S, 5 * S, 0, 0, 0, 1, 'out'],
+        [0.84, -0.06, -0.02, 0.04, 0.2, 0, 0, 1, 'io'],
+        [0.9, -0.13, -0.14, 0.1, 0.3, 0, 0, 1, 'in'],
+        [0.91, -0.13, -0.14, 0.1, 0, 0, 0, 0],
+        [1, -0.13, -0.14, 0.1, 0, 0, 0, 0],
+      ],
+    },
+    freeSupport: [0.15, 0.91],
+    ejects: [{ at: 0.31, kind: 'smgMag', part: 'mag', from: [SMG_MAG_C[0], SMG_MAG_C[1] + 0.05, SMG_MAG_C[2] + 0.035], vel: [-0.9, 0.6, 0.5] }],
+    jolts: [0.62, 0.65, 0.83],
+  },
+  // Hammer : on couche le fusil pour présenter la fenêtre de chargement, quatre cartouches,
+  // la main gauche revient sur la pompe et arme d'un coup sec.
+  [Weapon.SHOTGUN]: {
+    keys: [
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.1, -0.06, 0.04, 0.04, 0.12, 0.34, -0.72, 'io'],
+      [0.8, -0.06, 0.04, 0.04, 0.1, 0.32, -0.7, 'io'],
+      [0.86, -0.02, 0.01, 0.02, 0.04, 0.12, -0.15, 'io'],
+      [0.92, -0.015, 0.0, 0.03, 0.08, 0.1, -0.1, 'out'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
+    ],
+    parts: {
+      pump: [
+        [0, 0],
+        [0.87, 0],
+        [0.91, VM.SHOTGUN_PUMP_TRAVEL, 'out'],
+        [0.96, 0, 'in'],
+        [1, 0],
+      ],
+    },
+    helper: { pose: 'fist', item: 'shell', handPos: [0, -2.5 * S, 2 * S], handRot: [PI / 2, 0, 0], keys: shotgunHelperKeys() },
+    freeSupport: [0.11, 0.84],
+    jolts: [0.24, 0.41, 0.58, 0.75, 0.96],
+  },
+  // Longbow : on penche l'arme, la cellule vide tombe, la main gauche en glisse une neuve,
+  // une claque, puis les bobines se chargent une à une.
+  [Weapon.RIFLE]: {
+    keys: [
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.12, -0.04, 0.035, 0.03, 0.12, 0.28, -0.62, 'io'],
+      [0.22, -0.04, 0.04, 0.03, 0.15, 0.28, -0.64, 'out'],
+      [0.56, -0.04, 0.035, 0.03, 0.12, 0.28, -0.62, 'io'],
+      [0.6, -0.04, 0.028, 0.03, 0.09, 0.28, -0.62, 'out'],
+      [0.72, -0.02, 0.015, 0.015, 0.06, 0.14, -0.25, 'io'],
+      [0.9, -0.01, 0.01, 0.01, 0.04, 0.06, -0.08, 'io'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
+    ],
+    parts: {
+      cell: [
+        [0, 0],
+        [0.15, 0],
+        [0.23, 0.07, 'in'],
+        [0.24, 0],
+        [1, 0],
+      ],
+    },
+    hidden: { cell: [[0.23, 0.57]] },
+    helper: {
+      pose: 'fist',
+      item: 'cell',
+      handPos: [0.5 * S, -5 * S, 1 * S],
+      handRot: [0, 0, PI],
+      keys: [
+        [0, -0.12, -0.2, 0.05, 0, 0, 0, 0],
+        [0.13, -0.12, -0.2, 0.05, 0, 0, 0, 0],
+        [0.14, -0.06, -0.07, -0.12, 0, 0, 0, 1],
+        [0.26, -0.12, -0.2, 0.06, 0.4, 0, 0.3, 1, 'io'],
+        [0.27, -0.12, -0.2, 0.06, 0.4, 0, 0.3, 2],
+        [0.47, RIFLE_CELL_C[0], RIFLE_CELL_C[1] - 0.06, RIFLE_CELL_C[2], 0, 0, 0, 2, 'out'],
+        [0.56, ...RIFLE_CELL_C, 0, 0, 0, 2, 'in'],
+        [0.57, ...RIFLE_CELL_C, 0, 0, 0, 1],
+        [0.61, RIFLE_CELL_C[0], RIFLE_CELL_C[1] + 0.005, RIFLE_CELL_C[2], 0, 0, 0, 1, 'out'],
+        [0.7, -0.02, -0.05, -0.3, 0, 0, 0, 1, 'io'],
+        [0.71, -0.02, -0.05, -0.3, 0, 0, 0, 0],
+        [1, -0.02, -0.05, -0.3, 0, 0, 0, 0],
+      ],
+    },
+    freeSupport: [0.13, 0.71],
+    ejects: [{ at: 0.22, kind: 'cellSpent', part: 'cell', from: RIFLE_CELL_C, vel: [0.15, -1.3, 0.3] }],
+    jolts: [0.57, 0.61],
+  },
 };
 
 /** Coups : durée (s) et images clés (t normalisé). */
@@ -253,33 +551,33 @@ const SWING: Partial<Record<Weapon, { dur: number; keys: Key[] }>> = {
   [Weapon.KNIFE]: {
     dur: 0.4,
     keys: [
-      [0, 0, 0, 0, 0, 0, 0, 0],
-      [0.16, 0.05, 0.1, 0.05, 0.55, -0.35, -0.65, 0, 'out'],
-      [0.42, -0.24, -0.09, -0.12, -0.45, 0.95, 0.95, 0, 'in'],
-      [0.56, -0.26, -0.11, -0.1, -0.5, 1.0, 1.0, 0, 'out'],
-      [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.16, 0.05, 0.1, 0.05, 0.55, -0.35, -0.65, 'out'],
+      [0.42, -0.24, -0.09, -0.12, -0.45, 0.95, 0.95, 'in'],
+      [0.56, -0.26, -0.11, -0.1, -0.5, 1.0, 1.0, 'out'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
     ],
   },
   // coup de matraque par le haut : levée derrière l'épaule, abattue au centre
   [Weapon.CLUB]: {
     dur: 0.52,
     keys: [
-      [0, 0, 0, 0, 0, 0, 0, 0],
-      [0.24, 0.04, 0.075, 0.03, 1.05, -0.12, -0.2, 0, 'out'],
-      [0.44, -0.09, -0.05, -0.15, -1.15, 0.28, 0.18, 0, 'in'],
-      [0.58, -0.09, -0.06, -0.14, -1.2, 0.3, 0.2, 0, 'out'],
-      [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.24, 0.04, 0.075, 0.03, 1.05, -0.12, -0.2, 'out'],
+      [0.44, -0.09, -0.05, -0.15, -1.15, 0.28, 0.18, 'in'],
+      [0.58, -0.09, -0.06, -0.14, -1.2, 0.3, 0.2, 'out'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
     ],
   },
   // direct : le poing part vers le centre de l'écran en tournant
   [Weapon.FISTS]: {
     dur: 0.34,
     keys: [
-      [0, 0, 0, 0, 0, 0, 0, 0],
-      [0.12, 0.012, -0.012, 0.03, 0.05, 0, 0.05, 0, 'out'],
-      [0.36, -0.07, 0.06, -0.15, 0.2, 0.22, 0.5, 0, 'out'],
-      [0.5, -0.07, 0.06, -0.145, 0.2, 0.22, 0.5, 0, 'lin'],
-      [1, 0, 0, 0, 0, 0, 0, 0, 'io'],
+      [0, 0, 0, 0, 0, 0, 0],
+      [0.12, 0.012, -0.012, 0.03, 0.05, 0, 0.05, 'out'],
+      [0.36, -0.07, 0.06, -0.15, 0.2, 0.22, 0.5, 'out'],
+      [0.5, -0.07, 0.06, -0.145, 0.2, 0.22, 0.5, 'lin'],
+      [1, 0, 0, 0, 0, 0, 0, 'io'],
     ],
   },
 };
@@ -305,7 +603,7 @@ class Spring {
   }
 }
 
-/** Douille éjectée (vit dans le repère de la caméra). */
+/** Douille, chargeur ou cellule éjectés (vivent dans le repère de la caméra). */
 interface Casing {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
@@ -318,6 +616,8 @@ const smooth01 = (t: number) => {
   return x * x * (3 - 2 * x);
 };
 
+const CASING_KINDS: VM.CasingKind[] = ['pistol', 'shell', 'mag', 'smgMag', 'cell', 'cellSpent'];
+
 export class Viewmodel {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(VM_FOV, 1, 0.01, 10);
@@ -327,7 +627,7 @@ export class Viewmodel {
   private rigs = new Map<Weapon, Rig>();
   private fistL: Rig;
   private armGeos: THREE.BufferGeometry[] = [];
-  private casingGeo: Record<'pistol' | 'rifle' | 'shell', THREE.BufferGeometry>;
+  private casingGeo = {} as Record<VM.CasingKind, THREE.BufferGeometry>;
   private casings: Casing[] = [];
   private look = '';
   private shown: Weapon = Weapon.PISTOL;
@@ -352,12 +652,17 @@ export class Viewmodel {
   private swayPitch = new Spring(120, 15);
   private kickPos = new Spring(520, 30);
   private kickRot = new Spring(210, 15);
+  private kickYaw = new Spring(260, 18);
   private kickRoll = 0;
   private swingT = -1;
   private swingDur = 0.4;
   private punchLeft = false;
   private reloadPhase = -1;
   private reloadEvents = new Set<string>();
+  /** Instant (horloge de la vue) du dernier tir et avancement du cycle (culasse, pompe). */
+  private shotT = -10;
+  private cycleT = -1;
+  private cycleEvents = new Set<string>();
   // --- temporaires
   private P = new THREE.Vector3();
   private Q = new THREE.Quaternion();
@@ -367,7 +672,8 @@ export class Viewmodel {
   private v2 = new THREE.Vector3();
   private up = new THREE.Vector3();
   private m4 = new THREE.Matrix4();
-  private keyOut = [0, 0, 0, 0, 0, 0, 0];
+  private mA = new THREE.Matrix4();
+  private keyOut = [0, 0, 0, 0, 0, 0, 0, 0];
   private mainFov = 75;
 
   constructor() {
@@ -375,13 +681,9 @@ export class Viewmodel {
     this.camera.add(this.root);
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
+    for (const k of CASING_KINDS) this.casingGeo[k] = meshModel(VM.casingModel(k));
     this.buildWeapons();
     this.fistL = this.makeRig(FIST_L, []);
-    this.casingGeo = {
-      pistol: meshModel(VM.casingModel('pistol')),
-      rifle: meshModel(VM.casingModel('rifle')),
-      shell: meshModel(VM.casingModel('shell')),
-    };
     this.setLook('dadou', {});
   }
 
@@ -393,49 +695,61 @@ export class Viewmodel {
     return m;
   }
 
-  private makeRig(def: RigDef, parts: THREE.Object3D[], moving: THREE.Group | null = null, rims: THREE.Mesh | null = null): Rig {
+  private makeRig(def: RigDef, statics: THREE.Object3D[], parts: Partial<Record<PartName, THREE.Object3D>> = {}): Rig {
     const root = new THREE.Group();
     root.visible = false;
-    for (const p of parts) root.add(p);
-    if (moving) root.add(moving);
+    for (const p of statics) root.add(p);
+    const map = new Map<PartName, PartObj>();
+    for (const pd of def.parts ?? []) {
+      const obj = parts[pd.name];
+      if (!obj) continue;
+      obj.position.set(...pd.pos);
+      obj.rotation.set(...pd.rot);
+      if (pd.scale) obj.scale.setScalar(pd.scale);
+      root.add(obj);
+      map.set(pd.name, { obj, base: new THREE.Vector3(...pd.pos), dir: new THREE.Vector3(...pd.dir).normalize() });
+    }
     this.root.add(root);
-    return { def, root, moving, rims, arms: [], forearms: [], helper: null };
+    return { def, root, parts: map, rings: null, arms: [], forearms: [], support: [], helper: null };
   }
 
   private buildWeapons(): void {
-    // revolver : carcasse, crosse (repère main), ensemble basculant
+    const M = (m: Parameters<typeof meshModel>[0]) => this.mesh(meshModel(m));
+    const inGrip = (m: Parameters<typeof meshModel>[0], rot: V3) => {
+      const o = M(m);
+      o.rotation.set(...rot);
+      return o;
+    };
     {
-      const r = VM.revolverModels();
-      const frame = this.mesh(meshModel(r.frame));
-      const grip = this.mesh(meshModel(r.grip));
-      grip.rotation.set(...VM.REVOLVER.gripRot);
-      const moving = new THREE.Group();
-      moving.position.set(...VM.REVOLVER.pivot!);
-      moving.add(this.mesh(meshModel(r.barrel)));
-      const rims = this.mesh(meshModel(r.rims));
-      rims.visible = false;
-      moving.add(rims);
-      this.rigs.set(Weapon.PISTOL, this.makeRig(RIGS[Weapon.PISTOL], [frame, grip], moving, rims));
+      const p = VM.pistolModels();
+      this.rigs.set(Weapon.PISTOL, this.makeRig(RIGS[Weapon.PISTOL], [M(p.frame), inGrip(p.grip, VM.PISTOL.gripRot)], { slide: M(p.slide), mag: M(p.mag) }));
     }
     {
-      const s = VM.shotgunModels();
-      const moving = new THREE.Group();
-      moving.position.set(...VM.SHOTGUN.pivot!);
-      moving.add(this.mesh(meshModel(s.barrels)));
-      const shells = this.mesh(meshModel(s.shells));
-      shells.visible = false;
-      moving.add(shells);
-      this.rigs.set(Weapon.SHOTGUN, this.makeRig(RIGS[Weapon.SHOTGUN], [this.mesh(meshModel(s.body))], moving, shells));
+      const p = VM.smgModels();
+      const fg = M(p.foregrip);
+      fg.position.set(...VM.SMG.support!);
+      fg.rotation.set(...VM.SMG.supportRot);
+      const ret = M(VM.reticleModel(SLOT.NEON_AMBER));
+      ret.position.set(...VM.SMG_RETICLE);
+      this.rigs.set(Weapon.SMG, this.makeRig(RIGS[Weapon.SMG], [M(p.body), inGrip(p.grip, VM.SMG.gripRot), fg, ret], { mag: M(p.mag), handle: M(p.handle) }));
     }
     {
-      const r = VM.rifleModels();
-      const moving = new THREE.Group();
-      moving.position.set(...VM.RIFLE.pivot!);
-      moving.add(this.mesh(meshModel(r.lever)));
-      this.rigs.set(Weapon.RIFLE, this.makeRig(RIGS[Weapon.RIFLE], [this.mesh(meshModel(r.body))], moving));
+      const p = VM.shotgunModels();
+      this.rigs.set(Weapon.SHOTGUN, this.makeRig(RIGS[Weapon.SHOTGUN], [M(p.body), inGrip(p.grip, VM.SHOTGUN.gripRot)], { pump: M(p.pump) }));
     }
-    this.rigs.set(Weapon.KNIFE, this.makeRig(RIGS[Weapon.KNIFE], [this.mesh(meshModel(VM.knifeModel()))]));
-    this.rigs.set(Weapon.CLUB, this.makeRig(RIGS[Weapon.CLUB], [this.mesh(meshModel(VM.clubModel()))]));
+    {
+      const p = VM.rifleModels();
+      const ret = M(VM.reticleModel(SLOT.NEON_CYAN));
+      ret.position.set(...VM.RIFLE_RETICLE);
+      const rig = this.makeRig(RIGS[Weapon.RIFLE], [M(p.body), inGrip(p.grip, VM.RIFLE.gripRot), ret], { cell: M(p.cell) });
+      const dark = p.rings.map((m) => M(m));
+      const lit = p.ringsLit.map((m) => M(m));
+      for (const o of [...dark, ...lit]) rig.root.add(o);
+      rig.rings = { dark, lit };
+      this.rigs.set(Weapon.RIFLE, rig);
+    }
+    this.rigs.set(Weapon.KNIFE, this.makeRig(RIGS[Weapon.KNIFE], [M(VM.knifeModel())]));
+    this.rigs.set(Weapon.CLUB, this.makeRig(RIGS[Weapon.CLUB], [M(VM.clubModel())]));
     this.rigs.set(Weapon.FISTS, this.makeRig(RIGS[Weapon.FISTS], []));
   }
 
@@ -478,9 +792,10 @@ export class Viewmodel {
       for (const o of rig.arms) o.removeFromParent();
       rig.arms = [];
       rig.forearms = [];
+      rig.support = [];
       for (const slot of rig.def.hands) {
         const a = arm(slot.side, slot.pose);
-        const parent = slot.onPivot && rig.moving ? rig.moving : rig.root;
+        const parent = (slot.part && rig.parts.get(slot.part)?.obj) || rig.root;
         const hand = this.mesh(a.handGeo);
         hand.position.set(...slot.pos);
         hand.rotation.set(...slot.rot);
@@ -488,26 +803,42 @@ export class Viewmodel {
         hand.scale.setScalar(1.015);
         const fore = this.mesh(a.foreGeo);
         fore.position.set(...a.wrist).applyEuler(hand.rotation).add(hand.position);
-        rig.forearms.push({ mesh: fore, slot, onMoving: parent !== rig.root });
+        // une main portée par une pièce mobile garde sa place même quand la pièce coulisse
+        if (parent !== rig.root) {
+          const pd = rig.parts.get(slot.part!)!;
+          hand.position.sub(pd.base);
+          fore.position.sub(pd.base);
+        }
+        rig.forearms.push({ mesh: fore, slot, parent });
         parent.add(hand, fore);
         rig.arms.push(hand, fore);
+        if (slot.support) rig.support.push(hand, fore);
       }
       rig.helper = null;
-      const hd = rig.def.helper;
+      const anim = RELOADS[RIGS_INV.get(rig.def) ?? Weapon.FISTS];
+      const hd = anim?.helper;
       if (hd) {
         const a = arm('L', hd.pose);
-        const hand = new THREE.Group();
+        const group = new THREE.Group();
         const hm = this.mesh(a.handGeo);
+        hm.position.set(...hd.handPos);
+        hm.rotation.set(...hd.handRot);
         hm.scale.setScalar(1.015);
-        const cart = this.mesh(this.casingGeo[hd.cartridge]);
-        cart.position.set(0.5 * S, 0, -3.5 * S);
-        hand.add(hm, cart);
+        group.add(hm);
+        let item: THREE.Mesh | null = null;
+        if (hd.item) {
+          item = this.mesh(this.casingGeo[hd.item]);
+          item.scale.setScalar(0.99);
+          group.add(item);
+        }
         const fore = this.mesh(a.foreGeo);
-        hand.visible = fore.visible = false;
-        rig.root.add(hand, fore);
-        rig.arms.push(hand, fore);
-        rig.helper = { hand, fore, wrist: new THREE.Vector3(...a.wrist) };
-        rig.forearms.push({ mesh: fore, slot: { pose: hd.pose, side: 'L', pos: [0, 0, 0], rot: [0, 0, 0], roll: 0 }, onMoving: false });
+        fore.position.set(...a.wrist).applyEuler(hm.rotation).add(hm.position);
+        group.add(fore);
+        group.visible = false;
+        rig.root.add(group);
+        rig.arms.push(group);
+        rig.helper = { group, item, fore, anim: anim! };
+        rig.forearms.push({ mesh: fore, slot: { pose: hd.pose, side: 'L', pos: [0, 0, 0], rot: [0, 0, 0], roll: 0 }, parent: group });
       }
     }
   }
@@ -516,11 +847,18 @@ export class Viewmodel {
 
   kick(n: number): void {
     const w = this.shown;
-    const k = w === Weapon.PISTOL ? 1 : 1.25;
+    const rc = RIGS[w].recoil;
+    const k = w === Weapon.PISTOL ? 1 : w === Weapon.SMG ? 0.8 : 1.25;
     // impulsions : la crête du ressort vaut ≈ 0,6 × n (recul arrière et relevé du canon)
     this.kickPos.v += 30 * n;
     this.kickRot.v += 16 * n * k;
     this.kickRoll = (Math.random() - 0.5) * 2;
+    if (rc.jitter) this.kickYaw.v += (Math.random() - 0.5) * 2 * rc.jitter * 60;
+    this.shotT = this.t;
+    if (RIGS[w].cycle) {
+      this.cycleT = 0;
+      this.cycleEvents.clear();
+    }
   }
 
   swing(): void {
@@ -545,10 +883,11 @@ export class Viewmodel {
         this.shown = this.target;
         this.swingT = -1;
         this.reloadPhase = -1;
+        this.cycleT = -1;
       }
     } else this.down = Math.max(0, this.down - dt / 0.26);
     const w = this.shown;
-    const rig = this.rigs.get(w)!;
+    const rig = this.rigs.get(w) ?? this.rigs.get(Weapon.FISTS)!;
     for (const [k, r] of this.rigs) r.root.visible = k === w;
     this.fistL.root.visible = w === Weapon.FISTS;
     const def = rig.def;
@@ -585,9 +924,20 @@ export class Viewmodel {
     this.swayYaw.step(dt, clamp(dy * inv * 0.016, -0.075, 0.075));
     this.swayPitch.step(dt, clamp(dp * inv * 0.016, -0.06, 0.06));
 
-    // --- recul
+    // --- recul et cycle de tir
     this.kickPos.step(dt);
     this.kickRot.step(dt);
+    this.kickYaw.step(dt);
+    const cyc = def.cycle;
+    let cycleT = -1;
+    if (cyc && this.cycleT >= 0) {
+      const el = this.t - this.shotT - cyc.delay;
+      if (el >= 0) cycleT = el / cyc.dur;
+      if (cycleT >= 1) {
+        cycleT = -1;
+        this.cycleT = -1;
+      }
+    }
 
     // --- rechargement
     const ranged = WEAPONS[w].ranged;
@@ -598,6 +948,7 @@ export class Viewmodel {
       reloadT = clamp(1 - (weapons.reloadUntil - now) / dur, 0, 1);
       if (this.reloadPhase < 0 || reloadT < this.reloadPhase) this.reloadEvents.clear();
       this.reloadPhase = reloadT;
+      cycleT = -1;
     } else this.reloadPhase = -1;
 
     // --- coups
@@ -617,18 +968,18 @@ export class Viewmodel {
     const sp = smooth01(this.sprintLin);
 
     // ------------------------------------------------ pose de l'arme principale
-    this.composePose(rig, a, sp, reloadT, false);
-    if (w === Weapon.FISTS) this.composePose(this.fistL, 0, sp, -1, true);
+    this.composePose(rig, a, sp, reloadT, cycleT, false);
+    if (w === Weapon.FISTS) this.composePose(this.fistL, 0, sp, -1, -1, true);
 
     // --- pièces mobiles, bras, douilles
-    this.updateParts(rig, w, reloadT);
+    this.updateParts(rig, w, reloadT, cycleT);
     this.solveArms(rig);
     if (w === Weapon.FISTS) this.solveArms(this.fistL);
     this.updateCasings(dt);
   }
 
   /** Calcule la pose d'une arme (ou d'un poing) dans le repère de la caméra. */
-  private composePose(rig: Rig, a: number, sp: number, reloadT: number, isLeftFist: boolean): void {
+  private composePose(rig: Rig, a: number, sp: number, reloadT: number, cycleT: number, isLeftFist: boolean): void {
     const def = rig.def;
     const w = this.shown;
     const hip = def.hip;
@@ -706,25 +1057,28 @@ export class Viewmodel {
     px += dn * 0.05;
     rx -= dn * 0.75;
     rz += dn * 0.2;
-    // --- rechargement (images clés)
+    // --- rechargement et cycle de tir (images clés)
     const ko = this.keyOut;
-    const reloadKeys = RELOAD_KEYS[w];
-    if (reloadT >= 0 && reloadKeys) {
-      sampleKeys(reloadKeys, reloadT, ko);
-      px += ko[0];
-      py += ko[1];
-      pz += ko[2];
-      rx += ko[3];
-      ry += ko[4];
-      rz += ko[5];
-      // petites secousses quand on glisse les cartouches
-      const loads = w === Weapon.PISTOL ? [0.48, 0.53, 0.58, 0.63, 0.68, 0.73] : w === Weapon.SHOTGUN ? [0.45, 0.6] : [0.5];
-      for (const lt of loads) {
-        const d = (reloadT - lt) / 0.035;
+    const anim = !isLeftFist && reloadT >= 0 ? RELOADS[w] : undefined;
+    const animT = anim ? reloadT : cycleT;
+    const cur = anim ?? (cycleT >= 0 && !isLeftFist ? def.cycle?.anim : undefined);
+    if (cur && animT >= 0) {
+      sampleN(cur.keys, 6, animT, ko);
+      // la course de la pompe est atténuée en visée (le tireur garde l'arme à l'épaule)
+      const k = anim ? 1 : 1 - a * 0.6;
+      px += ko[0] * k;
+      py += ko[1] * k;
+      pz += ko[2] * k;
+      rx += ko[3] * k;
+      ry += ko[4] * k;
+      rz += ko[5] * k;
+      // petites secousses quand on insère chargeur, cartouche ou cellule
+      for (const lt of cur.jolts ?? []) {
+        const d = (animT - lt) / 0.03;
         if (d > -1 && d < 1) {
-          const k = Math.cos(d * Math.PI * 0.5);
-          py -= 0.007 * k;
-          rx -= 0.05 * k;
+          const kk = Math.cos(d * Math.PI * 0.5);
+          py -= 0.006 * kk;
+          rx -= 0.045 * kk;
         }
       }
     }
@@ -732,7 +1086,7 @@ export class Viewmodel {
     const sw = SWING[w];
     const activeSwing = this.swingT >= 0 && sw && (!fists || isLeftFist === this.punchLeft);
     if (activeSwing && sw) {
-      sampleKeys(sw.keys, this.swingT, ko);
+      sampleN(sw.keys, 6, this.swingT, ko);
       const mir = isLeftFist ? -1 : 1;
       px += ko[0] * mir;
       py += ko[1];
@@ -755,7 +1109,7 @@ export class Viewmodel {
       const ak = 1 - a * 0.45;
       const climb = this.kickRot.x * rc.climb * ak;
       const roll = this.kickRot.x * rc.roll * this.kickRoll;
-      this.q2.setFromEuler(this.e.set(climb, roll * 0.5, roll, 'YXZ'));
+      this.q2.setFromEuler(this.e.set(climb, roll * 0.5 + this.kickYaw.x, roll, 'YXZ'));
       // p' = p + q·pivot − q·q2·pivot
       const pv = this.v.set(def.pivot[0], def.pivot[1], def.pivot[2]);
       const before = this.v2.copy(pv).applyQuaternion(this.Q);
@@ -770,6 +1124,16 @@ export class Viewmodel {
     rig.root.quaternion.copy(this.Q);
   }
 
+  /** Matrice d'un objet de l'arme dans le repère de la caméra (la racine de la vue est l'identité). */
+  private toCamera(obj: THREE.Object3D, out: THREE.Matrix4): THREE.Matrix4 {
+    out.identity();
+    for (let o: THREE.Object3D | null = obj; o && o !== this.root; o = o.parent) {
+      o.updateMatrix();
+      out.premultiply(o.matrix);
+    }
+    return out;
+  }
+
   /**
    * Cinématique inverse à deux segments (épaule fixe dans le repère de la caméra, bras et
    * avant-bras de longueur fixe, coude rejeté vers le bas et l'extérieur) : seul l'avant-bras
@@ -779,16 +1143,11 @@ export class Viewmodel {
     const Lu = 0.3;
     const Lf = VM.FOREARM_LENGTH;
     for (const f of rig.forearms) {
-      if (!f.mesh.visible) continue;
+      if (!f.mesh.visible || !f.parent.visible) continue;
       const left = f.slot.side === 'L';
-      // repère (dans la caméra) du porteur de l'avant-bras : l'arme ou sa pièce mobile
-      const qp = this.q2.copy(rig.root.quaternion);
-      const tp = this.P.copy(rig.root.position);
-      if (f.onMoving && rig.moving) {
-        tp.add(this.v.copy(rig.moving.position).applyQuaternion(qp));
-        qp.multiply(rig.moving.quaternion);
-      }
-      const wrist = this.v.copy(f.mesh.position).applyQuaternion(qp).add(tp);
+      // repère (dans la caméra) du porteur de l'avant-bras : l'arme, une pièce mobile, la main d'appoint
+      const mp = this.toCamera(f.parent, this.mA);
+      const wrist = this.v.copy(f.mesh.position).applyMatrix4(mp);
       const sh = f.slot.shoulder ?? (left ? SHOULDER_L : SHOULDER_R);
       const po = f.slot.pole ?? (left ? POLE_L : POLE_R);
       const D = this.v2.set(wrist.x - sh[0], wrist.y - sh[1], wrist.z - sh[2]);
@@ -803,86 +1162,88 @@ export class Viewmodel {
       const ey = sh[1] + Lu * (cosA * D.y + sinA * pv.y);
       const ez = sh[2] + Lu * (cosA * D.z + sinA * pv.z);
       // direction poignet → coude, puis « haut » de la caméra, exprimés dans le repère du porteur
-      const qi = qp.invert();
+      const qi = this.q2.setFromRotationMatrix(this.m4.extractRotation(mp)).invert();
       const dir = this.v2.set(ex - wrist.x, ey - wrist.y, ez - wrist.z).applyQuaternion(qi);
       const up = this.up.set(0, 1, 0).applyQuaternion(qi);
       this.armQuat([dir.x, dir.y, dir.z], f.slot.roll, f.mesh.quaternion, up);
     }
   }
 
-  /** Pièces mobiles (bascule, levier) et éjection des douilles selon l'avancement du rechargement. */
-  private updateParts(rig: Rig, w: Weapon, reloadT: number): void {
-    let ang = 0;
-    if (reloadT >= 0 && RELOAD_KEYS[w]) {
-      sampleKeys(RELOAD_KEYS[w]!, reloadT, this.keyOut);
-      ang = this.keyOut[6];
+  /** Pièces mobiles, main d'appoint, bobines et éjections selon le rechargement ou le cycle de tir. */
+  private updateParts(rig: Rig, w: Weapon, reloadT: number, cycleT: number): void {
+    const reload = reloadT >= 0 ? RELOADS[w] : undefined;
+    const cycle = !reload && cycleT >= 0 ? rig.def.cycle?.anim : undefined;
+    const anim = reload ?? cycle;
+    const at = reload ? reloadT : cycleT;
+    // --- pièces mobiles : décalage le long de leur course, chargeur retiré caché
+    for (const [name, p] of rig.parts) {
+      const track = anim?.parts?.[name];
+      const off = track ? sampleTrack(track, at) : 0;
+      p.obj.position.copy(p.base).addScaledVector(p.dir, off);
+      p.obj.visible = !(reload && inIntervals(reload.hidden?.[name], at));
     }
-    if (rig.moving) rig.moving.rotation.x = ang;
+    // --- main d'appui libérée pendant que la main d'appoint travaille
+    const free = !!reload?.freeSupport && at >= reload.freeSupport[0] && at < reload.freeSupport[1];
+    for (const o of rig.support) o.visible = !free;
+    // --- main d'appoint
     const hp = rig.helper;
-    const hk = rig.def.helper?.keys;
-    if (hp && hk) {
-      const ko = this.keyOut;
-      if (reloadT >= 0) sampleKeys(hk, reloadT, ko);
-      const on = reloadT >= 0 && ko[6] > 0.5;
-      hp.hand.visible = hp.fore.visible = on;
-      if (on) {
-        hp.hand.position.set(ko[0], ko[1], ko[2]);
-        hp.hand.rotation.set(ko[3], ko[4], ko[5]);
-        hp.fore.position.copy(hp.wrist).applyEuler(hp.hand.rotation).add(hp.hand.position);
+    if (hp) {
+      const on = !!reload && reload === hp.anim;
+      const vis = on ? stepVis(hp.anim.helper!.keys, at) : 0;
+      hp.group.visible = vis > 0;
+      if (vis > 0) {
+        const ko = this.keyOut;
+        sampleN(hp.anim.helper!.keys, 6, at, ko, 8);
+        hp.group.position.set(ko[0], ko[1], ko[2]);
+        hp.group.rotation.set(ko[3], ko[4], ko[5]);
+        if (hp.item) hp.item.visible = vis > 1;
       }
     }
-    const ev = this.reloadEvents;
-    const fire = (name: string, at: number, fn: () => void) => {
-      if (reloadT >= at && !ev.has(name)) {
-        ev.add(name);
-        fn();
+    // --- bobines du fusil à rail : éteintes après un tir, rallumées une à une pendant le
+    // temps de recharge ; éteintes pendant l'échange de cellule, puis chargées
+    if (rig.rings) {
+      const n = rig.rings.lit.length;
+      let charge: number;
+      if (reload) charge = at < 0.6 ? 0 : clamp((at - 0.62) / 0.26, 0, 1);
+      else charge = clamp((this.t - this.shotT) / (WEAPONS[Weapon.RIFLE].cooldown * 0.95), 0, 1);
+      const empty = !reload && (this.weaponsRef?.mag.get(Weapon.RIFLE) ?? 1) === 0;
+      for (let i = 0; i < n; i++) {
+        // la bobine arrière s'allume la première
+        const lit = !empty && charge >= (i + 1) / n - 1e-3;
+        rig.rings.lit[i].visible = lit;
+        rig.rings.dark[i].visible = !lit;
       }
-    };
-    if (w === Weapon.PISTOL) {
-      if (rig.rims) rig.rims.visible = reloadT >= 0 && ang < -0.15 && (reloadT < 0.31 || reloadT > 0.47);
-      if (reloadT >= 0) {
-        fire('eject', 0.31, () => {
-          for (let i = 0; i < 6; i++) {
-            const a = (i / 6) * Math.PI * 2;
-            this.spawnCasing(rig, 'pistol', [Math.cos(a) * 0.8 * S, (3 + Math.sin(a) * 0.8) * S, -1 * S], [(Math.random() - 0.5) * 0.25, -0.6 - Math.random() * 0.4, 0.4 + Math.random() * 0.3], true);
-          }
-        });
+    }
+    // --- éjections (douilles, chargeur vide, cellule usée)
+    const events = reload ? this.reloadEvents : this.cycleEvents;
+    for (const [i, ev] of (anim?.ejects ?? []).entries()) {
+      const name = `${i}`;
+      if (at >= ev.at && !events.has(name)) {
+        events.add(name);
+        this.spawnCasing(rig, ev);
       }
-    } else if (w === Weapon.SHOTGUN) {
-      if (rig.rims) rig.rims.visible = reloadT >= 0 && ang < -0.1 && (reloadT < 0.19 || reloadT > 0.44);
-      if (reloadT >= 0) {
-        fire('eject', 0.19, () => {
-          for (const x of [-1, 1]) this.spawnCasing(rig, 'shell', [x * S, 3 * S, -3 * S], [0.15 * x + 0.1, 1.1, 1.3], true);
-        });
-      }
-    } else if (w === Weapon.RIFLE) {
-      if (reloadT >= 0) fire('eject', 0.22, () => this.spawnCasing(rig, 'rifle', [0, 2.5 * S, -9 * S], [0.35, 1.25, 1.1], false));
     }
   }
 
-  private spawnCasing(rig: Rig, kind: 'pistol' | 'rifle' | 'shell', local: V3, vel: V3, onMoving: boolean): void {
-    if (this.casings.length > 16) {
+  private spawnCasing(rig: Rig, ev: EjectDef): void {
+    if (this.casings.length > 24) {
       const old = this.casings.shift()!;
       old.mesh.removeFromParent();
     }
-    const mesh = this.mesh(this.casingGeo[kind]);
-    const host = onMoving && rig.moving ? rig.moving : rig.root;
-    host.updateWorldMatrix(true, false);
-    // position et vitesse dans le repère de la caméra
-    const p = new THREE.Vector3(...local).applyMatrix4(host.matrixWorld);
-    this.camera.updateWorldMatrix(true, false);
-    p.applyMatrix4(this.m4.copy(this.camera.matrixWorld).invert());
-    const qh = new THREE.Quaternion();
-    host.getWorldQuaternion(qh);
-    const qc = new THREE.Quaternion();
-    this.camera.getWorldQuaternion(qc);
-    qh.premultiply(qc.invert());
-    const v = new THREE.Vector3(...vel).applyQuaternion(qh);
+    const mesh = this.mesh(this.casingGeo[ev.kind]);
+    const host = (ev.part && rig.parts.get(ev.part)?.obj) || rig.root;
+    // position, orientation et vitesse dans le repère de la caméra
+    const mh = this.toCamera(host, this.mA);
+    const p = new THREE.Vector3(...ev.from).applyMatrix4(mh);
+    const qh = new THREE.Quaternion().setFromRotationMatrix(this.m4.extractRotation(mh));
+    const v = new THREE.Vector3(...ev.vel).applyQuaternion(this.q2.setFromRotationMatrix(this.m4.extractRotation(this.toCamera(rig.root, this.m4))));
     mesh.position.copy(p);
     mesh.quaternion.copy(qh);
     mesh.scale.setScalar(1.02);
     this.root.add(mesh);
-    this.casings.push({ mesh, vel: v, spin: new THREE.Vector3((Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18), life: 0.9 });
+    const heavy = ev.kind === 'mag' || ev.kind === 'smgMag' || ev.kind === 'cellSpent' || ev.kind === 'cell';
+    const spin = heavy ? 5 : 18;
+    this.casings.push({ mesh, vel: v, spin: new THREE.Vector3((Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin), life: heavy ? 1.2 : 0.9 });
   }
 
   private updateCasings(dt: number): void {
@@ -934,11 +1295,8 @@ export class Viewmodel {
   /** Position monde de la bouche du canon (pour la flamme), corrigée du champ de vision. */
   muzzleWorld(camera: THREE.PerspectiveCamera): THREE.Vector3 {
     const w = this.shown;
-    const rig = this.rigs.get(w)!;
-    const meta = rig.def.meta;
-    let tip = meta.muzzle;
-    // fusil : canon droit au premier coup, canon gauche au second
-    if (w === Weapon.SHOTGUN && meta.muzzle2 && (this.weaponsRef?.mag.get(Weapon.SHOTGUN) ?? 1) === 0) tip = meta.muzzle2;
+    const rig = this.rigs.get(w) ?? this.rigs.get(Weapon.FISTS)!;
+    const tip = rig.def.meta.muzzle;
     // point dans le repère de la caméra de la vue subjective
     rig.root.updateMatrix();
     const p = new THREE.Vector3(...tip).applyMatrix4(rig.root.matrix);
@@ -949,3 +1307,6 @@ export class Viewmodel {
     return p.applyMatrix4(camera.matrixWorld);
   }
 }
+
+/** Arme de chaque définition de pose (pour retrouver son rechargement). */
+const RIGS_INV = new Map<RigDef, Weapon>(Object.entries(RIGS).map(([w, d]) => [d, Number(w) as Weapon]));

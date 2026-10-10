@@ -2,10 +2,12 @@
 // Résolution 1/16 m (1/32 m pour les petits objets ronds ou très détaillés), origine au centre
 // de la base, l'avant regarde vers +Z ; les objets muraux ont le dos contre le mur (−Z).
 // Les bras de lampadaires, potences et ombrelles débordent de l'encombrement (voir props.ts).
+// Le maillage glouton ne fusionne que les faces à occlusion uniforme : on préfère les volumes
+// à faces planes et les détails peints (affleurants) aux reliefs fins, coûteux en faces.
 
 import type { PropKind } from '../../../shared/city/props';
 import type { PropModelEntry } from './index';
-import { SLOT, VoxelModel, shade, mix } from '../voxelModel';
+import { SLOT, VoxelModel, shade } from '../voxelModel';
 
 const R16 = 1 / 16;
 const R32 = 1 / 32;
@@ -125,7 +127,7 @@ function brush(m: VoxelModel, x: number, y: number, z: number, s: readonly [numb
 
 type V3 = readonly [number, number, number];
 
-/** Trait épais le long d'une courbe de Bézier quadratique (ou d'un segment si p1 est omis). */
+/** Trait épais le long d'une courbe de Bézier quadratique. */
 function bez(m: VoxelModel, p0: V3, p1: V3, p2: V3, s: V3, c: number): VoxelModel {
   const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]);
   const n = Math.ceil(len * 3) + 2;
@@ -139,6 +141,7 @@ function bez(m: VoxelModel, p0: V3, p1: V3, p2: V3, s: V3, c: number): VoxelMode
   return m;
 }
 
+/** Trait épais rectiligne. */
 function seg(m: VoxelModel, p0: V3, p1: V3, s: V3, c: number): VoxelModel {
   return bez(m, p0, [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2], p1, s, c);
 }
@@ -159,11 +162,30 @@ function blob(m: VoxelModel, cx: number, cy: number, cz: number, rx: number, ry:
   return m;
 }
 
+/** Copie la moitié z ≥ c sur la moitié z < c (symétrie avant/arrière, c entier). */
+function mirrorZ(m: VoxelModel, c: number): VoxelModel {
+  for (let y = 0; y < m.sy; y++)
+    for (let z = c; z < m.sz; z++) {
+      const zm = 2 * c - 1 - z;
+      if (zm < 0) continue;
+      for (let x = 0; x < m.sx; x++) m.data[m.idx(x, y, zm)] = m.data[m.idx(x, y, z)];
+    }
+  return m;
+}
+
+/** Hachage déterministe → [0,1). */
+function hash3(x: number, y: number, z: number, seed: number): number {
+  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(z | 0, 2147483647) + Math.imul(seed | 0, 1013904223)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return (h & 0xffff) / 65536;
+}
+
 // ------------------------------------------------------------------ texte en pixels
 
 type Font = Record<string, string[]>;
 
-/** Petite police 3×5 (plaques, panneaux de rue). */
+/** Petite police 3×5 (plaques, panneaux de rue ; M, N et W sont plus larges). */
 const F3: Font = {
   A: ['.#.', '#.#', '###', '#.#', '#.#'],
   B: ['##.', '#.#', '##.', '#.#', '##.'],
@@ -256,36 +278,36 @@ function layout(s: string, font: Font, gap = 1): { w: number; h: number; cells: 
   return { w: x - gap, h, cells };
 }
 
-/**
- * Écrit un texte centré sur une face. `face` : '+z' (lu depuis +Z), '-z', '+x', '-x'.
- * (cu, yTop) : centre horizontal de la ligne (voxels, axe de la face) et rangée du haut ; w0 =
- * coordonnée de la face.
- */
-function write(m: VoxelModel, s: string, font: Font, face: '+z' | '-z' | '+x' | '-x', cu: number, yTop: number, w0: number, c: number, gap = 1): void {
-  const L = layout(s, font, gap);
-  const u0 = Math.round(cu - L.w / 2);
-  for (const [u, v] of L.cells) {
-    const y = yTop - v;
-    if (face === '+z') m.set(u0 + u, y, w0, c);
-    else if (face === '-z') m.set(Math.round(2 * cu) - 1 - (u0 + u), y, w0, c);
-    else if (face === '+x') m.set(w0, y, Math.round(2 * cu) - 1 - (u0 + u), c);
-    else m.set(w0, y, u0 + u, c);
-  }
+type Face = '+z' | '-z' | '+x' | '-x';
+
+/** Pose une case de texte/pixel art : u le long de la face (sens de lecture), y vertical, w0 = plan de la face. */
+function putFace(m: VoxelModel, face: Face, cu: number, u: number, y: number, w0: number, c: number): void {
+  const mirror = Math.round(2 * cu) - 1 - u;
+  if (face === '+z') m.set(u, y, w0, c);
+  else if (face === '-z') m.set(mirror, y, w0, c);
+  else if (face === '+x') m.set(w0, y, mirror, c);
+  else m.set(w0, y, u, c);
 }
 
-/** Pixel art sur une face (mêmes conventions que write ; '#' ou caractères de la légende). */
-function art(m: VoxelModel, rows: string[], legend: Record<string, number>, face: '+z' | '-z' | '+x' | '-x', cu: number, yTop: number, w0: number): void {
+/**
+ * Écrit un texte centré sur une face. `face` : '+z' (lu depuis +Z), '-z', '+x', '-x'.
+ * cu : centre horizontal de la ligne (voxels, le long de la face) ; yTop : rangée du haut ;
+ * w0 : coordonnée du plan de la face.
+ */
+function write(m: VoxelModel, s: string, font: Font, face: Face, cu: number, yTop: number, w0: number, c: number, gap = 1): void {
+  const L = layout(s, font, gap);
+  const u0 = Math.round(cu - L.w / 2);
+  for (const [u, v] of L.cells) putFace(m, face, cu, u0 + u, yTop - v, w0, c);
+}
+
+/** Pixel art sur une face (mêmes conventions que write ; caractères traduits par la légende). */
+function art(m: VoxelModel, rows: string[], legend: Record<string, number>, face: Face, cu: number, yTop: number, w0: number): void {
   const w = Math.max(...rows.map((r) => r.length));
   const u0 = Math.round(cu - w / 2);
   for (let v = 0; v < rows.length; v++)
     for (let u = 0; u < rows[v].length; u++) {
       const c = legend[rows[v][u]];
-      if (c === undefined) continue;
-      const y = yTop - v;
-      if (face === '+z') m.set(u0 + u, y, w0, c);
-      else if (face === '-z') m.set(Math.round(2 * cu) - 1 - (u0 + u), y, w0, c);
-      else if (face === '+x') m.set(w0, y, Math.round(2 * cu) - 1 - (u0 + u), c);
-      else m.set(w0, y, u0 + u, c);
+      if (c !== undefined) putFace(m, face, cu, u0 + u, yTop - v, w0, c);
     }
 }
 
@@ -335,17 +357,6 @@ function streetLight(): VoxelModel {
   return m;
 }
 
-/** Copie la moitié z ≥ c sur la moitié z < c (symétrie avant/arrière, c entier). */
-function mirrorZ(m: VoxelModel, c: number): VoxelModel {
-  for (let y = 0; y < m.sy; y++)
-    for (let z = c; z < m.sz; z++) {
-      const zm = 2 * c - 1 - z;
-      if (zm < 0) continue;
-      for (let x = 0; x < m.sx; x++) m.data[m.idx(x, y, zm)] = m.data[m.idx(x, y, z)];
-    }
-  return m;
-}
-
 /** Lampadaire double des places (Times Square) : deux crosses opposées et deux bannières écran. */
 function streetLightDouble(): VoxelModel {
   const cz = 29;
@@ -385,7 +396,7 @@ function parkLamp(): VoxelModel {
   m.box(2, 9, 2, 4, 44, 4, iron);
   m.box(1, 24, 1, 5, 25, 5, hi);
   m.box(1, 43, 1, 5, 45, 5, hi);
-  m.box(0, 45, 0, 6, 46, 6, SLOT.NEON_CYAN);
+  m.cylY(3, 3, 2.6, 45, 46, SLOT.NEON_CYAN);
   m.box(2, 45, 2, 4, 46, 4, hi);
   // globe
   m.box(1, 46, 1, 5, 47, 5, SLOT.GLOW);
@@ -416,12 +427,13 @@ function trafficLight(): VoxelModel {
   bez(m, [4, 90, 5], [4, 88, 18], [4, 84, 31], [1, 1, 1], K.gunmetal);
   // plaque de rue verte sur la potence
   m.box(3, 84, 9, 5, 91, 28, K.signGreen);
-  write(m, '42 ST', F3, '-x', 18.5, 89, 3, K.white);
-  write(m, '42 ST', F3, '+x', 18.5, 89, 4, K.white);
-  // têtes suspendues (double face ±X) : vert allumé
+  const plate = ['#....#.......#....', '###.##.##.#.###.##', '#.#.#.#.#.#.#.#.#.', '###.##.#.#.#.###.#'];
+  art(m, plate, { '#': K.white }, '-x', 18.5, 89, 3);
+  art(m, plate, { '#': K.white }, '+x', 18.5, 89, 4);
+  // têtes suspendues (double face ±X) : vert allumé ; optiques affleurantes, visières en saillie
   const armHead = (zc: number) => {
     m.box(3, 80, zc - 1, 5, 82, zc + 1, K.graphite);
-    m.box(2, 63, zc - 3, 6, 80, zc + 3, K.black);
+    m.box(1, 63, zc - 3, 7, 80, zc + 3, K.black);
     const lenses: [number, number][] = [
       [75, OFF_R],
       [70, OFF_A],
@@ -432,15 +444,13 @@ function trafficLight(): VoxelModel {
       m.box(6, y, zc - 2, 7, y + 4, zc + 2, c);
       m.box(0, y + 4, zc - 2, 1, y + 5, zc + 2, K.black);
       m.box(7, y + 4, zc - 2, 8, y + 5, zc + 2, K.black);
-      m.box(1, y + 4, zc - 2, 2, y + 5, zc + 2, K.black);
-      m.box(6, y + 4, zc - 2, 7, y + 5, zc + 2, K.black);
     }
   };
   armHead(34);
   armHead(47);
   // tête sur le mât (vers +Z) : rouge allumé
   m.box(3, 63, 6, 5, 65, 7, K.graphite);
-  m.box(2, 46, 6, 6, 63, 9, K.black);
+  m.box(2, 46, 6, 6, 63, 10, K.black);
   const poleLenses: [number, number][] = [
     [58, SLOT.NEON_RED],
     [53, OFF_A],
@@ -448,7 +458,7 @@ function trafficLight(): VoxelModel {
   ];
   for (const [y, c] of poleLenses) {
     m.box(2, y, 9, 6, y + 4, 10, c);
-    m.box(2, y + 4, 9, 6, y + 5, 11, K.black);
+    m.box(2, y + 4, 10, 6, y + 5, 11, K.black);
   }
   // feux piétons : silhouette blanche vers +X, main orange vers +Z
   m.box(6, 34, 2, 8, 44, 7, K.black);
@@ -610,7 +620,7 @@ function manhole(m: VoxelModel, c: number, holes: boolean): void {
   lathe(m, c, c, 0, 1, 6.4, (_y, _a, d) => (d > 5.7 ? K.ironCoverHi : K.ironCover));
   lathe(m, c, c, 1, 2, 5.1, (_y, _a, d, x, z) => {
     if (d > 4.2) return K.ironCoverHi;
-    if (d < 3.4 && (x + z) % 3 === 0) return K.ironCoverHi;
+    if (holes && d < 3.4 && (x + z) % 3 === 0) return K.ironCoverHi;
     return -2;
   });
   if (holes)
@@ -638,17 +648,9 @@ function steamVent(v: number): VoxelModel {
   lathe(m, c, c, 1, 6, (y) => 5.6 - (y - 1) * 0.5, (y) => (y === 2 ? K.white : K.safetyOrange));
   lathe(m, c, c, 6, 27, 3.1, (y) => (y % 5 === 3 || y % 5 === 4 ? K.white : K.safetyOrange));
   lathe(m, c, c, 27, 29, 3.5, K.safetyOrange);
-  lathe(m, c, c, 20, 29, 2.2, -1);
-  lathe(m, c, c, 20, 21, 2.2, K.soot);
+  lathe(m, c, c, 26, 29, 2.2, -1);
+  lathe(m, c, c, 25, 26, 2.2, K.soot);
   return m;
-}
-
-/** Hachage déterministe → [0,1). */
-function hash3(x: number, y: number, z: number, seed: number): number {
-  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(z | 0, 2147483647) + Math.imul(seed | 0, 1013904223)) >>> 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
-  h = (h ^ (h >>> 16)) >>> 0;
-  return (h & 0xffff) / 65536;
 }
 
 /** Totem d'information (façon LinkNYC 2085) : écrans double face, bandeau, logo holographique. */
@@ -1295,8 +1297,7 @@ function busShelter(): VoxelModel {
   }
   // afficheur des prochains passages sous le toit
   m.box(20, 32, 19, 39, 39, 22, K.black);
-  write(m, 'M15', F3, '+z', 27, 37, 21, SLOT.NEON_AMBER);
-  write(m, '2', F3, '+z', 36, 37, 21, SLOT.NEON_AMBER);
+  write(m, 'M15', F3, '+z', 29.5, 37, 21, SLOT.NEON_AMBER);
   return m;
 }
 
@@ -1469,9 +1470,882 @@ function scaffold(): VoxelModel {
   return m;
 }
 
+// ================================================================== VÉHICULES
+
+/** Vitrage teinté des véhicules (couleur fixe : les marches des pare-brise restent sombres). */
+const TINT_GLASS = 0x1a222d;
+
+interface CarStyle {
+  body: number;
+  accent: number;
+  /** Lueur sous caisse (emplacement émissif) ou -1. */
+  glow: number;
+  roof?: number;
+  wreck?: boolean;
+  /** Taxi : 1 = enseigne allumée, 2 = hors service. */
+  taxi?: 1 | 2;
+}
+
+/** Berline à sustentation (2085) : caisse basse galbée, habitacle vitré, LED avant / bandeau rouge arrière, nacelles. */
+function hoverCar(st: CarStyle): VoxelModel {
+  const L = 70;
+  const m = new VoxelModel(32, 24, L, R16).setOrigin(16, 0, 35);
+  const cx = 16;
+  const round = [5, 2, 1, 0.4, 0.1];
+  const hwLow = (z: number) => {
+    const e = Math.min(z, L - 1 - z);
+    return 16 - (e < round.length ? round[e] : 0);
+  };
+  const yTop = (z: number) => (z >= 50 ? 11 - Math.round(((z - 50) * 3) / 19) : z <= 1 ? 10 : 11);
+  const yBot = (z: number) => (Math.min(z, L - 1 - z) < 2 ? 3 : 2);
+  const xs = (hw: number): [number, number] => [Math.round(cx - hw), Math.round(cx + hw)];
+  // caisse basse : bas de caisse rentré, arête de ceinture adoucie
+  for (let z = 0; z < L; z++) {
+    const [x0, x1] = xs(hwLow(z));
+    m.box(x0 + 1, yBot(z), z, x1 - 1, yBot(z) + 1, z + 1, st.body);
+    m.box(x0, yBot(z) + 1, z, x1, yTop(z) - 1, z + 1, st.body);
+    m.box(x0 + 1, yTop(z) - 1, z, x1 - 1, yTop(z), z + 1, st.body);
+  }
+  // habitacle vitré
+  const cabTop = (z: number) => (z < 18 ? 11 + Math.round(((z - 8) * 7) / 10) : z <= 38 ? 18 : 18 - Math.round(((z - 38) * 7) / 12));
+  const hwCab = (y: number) => 13 - (y - 11) * 0.36;
+  for (let z = 8; z <= 50; z++)
+    for (let y = 11; y <= cabTop(z); y++) {
+      const [x0, x1] = xs(hwCab(y));
+      m.box(x0, y, z, x1, y + 1, z + 1, TINT_GLASS);
+    }
+  // toit, montants A / B / C
+  const roofC = st.roof ?? st.body;
+  for (let z = 17; z <= 39; z++) paint(m, 0, 18, z, 32, 19, z + 1, roofC);
+  for (let z = 8; z <= 50; z++) {
+    const top = cabTop(z);
+    for (let y = 11; y <= top; y++) {
+      const [x0, x1] = xs(hwCab(y));
+      const pillar = (z >= 28 && z <= 29) || (z > 38 && y >= top - 1 && z < 48) || (z < 18 && y >= top - 1 && z > 9);
+      if (pillar) {
+        m.set(x0, y, z, roofC);
+        m.set(x1 - 1, y, z, roofC);
+      }
+    }
+  }
+  // flancs : ligne d'accent, joints de portes, poignées, caméras-rétroviseurs
+  for (let z = 4; z < 66; z++) {
+    const [x0, x1] = xs(hwLow(z));
+    for (const y of st.taxi ? [8, 9] : [8]) {
+      const c = st.taxi ? ((z + y) % 2 ? K.black : K.white) : st.accent;
+      m.set(x0, y, z, c);
+      m.set(x1 - 1, y, z, c);
+    }
+  }
+  for (const z of [30, 47]) {
+    paint(m, 0, 3, z, 1, 11, z + 1, shade(st.body, 0.7));
+    paint(m, 31, 3, z, 32, 11, z + 1, shade(st.body, 0.7));
+  }
+  for (const z of [34, 50]) {
+    m.box(0, 9, z, 1, 10, z + 2, K.chrome);
+    m.box(31, 9, z, 32, 10, z + 2, K.chrome);
+  }
+  m.box(2, 12, 45, 3, 13, 48, st.body);
+  m.box(29, 12, 45, 30, 13, 48, st.body);
+  // nacelles de sustentation (roues escamotées visibles dans le logement)
+  for (const zc of [12, 57]) {
+    for (const [x, xi] of [
+      [0, 1],
+      [31, 30],
+    ]) {
+      m.box(x, 3, zc - 5, x + 1, 8, zc + 5, -1);
+      m.box(xi, 3, zc - 5, xi + 1, 8, zc + 5, K.black);
+      for (let z = zc - 3; z < zc + 3; z++) for (let y = 3; y < 8; y++) if (Math.hypot(z + 0.5 - zc, y + 0.5 - 5.5) < 2.6) m.set(xi, y, z, K.gunmetal);
+    }
+    m.box(4, 0, zc - 4, 10, 2, zc + 4, K.gunmetal);
+    m.box(22, 0, zc - 4, 28, 2, zc + 4, K.gunmetal);
+    if (!st.wreck) {
+      m.box(4, 0, zc - 4, 5, 1, zc + 4, SLOT.NEON_CYAN);
+      m.box(27, 0, zc - 4, 28, 1, zc + 4, SLOT.NEON_CYAN);
+    }
+  }
+  // lueur sous caisse
+  if (st.glow >= 0)
+    for (let z = 18; z < 48; z++) {
+      const [x0, x1] = xs(hwLow(z));
+      m.set(x0 + 1, 2, z, st.glow);
+      m.set(x1 - 2, 2, z, st.glow);
+    }
+  // feux : bandeau LED avant qui contourne les angles, prise d'air ; bandeau rouge arrière, diffuseur
+  const front = st.wreck ? 0x8a8a80 : SLOT.LED;
+  const rear = st.wreck ? 0x5a1a14 : SLOT.NEON_RED;
+  paint(m, 0, 7, 65, 32, 8, L, front);
+  paint(m, 0, 3, 68, 32, 6, L, K.black);
+  paint(m, 0, 8, 0, 32, 9, 3, rear);
+  paint(m, 4, 3, 0, 28, 5, 1, K.black);
+  if (st.taxi) {
+    // enseigne de toit (le damier est posé avec la ligne d'accent)
+    const lit = st.taxi === 1;
+    m.box(8, 19, 27, 24, 24, 31, lit ? SLOT.NEON_AMBER : K.offWhite);
+    write(m, 'TAXI', F3, '+z', 16, 23, 30, lit ? K.black : K.steel);
+    write(m, 'TAXI', F3, '-z', 16, 23, 27, lit ? K.black : K.steel);
+  }
+  if (st.wreck) {
+    // épave : rouille, apprêt, vitres brisées, capot enfoncé
+    m.forEach((x, y, z, c) => {
+      if (c === st.body) {
+        const h = hash3(x >> 1, y >> 1, z >> 2, 11);
+        return h < 0.25 ? 0x4a3020 : h < 0.4 ? 0x77706a : h > 0.85 ? 0x8a5a36 : undefined;
+      }
+      if (c === TINT_GLASS && hash3(x, y, z, 12) > 0.72) return 0x0c0c0c;
+      return undefined;
+    });
+    m.box(10, 10, 56, 20, 11, 64, -1);
+    m.box(0, 3, 32, 1, 10, 46, K.black);
+  }
+  return m;
+}
+
+/** Fourgon de livraison à sustentation : caisse haute, cabine avancée, porte coulissante, bandeau de livreur. */
+function hoverVan(v: number): VoxelModel {
+  const L = 86;
+  const m = new VoxelModel(35, 38, L, R16).setOrigin(17.5, 0, 43);
+  const P = [
+    { body: 0xe4e6e8, stripe: 0x1f5fb8 },
+    { body: 0x2c3036, stripe: 0xe8641c },
+    { body: 0x5a4030, stripe: 0xe8c030 },
+  ][v];
+  const dk = shade(P.body, 0.7);
+  // profil : caisse et pavillon jusqu'à z 66, pare-brise incliné, capot court
+  const top = (z: number) => (z < 66 ? 36 : z < 80 ? 36 - Math.round(((z - 66) * 18) / 14) : 18 - Math.round((z - 80) * 0.6));
+  for (let z = 0; z < L; z++) {
+    const e = Math.min(z, L - 1 - z);
+    const inset = e === 0 ? 2 : e === 1 ? 1 : 0;
+    m.box(1 + inset, 3, z, 34 - inset, top(z), z + 1, P.body);
+    m.box(2 + inset, 2, z, 33 - inset, 3, z + 1, dk);
+  }
+  // arêtes de pavillon arrondies
+  m.box(1, 35, 0, 2, 36, 66, -1);
+  m.box(33, 35, 0, 34, 36, 66, -1);
+  // pare-brise et vitres de cabine
+  for (let z = 66; z < 80; z++) for (let y = 20; y < top(z); y++) for (let x = 3; x < 32; x++) if (m.get(x, y, z) >= 0 && (y === top(z) - 1 || m.get(x, y + 1, z) < 0 || m.get(x, y, z + 1) < 0)) m.set(x, y, z, TINT_GLASS);
+  for (const x of [1, 33]) m.box(x, 20, 64, x + 1, 32, 76, TINT_GLASS);
+  for (const x of [1, 33]) m.box(x, 20, 70, x + 1, 32, 71, P.body);
+  // bandeau de livreur et pictogramme (colis en mouvement)
+  for (const x of [1, 33]) m.box(x, 20, 4, x + 1, 24, 62, P.stripe);
+  const icon = ['....####', '.--.#..#', '--..####', '.--.####'];
+  art(m, icon, { '#': K.white, '-': K.white }, '+x', 30, 31, 33);
+  art(m, icon, { '#': K.white, '-': K.white }, '-x', 30, 31, 1);
+  // porte latérale coulissante, poignées
+  for (const x of [1, 33]) {
+    m.box(x, 4, 40, x + 1, 34, 41, dk);
+    m.box(x, 4, 58, x + 1, 34, 59, dk);
+    m.box(x, 18, 55, x + 1, 19, 57, K.chrome);
+  }
+  // portes arrière, feux rouges verticaux, plaque
+  m.box(17, 4, 0, 18, 35, 1, dk);
+  m.box(14, 18, 0, 16, 19, 1, K.chrome);
+  m.box(19, 18, 0, 21, 19, 1, K.chrome);
+  for (const x of [3, 31]) m.box(x, 10, 0, x + 1, 22, 1, SLOT.NEON_RED);
+  m.box(13, 5, 0, 22, 8, 1, K.offWhite);
+  // face avant : calandre, bandeau LED, feux de gabarit
+  m.box(6, 5, 85, 29, 10, 86, K.black);
+  m.box(4, 11, 85, 31, 12, 86, SLOT.LED);
+  for (const x of [3, 31]) m.set(x, 35, 66, SLOT.NEON_AMBER).set(x + 1, 35, 66, SLOT.NEON_AMBER);
+  // nacelles de sustentation
+  for (const zc of [14, 70]) {
+    for (const x of [1, 33]) {
+      m.box(x, 3, zc - 6, x + 1, 10, zc + 6, K.black);
+      for (let z = zc - 4; z < zc + 4; z++) for (let y = 3; y < 10; y++) if (Math.hypot(z + 0.5 - zc, y + 0.5 - 6.5) < 3.1) m.set(x, y, z, K.gunmetal);
+    }
+    m.box(4, 0, zc - 5, 11, 2, zc + 5, K.gunmetal);
+    m.box(24, 0, zc - 5, 31, 2, zc + 5, K.gunmetal);
+    m.box(4, 0, zc - 5, 5, 1, zc + 5, SLOT.NEON_CYAN);
+    m.box(30, 0, zc - 5, 31, 1, zc + 5, SLOT.NEON_CYAN);
+  }
+  return m;
+}
+
+const CAR_STYLES: CarStyle[] = [
+  { body: 0x16181c, accent: K.chrome, glow: SLOT.NEON_CYAN },
+  { body: 0x8e1520, accent: 0xd4a640, glow: SLOT.NEON_RED, roof: 0x141012 },
+  { body: 0x1a2d5a, accent: 0xc9d1dc, glow: SLOT.NEON_BLUE, roof: 0x0f1a30 },
+  { body: 0xdfe2e4, accent: 0x2a2d31, glow: -1 },
+  { body: 0x8d959e, accent: 0x2a2d31, glow: -1 },
+  { body: 0x1d5f63, accent: K.chrome, glow: SLOT.NEON_CYAN },
+  { body: 0xd0601a, accent: 0x16181c, glow: SLOT.NEON_AMBER, roof: 0x16181c },
+  { body: 0x6a4a32, accent: 0x4a3020, glow: -1, wreck: true },
+];
+
+// ================================================================== TOITS ET FAÇADES
+
+/** Groupe de climatisation de toit : caisson à persiennes, grille de ventilateur, tuyaux de cuivre. */
+function acUnit(v: number): VoxelModel {
+  const m = new VoxelModel(16, 11, 13, R16);
+  const body = [0xc8c4b8, 0xd6d9dc, 0x9a9488][v];
+  const dk = shade(body, 0.72);
+  m.box(1, 0, 1, 15, 1, 3, K.gunmetal);
+  m.box(1, 0, 10, 15, 1, 12, K.gunmetal);
+  m.box(0, 1, 0, 16, 10, 13, body);
+  // persiennes sur les quatre faces
+  for (const y of [2, 4, 6, 8]) {
+    m.box(0, y, 0, 16, y + 1, 1, dk);
+    m.box(0, y, 12, 11, y + 1, 13, dk);
+    m.box(0, y, 0, 1, y + 1, 13, dk);
+    m.box(15, y, 0, 16, y + 1, 13, dk);
+  }
+  // boîtier électrique et tuyaux
+  m.box(11, 2, 12, 15, 9, 13, shade(body, 0.9));
+  m.set(13, 7, 12, K.offWhite).set(12, 7, 12, K.offWhite);
+  m.box(1, 2, 12, 3, 3, 13, 0xb06a3a);
+  m.box(1, 4, 12, 3, 5, 13, 0xb06a3a);
+  // ventilateur sous grille
+  lathe(m, 8, 6.5, 10, 11, 5.6, (_y, a, d) => {
+    if (d > 4.9) return K.graphite;
+    if (d < 1.2) return K.gunmetal;
+    const blade = Math.abs(Math.sin(2 * a + d * 0.35)) < 0.38;
+    return d > 3.4 && d < 3.9 ? K.steel : blade ? K.steelHi : 0x1c1e20;
+  });
+  if (v === 2) for (let x = 0; x < 16; x++) if (hash3(x, 0, 0, 3) > 0.6) m.set(x, 1, 12, 0x6e3a1e);
+  return m;
+}
+
+/** Climatiseur de fenêtre : boîtier beige, grille à lamelles, commandes, équerres de soutien. */
+function acWindow(): VoxelModel {
+  const m = new VoxelModel(11, 7, 8, R16);
+  const body = 0xd6d0c0;
+  const dk = shade(body, 0.68);
+  m.box(0, 1, 0, 11, 7, 8, body);
+  for (const y of [2, 4]) m.box(1, y, 7, 8, y + 1, 8, dk);
+  m.box(1, 6, 7, 8, 7, 8, shade(body, 0.85));
+  m.box(8, 2, 7, 10, 6, 8, shade(body, 0.9));
+  m.set(9, 5, 7, SLOT.NEON_CYAN);
+  m.set(9, 3, 7, K.gunmetal);
+  for (const x of [0, 10]) for (const z of [2, 4]) m.box(x, 2, z, x + 1, 6, z + 1, dk);
+  // équerres sous l'appareil
+  for (const x of [1, 9]) {
+    m.box(x, 0, 0, x + 1, 1, 6, K.graphite);
+    m.set(x, 0, 0, K.graphite);
+  }
+  return m;
+}
+
+/** Aérateur à turbine de toit (galvanisé) : costière, gaine carrée, turbine à ailettes, dôme. */
+function roofVent(): VoxelModel {
+  const m = new VoxelModel(10, 19, 10, R16);
+  const c = 5;
+  m.box(0, 0, 0, 10, 1, 10, K.galvDk);
+  m.box(1, 1, 1, 9, 2, 9, K.galv);
+  squarePole(m, 3, 3, 4, 2, 10, K.galv);
+  lathe(m, c, c, 9, 10, 2.6, K.galvDk);
+  lathe(m, c, c, 10, 16, 4.3, (_y, a) => (Math.floor(((a + Math.PI) / (2 * Math.PI)) * 16) % 2 ? K.galv : 0x5e666b));
+  lathe(m, c, c, 16, 18, (y) => (y === 16 ? 3.6 : 2.4), K.galvDk);
+  lathe(m, c, c, 18, 19, 1.2, K.galv);
+  return m;
+}
+
+/** Antenne parabolique sur support lesté (plat de toit). */
+function satDish(): VoxelModel {
+  const m = new VoxelModel(19, 22, 16, R16);
+  // châssis lesté
+  m.box(1, 0, 1, 18, 1, 3, K.gunmetal);
+  m.box(1, 0, 13, 18, 1, 15, K.gunmetal);
+  m.box(8, 0, 1, 11, 1, 15, K.gunmetal);
+  m.box(1, 0, 1, 5, 2, 5, K.concrete);
+  m.box(14, 0, 1, 18, 2, 5, K.concrete);
+  m.box(8, 1, 5, 11, 12, 8, K.steel);
+  // réflecteur parabolique orienté vers +Z, incliné de 35°
+  const cx = 9.5;
+  const cy = 14;
+  const cz = 8.5;
+  const ny = Math.sin((35 * Math.PI) / 180);
+  const nz = Math.cos((35 * Math.PI) / 180);
+  const R = 7.6;
+  const f = 6.5;
+  for (let y = 0; y < 22; y++)
+    for (let z = 0; z < 16; z++)
+      for (let x = 0; x < 19; x++) {
+        const dx = x + 0.5 - cx;
+        const dy = y + 0.5 - cy;
+        const dz = z + 0.5 - cz;
+        const h = dy * ny + dz * nz;
+        const rx = dx;
+        const ry = dy - h * ny;
+        const rz = dz - h * nz;
+        const rho = Math.hypot(rx, ry, rz);
+        if (rho > R) continue;
+        const hs = (rho * rho) / (4 * f) - 1.2;
+        if (Math.abs(h - hs) > 0.62) continue;
+        m.set(x, y, z, rho > R - 1 ? 0xb8b8b2 : 0xe2e2dc);
+      }
+  // bras et tête LNB au foyer
+  const fy = cy + ny * (f - 1.2);
+  const fz = cz + nz * (f - 1.2);
+  m.box(8, 11, 6, 11, 13, 8, K.steel);
+  seg(m, [cx, cy - nz * 7 + ny * 0.7, cz + ny * 7 + nz * 0.7], [cx, fy, fz], [1, 1, 1], K.gunmetal);
+  m.box(9, Math.round(fy) - 1, Math.round(fz) - 1, 11, Math.round(fy) + 1, Math.round(fz) + 1, K.graphite);
+  m.set(10, Math.round(fy), Math.round(fz), SLOT.NEON_GREEN);
+  return m;
+}
+
+/** Antenne-relais de toit : mât, panneaux, fouet sommital à feu rouge (balisage). */
+function antenna(): VoxelModel {
+  const m = new VoxelModel(5, 64, 5, R16);
+  m.box(0, 0, 0, 5, 1, 5, K.gunmetal);
+  m.box(1, 1, 1, 4, 48, 4, K.galv);
+  for (let y = 3; y < 46; y += 6) {
+    m.box(1, y, 1, 4, y + 1, 4, K.galvDk);
+  }
+  // panneaux d'émission (3 faces) et boîtiers
+  m.box(0, 34, 1, 1, 46, 4, K.offWhite);
+  m.box(4, 34, 1, 5, 46, 4, K.offWhite);
+  m.box(1, 34, 4, 4, 46, 5, K.offWhite);
+  m.box(1, 20, 0, 4, 25, 1, K.gunmetal);
+  // feux de balisage et fouet
+  m.box(0, 28, 2, 1, 29, 3, SLOT.NEON_RED);
+  m.box(4, 28, 2, 5, 29, 3, SLOT.NEON_RED);
+  m.box(2, 48, 2, 3, 62, 3, K.steel);
+  m.box(2, 62, 2, 3, 64, 3, SLOT.NEON_RED);
+  return m;
+}
+
+/** Pictogrammes 5×5 des enseignes. */
+const ICONS: Record<string, string[]> = {
+  heart: ['.#.#.', '#####', '#####', '.###.', '..#..'],
+  star: ['..#..', '.###.', '#####', '.###.', '.#.#.'],
+  note: ['..##.', '..#.#', '..#..', '###..', '###..'],
+  glass: ['#####', '.###.', '..#..', '..#..', '.###.'],
+  arrow: ['.###.', '.###.', '#####', '.###.', '..#..'],
+  diamond: ['..#..', '.#.#.', '#...#', '.#.#.', '..#..'],
+};
+
+/** Enseigne verticale « en drapeau » (néon de la variante) : caisson sombre, lettres empilées, deux faces. */
+function neonBlade(v: number): VoxelModel {
+  const m = new VoxelModel(5, 48, 22, R16).setOrigin(2.5, 0, 11);
+  const designs: [string, string | null][] = [
+    ['CLUB', 'heart'],
+    ['HOTEL', null],
+    ['LUCKY', null],
+    ['JAZZ', 'note'],
+    ['DELI', 'star'],
+    ['PIZZA', null],
+    ['LIVE', 'star'],
+    ['BAR', 'glass'],
+  ];
+  const [word, icon] = designs[v];
+  const N = SLOT.NEON;
+  // potences murales
+  for (const y of [7, 40]) {
+    m.box(2, y, 0, 3, y + 1, 9, K.gunmetal);
+    m.box(1, y - 1, 0, 4, y + 2, 1, K.graphite);
+  }
+  seg(m, [2.5, 10, 0.5], [2.5, 7.5, 8.5], [1, 1, 1], K.gunmetal);
+  // caisson
+  m.box(1, 2, 9, 4, 47, 22, 0x16171b);
+  m.box(1, 2, 9, 4, 3, 22, K.gunmetal);
+  m.box(1, 46, 9, 4, 47, 22, K.gunmetal);
+  m.box(1, 2, 21, 4, 47, 22, N);
+  // cadre néon et lettres (affleurants, sur les deux faces)
+  const z0 = 10;
+  const z1 = 21;
+  const zc = 15.5;
+  for (const x of [1, 3]) {
+    m.box(x, 3, z0, x + 1, 4, z1, N);
+    m.box(x, 45, z0, x + 1, 46, z1, N);
+    m.box(x, 3, z0, x + 1, 46, z0 + 1, N);
+    m.box(x, 3, z1 - 1, x + 1, 46, z1, N);
+  }
+  const n = word.length;
+  const gap = n >= 5 ? 1 : 2;
+  const iconH = icon ? 7 : 0;
+  const total = n * 7 + (n - 1) * gap + iconH;
+  let y = Math.floor(24.5 + (total - 1) / 2);
+  const face = (rows: string[], yTop: number) => {
+    art(m, rows, { '#': N }, '-x', zc, yTop, 1);
+    art(m, rows, { '#': N }, '+x', zc, yTop, 3);
+  };
+  if (icon) {
+    face(ICONS[icon], y);
+    y -= 7;
+  }
+  for (const ch of word) {
+    face(F5[ch].map((r) => r), y);
+    y -= 7 + gap;
+  }
+  return m;
+}
+
+/** Enseigne murale plate (néon de la variante) : panneau sombre, cadre, texte ou emblème. */
+function neonWallSign(v: number): VoxelModel {
+  const m = new VoxelModel(32, 13, 2, R16).setOrigin(16, 0, 1);
+  const N = SLOT.NEON;
+  m.box(0, 0, 0, 32, 13, 1, 0x141518);
+  m.box(0, 0, 0, 32, 1, 1, K.gunmetal);
+  m.box(0, 12, 0, 32, 13, 1, K.gunmetal);
+  // cadre néon
+  m.box(1, 1, 1, 31, 2, 2, N);
+  m.box(1, 11, 1, 31, 12, 2, N);
+  m.box(1, 1, 1, 2, 12, 2, N);
+  m.box(30, 1, 1, 31, 12, 2, N);
+  const put = (rows: string[], cx: number, yTop: number) => art(m, rows, { '#': N }, '+z', cx, yTop, 1);
+  const word = (s: string, cx: number) => write(m, s, F5, '+z', cx, 9, 1, N);
+  switch (v) {
+    case 0:
+      word('OPEN', 16);
+      break;
+    case 1:
+      put(['..........#.........', '.........###........', '.........###....#...', '....#....###...###..', '...###...###...###..', '...###.#.###.#.###.#', '#.####.#####.#####.#', '####################'], 16, 9);
+      break;
+    case 2:
+      put(['#...#...#', '##.###.##', '#########', '#.#.#.#.#', '#########'], 16, 8);
+      put(ICONS.star, 6, 8);
+      put(ICONS.star, 26, 8);
+      break;
+    case 3:
+      put(['....#....', '...###...', '#########', '.#######.', '..#####..', '.##...##.', '##.....##'], 16, 9);
+      m.box(4, 6, 1, 10, 7, 2, N);
+      m.box(22, 6, 1, 28, 7, 2, N);
+      break;
+    case 4:
+      word('24H', 19);
+      put(ICONS.star, 7, 8);
+      break;
+    case 5:
+      word('BAR', 12.5);
+      put(ICONS.glass, 25, 8);
+      break;
+    case 6:
+      word('CAFE', 16);
+      break;
+    default:
+      word('LIVE', 16);
+      break;
+  }
+  return m;
+}
+
+/** Lanterne chinoise en papier rouge : côtes sombres, coiffes dorées, gland. */
+function lanternRed(): VoxelModel {
+  const m = new VoxelModel(8, 13, 8, R16);
+  const c = 4;
+  const gold = 0xc8a040;
+  m.box(3, 11, 3, 5, 13, 5, 0x5a1010);
+  lathe(m, c, c, 10, 11, 2.6, gold);
+  lathe(m, c, c, 3, 10, (y) => 3.7 * Math.sqrt(Math.max(0, 1 - ((y + 0.5 - 6.5) / 4.3) ** 2)) + 0.3, (_y, a) => (Math.abs(Math.sin(4 * a + Math.PI / 2)) < 0.2 ? 0x9a1a14 : SLOT.NEON_RED));
+  lathe(m, c, c, 2, 3, 2.6, gold);
+  m.box(3, 0, 3, 5, 2, 5, 0xa01818);
+  m.set(3, 0, 3, gold).set(4, 0, 4, gold);
+  return m;
+}
+
+/** Guirlande de lanternes (rouges et ambrées) sur un cordon en chaînette. */
+function lanternString(): VoxelModel {
+  const m = new VoxelModel(64, 10, 3, R16).setOrigin(32, 0, 1.5);
+  const cordY = (x: number) => 9 - 3 * (1 - ((x + 0.5 - 32) / 32) ** 2);
+  for (let x = 0; x < 64; x++) m.set(x, Math.round(cordY(x)), 1, 0x2a1a14);
+  [5, 16, 27, 37, 48, 58].forEach((x, i) => {
+    const top = Math.round(cordY(x)) - 1;
+    const body = i % 2 ? SLOT.NEON_AMBER : SLOT.NEON_RED;
+    m.set(x, top, 1, 0xc8a040);
+    m.box(x - 1, top - 3, 0, x + 2, top, 3, body);
+    for (const [dx, dz] of [
+      [-1, 0],
+      [1, 0],
+      [-1, 2],
+      [1, 2],
+    ]) {
+      m.set(x + dx, top - 1, dz, -1);
+      m.set(x + dx, top - 3, dz, -1);
+    }
+    m.set(x, top - 4, 1, 0xc8a040);
+  });
+  return m;
+}
+
+/** Caméra de surveillance murale (1/32) : platine, bras, caisson à visière aux couleurs du propriétaire, LED rouge. */
+function securityCamera(): VoxelModel {
+  const m = new VoxelModel(10, 10, 16, R32).setOrigin(5, 0, 8);
+  m.box(2, 2, 0, 8, 9, 1, K.gunmetal);
+  m.box(4, 5, 1, 6, 7, 6, K.graphite);
+  m.box(3, 3, 5, 7, 8, 14, 0xd8dadc);
+  m.box(2, 8, 4, 8, 9, 16, SLOT.TINT1);
+  m.box(2, 7, 4, 3, 8, 15, SLOT.TINT1);
+  m.box(7, 7, 4, 8, 8, 15, SLOT.TINT1);
+  m.box(3, 3, 5, 7, 4, 14, SLOT.TINT2);
+  m.box(3, 4, 14, 7, 7, 15, K.black);
+  m.box(4, 4, 14, 6, 6, 15, SLOT.GLASS);
+  m.set(6, 6, 14, SLOT.NEON_RED);
+  return m;
+}
+
+/** Bannière verticale aux couleurs du propriétaire : hampe, plis, bordure, blason, pointe à gland. */
+function flagBanner(): VoxelModel {
+  const m = new VoxelModel(16, 42, 2, R16).setOrigin(8, 0, 1);
+  const T1 = SLOT.TINT1;
+  const T2 = SLOT.TINT2;
+  const T3 = SLOT.TINT3;
+  m.box(0, 40, 0, 16, 42, 2, T2);
+  m.box(0, 39, 0, 1, 42, 2, T2);
+  m.box(15, 39, 0, 16, 42, 2, T2);
+  // étoffe à plis (colonnes alternées en avant / en arrière), pointe en V
+  for (let x = 1; x < 15; x++) {
+    const z = x % 4 < 2 ? 1 : 0;
+    const yb = 5 + Math.round(Math.abs(x + 0.5 - 8) * 0.9);
+    for (let y = yb; y < 40; y++) {
+      const edge = x === 1 || x === 14 || y < yb + 2 || y >= 38;
+      const band = y >= 33 && y < 35;
+      m.set(x, y, z, edge ? T2 : band ? T3 : T1);
+    }
+  }
+  // blason
+  const crest = ['###########', '#333333333#', '#323232323#', '#322222223#', '#333333333#', '#332222233#', '#333333333#', '.#3333333#.', '..#33333#..', '...#333#...', '....###....'];
+  for (let v = 0; v < crest.length; v++)
+    for (let u = 0; u < crest[v].length; u++) {
+      const ch = crest[v][u];
+      if (ch === '.') continue;
+      const x = 3 + u;
+      const y = 30 - v;
+      const z = x % 4 < 2 ? 1 : 0;
+      m.set(x, y, z, ch === '#' || ch === '2' ? T2 : T3);
+    }
+  // gland
+  m.box(7, 1, 0, 9, 5, 1, T2);
+  m.box(7, 0, 0, 9, 1, 1, T3);
+  return m;
+}
+
+/** Terminal de sécurité piratable (entrée des bâtiments protégés) : pied aux couleurs du propriétaire, écran incliné, clavier, lecteur, voyant. */
+function securityPanel(): VoxelModel {
+  const m = new VoxelModel(10, 22, 7, R16);
+  m.box(0, 0, 0, 10, 1, 7, K.graphite);
+  for (let x = 0; x < 10; x++) m.set(x, 0, 6, (x >> 1) % 2 ? K.black : K.hydrantYellow);
+  // pied : bande verticale aux couleurs du propriétaire
+  m.box(2, 1, 1, 8, 12, 6, K.graphite);
+  m.box(4, 2, 5, 6, 11, 6, SLOT.TINT1);
+  m.box(2, 11, 1, 8, 12, 6, SLOT.TINT2);
+  // tête : caisson à face inclinée, écran, clavier, lecteur de carte
+  for (let y = 12; y < 21; y++) {
+    const zf = y < 15 ? 7 : 7 - Math.round((y - 14) * 0.45);
+    m.box(0, y, 0, 10, y + 1, zf, K.gunmetal);
+  }
+  m.box(0, 12, 0, 10, 13, 7, K.graphite);
+  m.box(0, 21, 0, 10, 22, 3, K.graphite);
+  for (let y = 15; y < 20; y++) {
+    const zf = 7 - Math.round((y - 14) * 0.45);
+    m.box(1, y, zf - 1, 9, y + 1, zf, SLOT.SCREEN);
+  }
+  for (const x of [2, 4, 6]) {
+    m.set(x, 13, 6, K.alu);
+    m.set(x, 14, 6, K.alu);
+  }
+  m.box(7, 13, 6, 9, 15, 7, K.black);
+  m.box(7, 14, 6, 9, 15, 7, SLOT.NEON_CYAN);
+  // voyant de verrouillage et liserés
+  m.box(4, 21, 1, 6, 22, 2, SLOT.NEON_RED);
+  m.box(0, 12, 0, 1, 21, 1, SLOT.NEON_CYAN);
+  m.box(9, 12, 0, 10, 21, 1, SLOT.NEON_CYAN);
+  return m;
+}
+
+/** Battant de porte générique sombre (les portes sont animées par un autre système). */
+function doorLeaf(): VoxelModel {
+  const m = new VoxelModel(24, 40, 2, R16).setOrigin(12, 0, 1);
+  m.box(0, 0, 0, 24, 40, 2, K.graphite);
+  m.box(2, 2, 1, 22, 38, 2, 0x2a2d32);
+  m.box(15, 8, 1, 19, 34, 2, SLOT.GLASS);
+  m.box(2, 0, 1, 22, 4, 2, K.steel);
+  m.box(4, 14, 1, 5, 26, 2, K.chrome);
+  return m;
+}
+
+/** Portes d'ascenseur en inox brossé, encadrement sombre souligné de LED, indicateur d'étage. */
+function elevatorDoor(): VoxelModel {
+  const m = new VoxelModel(26, 38, 2, R16).setOrigin(13, 0, 1);
+  m.box(0, 0, 0, 26, 38, 2, K.graphite);
+  // vantaux en retrait, brossés (bandes verticales)
+  for (let x = 3; x < 23; x++) m.box(x, 0, 1, x + 1, 33, 2, x % 2 ? 0xa9b1b9 : 0x9ca4ac);
+  m.box(12, 0, 1, 14, 33, 2, 0x5a6068);
+  m.box(3, 0, 0, 23, 33, 1, 0x8a929a);
+  // liseré LED de l'encadrement
+  m.box(2, 0, 1, 3, 34, 2, SLOT.LED);
+  m.box(23, 0, 1, 24, 34, 2, SLOT.LED);
+  m.box(2, 33, 1, 24, 34, 2, SLOT.LED);
+  // indicateur d'étage (flèche et chiffres ambre)
+  m.box(9, 34, 1, 17, 38, 2, K.black);
+  art(m, ['.#.', '###'], { '#': SLOT.NEON_AMBER }, '+z', 11.5, 36, 1);
+  art(m, ['###', '.##', '###'], { '#': SLOT.NEON_AMBER }, '+z', 15, 37, 1);
+  // boutons d'appel
+  m.box(24, 14, 1, 26, 20, 2, K.alu);
+  m.set(24, 18, 1, SLOT.LED).set(24, 16, 1, SLOT.LED);
+  return m;
+}
+
+/** Rideau métallique ondulé : glissières, caisson, lame finale ; tags (variantes 0 et 2) ou finition anthracite (1). */
+function rollupDoor(v: number): VoxelModel {
+  const m = new VoxelModel(58, 54, 2, R16).setOrigin(29, 0, 1);
+  const base = [0x8a9196, 0x2e3236, 0x4a6a52][v];
+  const rib = shade(base, 1.15);
+  m.box(0, 0, 0, 2, 54, 2, K.graphite);
+  m.box(56, 0, 0, 58, 54, 2, K.graphite);
+  m.box(0, 50, 0, 58, 54, 2, K.gunmetal);
+  // lames ondulées : bandes de couleur (un relief réel multiplierait les faces)
+  const groove = shade(base, 0.78);
+  for (let y = 0; y < 50; y++) m.box(2, y, 0, 56, y + 1, 1, y % 3 === 0 ? rib : y % 3 === 1 ? base : groove);
+  m.box(2, 0, 0, 56, 2, 1, shade(base, 0.7));
+  m.box(26, 2, 0, 32, 3, 1, K.chrome);
+  if (v === 1) {
+    m.box(2, 2, 0, 56, 3, 1, SLOT.LED);
+    m.box(26, 3, 0, 32, 4, 1, K.chrome);
+  } else {
+    tag(m, v === 0 ? 'KRZ' : 'ZEN', 29, 38, '+z', v === 0 ? 0xe8509a : 0xf0c030, 0xf2f2f2, 3);
+    tag(m, 'NYC', 14, 16, '+z', 0x38c8e0, 0x151515, 1);
+    if (v === 2) tag(m, 'REX', 44, 18, '+z', 0xe84a2a, 0x151515, 2);
+    for (const x of [22, 30, 37]) m.box(x, 18, 0, x + 1, 22, 1, v === 0 ? 0xe8509a : 0xf0c030);
+  }
+  return m;
+}
+
+// ================================================================== MONUMENTS
+
+const BZ = {
+  verd: 0x5f9a82,
+  verdDk: 0x3f6f5c,
+  verdHi: 0x86bba3,
+  bronze: 0x6e5128,
+  bronzeDk: 0x47331a,
+  bronzeHi: 0x92703c,
+  polish: 0xc8a25a,
+  granite: 0x8f8a84,
+  graniteDk: 0x6b6762,
+  graniteHi: 0xa9a49d,
+  lime: 0xcfc6ae,
+  limeDk: 0xa8a08a,
+};
+
+/** Ombrage d'un ellipsoïde de bronze : clair au-dessus, sombre dessous. */
+function shadeBy(base: number, hi: number, dk: number): (nx: number, ny: number, nz: number) => number {
+  return (_nx, ny) => (ny > 0.55 ? hi : ny < -0.45 ? dk : base);
+}
+
+/** Socle de granit à degrés, plaque de bronze et petits projecteurs LED. */
+function pedestal(m: VoxelModel, c: number, top: number): void {
+  const step = (x0: number, y0: number, y1: number, col: number) => m.box(c - x0, y0, c - x0, c + x0, y1, c + x0, col);
+  step(13, 0, 2, BZ.graniteDk);
+  step(12, 2, 4, BZ.granite);
+  step(11, 4, 6, BZ.graniteHi);
+  step(9, 6, top - 4, BZ.granite);
+  step(11, top - 4, top - 2, BZ.graniteHi);
+  step(10, top - 2, top, BZ.granite);
+  // plaque et inscription
+  m.box(c - 5, 10, c + 9, c + 5, 17, c + 10, BZ.bronze);
+  for (const y of [15, 13, 11]) m.box(c - 4, y, c + 9, c + 4, y + 1, c + 10, BZ.bronzeHi);
+  for (const [x, z] of [
+    [c - 12, c - 12],
+    [c + 11, c - 12],
+    [c - 12, c + 11],
+    [c + 11, c + 11],
+  ])
+    m.set(x, 4, z, SLOT.LED);
+}
+
+/** Bronze patiné : coulures de vert-de-gris sur les parties hautes et quelques taches. */
+function patina(base: number, hi: number, dk: number, seed: number): (nx: number, ny: number, nz: number, x: number, y: number, z: number) => number {
+  return (_nx, ny, _nz, x, y, z) => {
+    const h = hash3(x, y >> 2, z, seed);
+    if (ny > 0.35 && h > 0.45) return BZ.verd;
+    if (h > 0.9) return BZ.verdDk;
+    return ny > 0.55 ? hi : ny < -0.45 ? dk : base;
+  };
+}
+
+/**
+ * Statue allégorique originale (4,6 m) : « la Veilleuse », silhouette drapée en marche, l'orbe lumineux
+ * levé à bout de bras (main gauche) et une haute hampe dans la main droite ; bronze patiné de vert-de-gris.
+ */
+function statue(): VoxelModel {
+  const m = new VoxelModel(26, 74, 26, R16);
+  const c = 13;
+  pedestal(m, c, 24);
+  m.box(c - 6, 24, c - 6, c + 6, 25, c + 6, BZ.verdDk);
+  const B = BZ.bronze;
+  const P = patina(BZ.bronze, BZ.bronzeHi, BZ.bronzeDk, 31);
+  // cape gonflée vers l'arrière
+  for (let y = 27; y < 57; y++) {
+    const w = 4.4 + (57 - y) * 0.09;
+    const back = 9 - Math.round((57 - y) * 0.12);
+    for (let x = Math.round(c - w); x < Math.round(c + w); x++) {
+      const streak = hash3(x, 0, 3, 7) > 0.7;
+      m.box(x, y, back, x + 1, y + 1, 11, streak ? BZ.verd : (x + (y >> 2)) % 4 === 0 ? BZ.bronzeDk : B);
+    }
+  }
+  // robe : jambe gauche en avant (pas de marche), plis et coulures
+  lathe(m, c, c + 0.5, 25, 45, (y) => 3.9 + ((45 - y) / 20) * 1.5, (_y, a, _d, x, z) => {
+    const fold = Math.sin(a * 9);
+    if (hash3(x, 1, z, 5) > 0.78 && fold < 0) return BZ.verd;
+    return fold < -0.5 ? BZ.bronzeDk : fold > 0.7 ? BZ.bronzeHi : B;
+  });
+  blob(m, c + 2, 31, c + 4.5, 2.2, 6, 2.6, P);
+  m.box(c + 1, 25, c + 5, c + 4, 26, c + 9, BZ.bronzeHi);
+  m.box(c - 3, 25, c + 3, c, 26, c + 6, BZ.bronzeDk);
+  // buste, ceinture tressée, épaules
+  blob(m, c, 51, c, 4, 6.6, 3.1, P);
+  m.box(c - 4, 45, c - 3, c + 4, 46, c + 4, BZ.polish);
+  blob(m, c, 55.5, c, 5.3, 1.9, 3, P);
+  // tête nue, cheveux courts tirés en arrière
+  m.box(c - 1, 56, c - 1, c + 1, 59, c + 1, B);
+  blob(m, c, 61.5, c + 0.4, 2.3, 2.8, 2.4, shadeBy(BZ.bronze, BZ.bronzeHi, BZ.bronzeDk));
+  blob(m, c, 62.5, c - 0.8, 2.4, 2.3, 2.3, (_nx, ny) => (ny > 0.5 ? BZ.verd : BZ.bronzeDk));
+  m.set(c - 1, 61, c + 2, BZ.bronzeDk).set(c, 61, c + 2, BZ.bronzeDk);
+  // bras gauche levé en oblique, orbe lumineux cerclé d'un anneau
+  seg(m, [c + 4.5, 55, c], [c + 7, 60.5, c + 0.5], [2, 2, 2], B);
+  seg(m, [c + 7, 60.5, c + 0.5], [c + 8, 66, c + 1], [2, 2, 2], B);
+  m.box(c + 6, 66, c - 1, c + 10, 67, c + 3, BZ.bronzeHi);
+  m.sphere(c + 8, 69.5, c + 1, 2.6, SLOT.GLOW);
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    m.set(Math.floor(c + 8 + Math.cos(a) * 3.6), Math.floor(69.5 + Math.sin(a) * 1.0), Math.floor(c + 1 + Math.sin(a) * 3.6), BZ.polish);
+  }
+  // bras droit tenant la hampe
+  seg(m, [c - 4.5, 55, c], [c - 6, 50, c + 1.5], [2, 2, 2], B);
+  seg(m, [c - 6, 50, c + 1.5], [c - 7, 46, c + 3], [2, 2, 2], B);
+  m.box(c - 8, 25, c + 2, c - 7, 66, c + 3, BZ.bronzeDk);
+  m.box(c - 9, 45, c + 1, c - 6, 47, c + 4, B);
+  m.box(c - 9, 66, c + 1, c - 6, 69, c + 4, BZ.polish);
+  m.box(c - 8, 69, c + 2, c - 7, 71, c + 3, BZ.polish);
+  return m;
+}
+
+/** Taureau de bronze original, chargeant tête baissée, sur un socle de granit bas. */
+function bullStatue(): VoxelModel {
+  const m = new VoxelModel(26, 30, 54, R16).setOrigin(13, 0, 27);
+  const c = 13;
+  rbox(m, 0, 0, 0, 26, 2, 54, BZ.graniteDk);
+  m.box(1, 2, 1, 25, 3, 53, BZ.granite);
+  const B = shadeBy(BZ.bronze, BZ.bronzeHi, BZ.bronzeDk);
+  // jambes (cuisse épaisse, canon fin, sabot sombre)
+  const leg = (top: V3, knee: V3, hoof: V3) => {
+    seg(m, top, knee, [4, 3, 4], BZ.bronze);
+    seg(m, knee, hoof, [2, 2, 3], BZ.bronze);
+    m.box(Math.round(hoof[0]) - 1, 3, Math.round(hoof[2]) - 1, Math.round(hoof[0]) + 2, 5, Math.round(hoof[2]) + 2, BZ.bronzeDk);
+  };
+  leg([c - 4, 14, 38], [c - 4.5, 9, 42], [c - 4.5, 5, 45]);
+  leg([c + 4, 14, 36], [c + 4.5, 9, 36], [c + 4.5, 5, 34]);
+  leg([c - 4, 14, 15], [c - 4.5, 9, 10], [c - 4.5, 5, 6]);
+  leg([c + 4, 14, 17], [c + 4.5, 9, 13], [c + 4.5, 5, 11]);
+  // masses du corps : arrière-train, ventre, poitrail, bosse
+  blob(m, c, 17.5, 16, 7.2, 6.5, 8.5, B);
+  blob(m, c, 16.5, 25, 7.2, 5.8, 9.5, B);
+  blob(m, c, 18.5, 33, 8.6, 8, 9, B);
+  blob(m, c, 21.5, 33, 6.2, 4.6, 7, B);
+  // encolure et tête baissée, mufle poli
+  blob(m, c, 16, 41.5, 5.6, 6, 5, B);
+  blob(m, c, 11, 46.5, 4, 5, 4.2, B);
+  blob(m, c, 7.5, 49.5, 3.2, 3, 3, BZ.polish);
+  m.set(c - 2, 7, 52, BZ.bronzeDk).set(c + 1, 7, 52, BZ.bronzeDk);
+  m.set(c - 3, 12, 49, 0x1a120a).set(c + 2, 12, 49, 0x1a120a);
+  // cornes recourbées vers l'avant (polies)
+  for (const s of [-1, 1]) {
+    bez(m, [c + s * 3, 14, 45], [c + s * 7.5, 14.5, 45.5], [c + s * 8, 17.5, 49], [2, 2, 2], BZ.bronzeHi);
+    bez(m, [c + s * 8, 17.5, 49], [c + s * 8, 19, 50.5], [c + s * 7, 19.5, 52], [1, 1, 1], BZ.polish);
+    blob(m, c + s * 3.4, 15, 44, 1.4, 1.3, 1.4, BZ.bronze);
+  }
+  // queue fouettée
+  bez(m, [c, 19, 8], [c, 27, 2], [c - 1, 27, 9], [2, 2, 2], BZ.bronze);
+  blob(m, c - 1, 26.5, 10, 1.5, 1.5, 1.5, BZ.bronzeDk);
+  return m;
+}
+
+/** Fontaine à l'ange (création originale) : socle, vasque débordante (eau en LED bleutée), ange aux ailes déployées. */
+function fountainAngel(): VoxelModel {
+  const m = new VoxelModel(22, 64, 22, R16);
+  const c = 11;
+  // éclaboussures et socle octogonal
+  lathe(m, c, c, 0, 1, 11, (_y, _a, d) => (d > 8.6 ? SLOT.NEON_CYAN : BZ.limeDk));
+  lathe(m, c, c, 1, 3, 8.4, BZ.lime);
+  lathe(m, c, c, 3, 5, 6.6, BZ.limeDk);
+  lathe(m, c, c, 5, 13, (y) => 5.2 - (y - 5) * 0.15, BZ.lime);
+  lathe(m, c, c, 13, 15, 5.4, BZ.limeDk);
+  // vasque : dessous en cône, lèvre, plan d'eau, rideau d'eau
+  lathe(m, c, c, 15, 19, (y) => 5 + (y - 15) * 1.6, BZ.lime);
+  lathe(m, c, c, 19, 20, 11, (_y, _a, d) => (d > 10 ? BZ.limeDk : -2));
+  lathe(m, c, c, 19, 20, 10, (_y, _a, d) => (Math.abs(d - 7) < 0.5 || Math.abs(d - 4) < 0.5 ? SLOT.NEON_CYAN : SLOT.LED));
+  for (let k = 0; k < 28; k++) {
+    const a = ((k + 0.5) / 28) * Math.PI * 2;
+    for (let y = 1; y < 19; y++) {
+      if (hash3(k, y >> 1, 0, 17) < 0.5) continue;
+      const r = 10.2 + (19 - y) * 0.04;
+      m.set(Math.floor(c + Math.sin(a) * r), y, Math.floor(c + Math.cos(a) * r), (y + k) % 4 === 0 ? SLOT.LED : SLOT.NEON_CYAN);
+    }
+  }
+  // fût supérieur
+  lathe(m, c, c, 20, 25, 2.8, BZ.lime);
+  lathe(m, c, c, 25, 26, 3.6, BZ.limeDk);
+  // ange : robe, buste, tête, ailes, bras bénissant, lys
+  const V = BZ.verd;
+  const shadeV = shadeBy(BZ.verd, BZ.verdHi, BZ.verdDk);
+  lathe(m, c, c, 26, 42, (y) => 2.4 + ((42 - y) / 16) * 1.4, (_y, a) => (Math.sin(a * 7) < -0.55 ? BZ.verdDk : V));
+  blob(m, c, 46.5, c, 2.9, 5, 2.3, shadeV);
+  blob(m, c, 50.5, c, 3.8, 1.5, 2.2, shadeV);
+  m.box(c - 1, 51, c - 1, c + 1, 53, c + 1, V);
+  blob(m, c, 55, c + 0.3, 1.9, 2.3, 2, shadeV);
+  blob(m, c, 55.8, c - 1.3, 1.6, 1.6, 1.3, BZ.verdDk);
+  for (const s of [-1, 1]) {
+    // aile : bord d'attaque en arc, rémiges plus longues vers la pointe, balayée vers l'arrière
+    for (let k = 0; k < 11; k++) {
+      const t = k / 10;
+      const x = c + (s > 0 ? k : -1 - k);
+      const top = 49 + 12 * (1 - (1 - t) * (1 - t));
+      const bot = k < 7 ? 46 - k * 0.5 : 42.5 + (k - 7) * 3.2;
+      const z = c - 3 - Math.round(k * 0.3);
+      for (let y = Math.round(bot); y <= Math.round(top); y++) {
+        const edge = y >= Math.round(top) - 1;
+        const primary = k >= 5 && (k & 1) === 1;
+        m.set(x, y, z, edge ? BZ.verdHi : primary ? BZ.verdDk : (y & 3) === 0 && k < 5 ? BZ.verdDk : V);
+        if (k < 5) m.set(x, y, z - 1, BZ.verdDk);
+      }
+    }
+  }
+  // bras droit tendu (bénédiction), bras gauche tenant un lys
+  seg(m, [c - 3, 50, c], [c - 4, 50.5, c + 4], [2, 2, 2], V);
+  seg(m, [c - 4, 50.5, c + 4], [c - 3.5, 52, c + 7], [2, 2, 2], V);
+  seg(m, [c + 3, 50, c], [c + 4, 46, c + 1.5], [2, 2, 2], V);
+  seg(m, [c + 4, 46, c + 1.5], [c + 3, 44, c + 3], [2, 2, 2], V);
+  seg(m, [c + 3, 40, c + 3.5], [c + 3, 53, c + 3.5], [1, 1, 1], BZ.verdDk);
+  m.box(c + 2, 52, c + 3, c + 5, 54, c + 5, BZ.verdHi);
+  return m;
+}
+
+/** Boule du Nouvel An (Times Square) : sphère à facettes lumineuses animées, joints argentés, éclats LED. */
+function ballTower(): VoxelModel {
+  const m = new VoxelModel(32, 32, 32, R16);
+  const c = 16;
+  const R = 15;
+  const lats = [-0.82, -0.5, -0.18, 0.18, 0.5, 0.82].map((s) => s * R);
+  for (let y = 0; y < 32; y++)
+    for (let z = 0; z < 32; z++)
+      for (let x = 0; x < 32; x++) {
+        const dx = x + 0.5 - c;
+        const dy = y + 0.5 - c;
+        const dz = z + 0.5 - c;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > R) continue;
+        if (d < R - 1.6) {
+          m.set(x, y, z, K.graphite);
+          continue;
+        }
+        let seam = lats.some((l) => Math.abs(dy - l) < 0.5);
+        for (let k = 0; k < 6 && !seam; k++) {
+          const a = (k * Math.PI) / 6 + (Math.floor((dy + R) / (R / 3)) % 2) * (Math.PI / 12);
+          if (Math.abs(dx * Math.sin(a) - dz * Math.cos(a)) < 0.55) seam = true;
+        }
+        const spark = seam && hash3(x, y, z, 21) > 0.86;
+        m.set(x, y, z, spark ? SLOT.LED : seam ? K.alu : SLOT.SCREEN);
+      }
+  // collier inférieur et couronne sommitale
+  lathe(m, c, c, 0, 2, 3.2, K.alu);
+  lathe(m, c, c, 30, 32, 2.6, (y) => (y === 31 ? SLOT.NEON_AMBER : K.alu));
+  return m;
+}
+
 // ================================================================== registre
 
 export const STREET_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
+  // rue
   STREET_LIGHT: { variants: 1, make: () => streetLight() },
   STREET_LIGHT_DOUBLE: { variants: 1, make: () => streetLightDouble() },
   PARK_LAMP: { variants: 1, make: () => parkLamp() },
@@ -1500,6 +2374,28 @@ export const STREET_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
   PARKING_METER: { variants: 1, make: () => parkingMeter() },
   CHARGING_POST: { variants: 1, make: () => chargingPost() },
   SCAFFOLD: { variants: 1, make: () => scaffold() },
+  CAR_PARKED: { variants: 8, make: (v) => hoverCar(CAR_STYLES[v % 8]) },
+  TAXI_PARKED: { variants: 2, make: (v) => hoverCar({ body: 0xf2b400, accent: K.black, glow: -1, taxi: v % 2 === 0 ? 1 : 2 }) },
+  VAN_PARKED: { variants: 3, make: (v) => hoverVan(v % 3) },
+  // toits et façades
+  AC_UNIT: { variants: 3, make: (v) => acUnit(v % 3) },
+  AC_WINDOW: { variants: 1, make: () => acWindow() },
+  ROOF_VENT: { variants: 1, make: () => roofVent() },
+  SAT_DISH: { variants: 1, make: () => satDish() },
+  ANTENNA: { variants: 1, make: () => antenna() },
+  NEON_SIGN: { variants: 8, make: (v) => neonBlade(v % 8) },
+  NEON_WALL_SIGN: { variants: 8, make: (v) => neonWallSign(v % 8) },
+  LANTERN_RED: { variants: 1, make: () => lanternRed() },
+  LANTERN_STRING: { variants: 1, make: () => lanternString() },
+  SECURITY_CAMERA: { variants: 1, make: () => securityCamera() },
+  SECURITY_PANEL: { variants: 1, make: () => securityPanel() },
+  FLAG_BANNER: { variants: 1, make: () => flagBanner() },
+  DOOR_LEAF: { variants: 1, make: () => doorLeaf() },
+  ELEVATOR_DOOR: { variants: 1, make: () => elevatorDoor() },
+  ROLLUP_DOOR: { variants: 3, make: (v) => rollupDoor(v % 3) },
+  // monuments
+  STATUE: { variants: 1, make: () => statue() },
+  BULL_STATUE: { variants: 1, make: () => bullStatue() },
+  FOUNTAIN_ANGEL: { variants: 1, make: () => fountainAngel() },
+  BALL_TOWER: { variants: 1, make: () => ballTower() },
 };
-
-void mix;

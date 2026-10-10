@@ -224,7 +224,7 @@ export class Ambience {
     // Intérieur et métro.
     set(this.rainRoofG.gain, r * 0.35 * i * (1 - u), ti);
     set(this.roomG.gain, i * 0.32 * (1 - u), ti);
-    set(this.subwayG.gain, u * 0.55, ti);
+    set(this.subwayG.gain, u * 0.4, ti);
     set(this.outdoor.gain, (i ? 0.4 : 1) * (1 - 0.9 * u), ti);
     const cut = Math.min(i ? 650 : 16000, 16000 * (1 - u) + 300 * u);
     set(this.muffle.frequency, cut, ti);

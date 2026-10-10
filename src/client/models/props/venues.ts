@@ -33,6 +33,7 @@ const K = {
   copper: 0xb06a3a,
   copperDk: 0x7a4426,
   rust: 0x7a3e22,
+  verdigris: 0x5f8f78,
   // bois
   walnut: 0x5a3a24,
   walnutDk: 0x3c2516,
@@ -316,15 +317,6 @@ function monitor(m: M, x0: number, y0: number, x1: number, y1: number, z: number
 function hazardXY(m: M, x0: number, y0: number, x1: number, y1: number, z: number, a: number, b: number, w = 2): M {
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) m.set(x, y, z, Math.floor((x + y) / w) % 2 ? a : b);
   return m;
-}
-
-/** Aplatit les couleurs proches (bruit doux par blocs sur une couleur donnée). */
-function blockTone(m: M, only: (c: number) => boolean, amount: number, seed: number, bs = 3): M {
-  return m.forEach((x, y, z, c) => {
-    if (c >= 0xf00000 || !only(c)) return;
-    const h = hash3(Math.floor(x / bs), Math.floor(y / bs), Math.floor(z / bs), seed);
-    return shade(c, 1 + (h * 2 - 1) * amount);
-  });
 }
 
 /** Veinage le long d'un axe (les faces fusionnent dans le sens du fil). */
@@ -631,7 +623,7 @@ function holoTable(v: number): M {
     [W - 6, D - 7],
   ]) {
     m.box(x, 14, z, x + 2, 15, z + 2, trim);
-    m.box(x, 15, z, x + 2, 16, z + 2, SLOT.LED);
+    m.set(x, 15, z, SLOT.NEON_CYAN);
   }
   return m;
 }
@@ -762,8 +754,8 @@ function deskBoss(v: number): M {
     m.set(x, 12, f, SLOT.TINT2);
     m.set(x, 12, 0, SLOT.TINT2);
   }
-  m.box(0, 12, 0, 1, 13, D, SLOT.TINT2);
-  m.box(W - 1, 12, 0, W, 13, D, SLOT.TINT2);
+  m.box(0, 12, 0, 1, 13, zf(0) + 1, SLOT.TINT2);
+  m.box(W - 1, 12, 0, W, 13, zf(W - 1) + 1, SLOT.TINT2);
   for (const x of [0, W - 1]) for (const z of [0, zf(x)]) m.box(x, 12, z, x + 1, 14, z + 1, -1);
   // veinage du marbre noir
   if (!classic) {
@@ -896,7 +888,6 @@ function bossChair(v: number): M {
   m.box(1, m.sy - 2, 0, W - 1, m.sy - 1, 1, leaHi);
   // dos : écusson
   discXY(m, cx, 15.5, 2.4, 0, 1, (dx, dy, d) => (d > 1.4 ? SLOT.TINT2 : SLOT.TINT1));
-  void mix;
   return m;
 }
 
@@ -1455,7 +1446,6 @@ function duffelBag(v: number): M {
   const nylon = [0x1e1f23, 0x3a422c][v % 2];
   m.cylX(3, 3, 3.1, 1, W - 1, nylon);
   m.box(1, 0, 1, W - 1, 1, 5, nylon);
-  discXY(m, 0, 0, 0, 0, 0, nylon);
   for (const x of [1, W - 2]) m.cylX(3, 3, 2.6, x, x + 1, shade(nylon, 0.7));
   // fermeture éclair et ouverture garnie de billets
   m.box(2, 5, 3, W - 2, 6, 4, K.chrome);
@@ -1618,7 +1608,7 @@ function tireStack(v: number): M {
     const y0 = i * 4;
     discXZ(m, cx, cz, 4.9, y0, y0 + 1, (dx, dz, d) => (d < 2.8 ? -2 : rub));
     discXZ(m, cx, cz, 5.45, y0 + 1, y0 + 3, (dx, dz, d) => (d < 2.6 ? -2 : rub));
-    discXZ(m, cx, cz, 4.9, y0 + 3, y0 + 4, (dx, dz, d) => (d < 2.8 ? -2 : d > 3.9 && d < 4.4 ? 0x45454a : rub));
+    discXZ(m, cx, cz, 4.9, y0 + 3, y0 + 4, (dx, dz, d) => (d < 2.8 ? -2 : rub));
     if (k === 1) {
       discXZ(m, cx, cz, 3.2, y0 + 1, y0 + 3, (dx, dz, d) => (d > 2.6 ? K.chrome : d > 1.2 ? K.alu : K.gunLt));
       discXZ(m, cx, cz, 3.2, y0 + 3, y0 + 4, (dx, dz, d) => (d > 2.6 ? SLOT.NEON_CYAN : -2));
@@ -1708,7 +1698,7 @@ function crateAt(m: M, x0: number, y0: number, z0: number, w: number, h: number,
 
 function crate(v: number): M {
   const m = mk('CRATE');
-  crateAt(m, 0, 0, 0, m.sx, m.sy, m.sz - 1, v % 3);
+  crateAt(m, 0, 0, 0, m.sx, m.sy, m.sz, v % 3);
   return m;
 }
 
@@ -1716,7 +1706,7 @@ function crate(v: number): M {
 function crateStack(v: number): M {
   const m = mk('CRATE_STACK');
   const k = v % 2;
-  crateAt(m, 0, 0, 0, 16, 14, 15, 0);
+  crateAt(m, 0, 0, 0, 16, 14, 16, 0);
   crateAt(m, 2, 14, 2, 12, 11, 12, k === 1 ? 2 : 1);
   m.box(4, 25, 4, 10, 27, 10, K.cardboard);
   m.box(6, 26, 4, 8, 27, 10, 0xd8c08a);
@@ -1760,29 +1750,40 @@ function palletStack(v: number): M {
     m.box(0, 14, 0, 1, 18, D, K.wrap);
     m.box(W - 1, 14, 0, W, 18, D, K.wrap);
   } else if (k === 1) {
-    for (const [cx, cz] of [
-      [4.75, 4],
-      [14.25, 4],
-      [4.75, 12],
-      [14.25, 12],
+    // quatre fûts bleus (octogonaux) sanglés
+    for (const [x0, z0] of [
+      [2, 0],
+      [10, 0],
+      [2, 8],
+      [10, 8],
     ]) {
-      m.cylY(cx, cz, 4.2, 2, 21, 0x2a5aa0);
-      m.cylY(cx, cz, 4.4, 8, 9, 0x1f4680);
-      m.cylY(cx, cz, 4.4, 15, 16, 0x1f4680);
-      discXZ(m, cx, cz, 1, 21, 22, K.white);
+      cbox(m, x0, 2, z0, x0 + 8, 21, z0 + 8, 0x2a5aa0, 1);
+      for (const y of [8, 15]) cbox(m, x0, y, z0, x0 + 8, y + 1, z0 + 8, 0x1f4680, 1);
+      m.box(x0 + 2, 21, z0 + 2, x0 + 3, 22, z0 + 3, K.white);
     }
-    m.box(0, 12, 0, W, 13, D, K.black);
-    m.box(0, 12, 1, W, 13, D - 1, -1);
+    m.box(2, 12, 0, W - 1, 13, 1, K.black);
+    m.box(2, 12, D - 1, W - 1, 13, D, K.black);
   } else {
-    // sacs de jute en quinconce
+    // sacs de jute en quinconce : coussins bombés (bords rentrés), coutures, oreilles
+    const sack = (x0: number, y: number, z0: number, x1: number, z1: number, col: number) => {
+      m.box(x0, y, z0, x1, y + 1, z1, shade(col, 0.85));
+      m.box(x0, y + 1, z0, x1, y + 3, z1, col);
+      m.box(x0 + 1, y + 3, z0 + 1, x1 - 1, y + 4, z1 - 1, shade(col, 1.08));
+      const lx = x1 - x0 > z1 - z0;
+      if (lx) {
+        m.set(x0, y + 2, Math.floor((z0 + z1) / 2), shade(col, 0.7));
+        m.box(x0 + 3, y + 3, z0 + 1, x0 + 4, y + 4, z1 - 1, shade(col, 0.75));
+      } else {
+        m.set(Math.floor((x0 + x1) / 2), y + 2, z1 - 1, shade(col, 0.7));
+        m.box(x0 + 1, y + 3, z0 + 3, x1 - 1, y + 4, z0 + 4, shade(col, 0.75));
+      }
+    };
     for (let i = 0; i < 4; i++) {
-      const y = 4 + i * 3.4;
+      const y = 2 + i * 4;
       for (let j = 0; j < 2; j++) {
-        const cx = i % 2 ? 9.5 : j === 0 ? 5 : 14;
-        const cz = i % 2 ? (j === 0 ? 4.5 : 11.5) : 8;
-        const rx = i % 2 ? 8.6 : 4.4;
-        const rz = i % 2 ? 3.4 : 7.4;
-        m.ellipsoid(cx, y, cz, rx, 2.2, rz, (i + j) % 2 ? 0xa8925e : 0x9a8454);
+        const col = (i + j) % 2 ? 0xc0a470 : 0xb0945e;
+        if (i % 2) sack(0, y, j * 8, W, j * 8 + 8, col);
+        else sack(j * 10 - (j ? 1 : 0), y, 0, j * 10 + 9, D, col);
       }
     }
   }
@@ -2846,6 +2847,1070 @@ function herbShelf(v: number): M {
   return m;
 }
 
+// ====================================================================== clinique, studio, finance, hôtel, arts
+
+/** Lit médicalisé : châssis à roulettes, dossier relevé, barrières, potence à perfusion, moniteur. */
+function medicalBed(v: number): M {
+  const m = mk('MEDICAL_BED', 0.8);
+  const W = m.sx;
+  const D = m.sz;
+  const frame = 0xd8dde2;
+  const blanket = v % 2 ? 0x3a7aa8 : 0x2a8a8a;
+  // roulettes, châssis, vérin
+  for (const x of [1, W - 3]) for (const z of [2, D - 4]) m.box(x, 0, z, x + 2, 2, z + 2, K.black);
+  m.box(1, 2, 2, W - 1, 4, D - 2, K.gunLt);
+  m.box(1, 3, 2, W - 1, 4, D - 2, SLOT.NEON_CYAN);
+  m.box(6, 4, 12, 10, 6, 22, K.chrome);
+  m.box(0, 6, 1, W, 8, D - 1, frame);
+  // matelas : dossier relevé (côté −Z), couverture, oreiller
+  m.box(1, 8, 12, W - 1, 10, D - 2, 0xe6eaee);
+  for (let z = 2; z < 13; z++) {
+    const top = 10 + Math.round((12 - z) * 0.65);
+    m.box(1, 8, z, W - 1, top, z + 1, 0xe6eaee);
+  }
+  m.box(2, 14, 3, W - 2, 16, 6, K.white);
+  m.box(1, 10, 15, W - 1, 11, D - 3, blanket);
+  m.box(1, 8, 15, 2, 11, D - 3, blanket);
+  m.box(W - 2, 8, 15, W - 1, 11, D - 3, blanket);
+  m.box(1, 10, 15, W - 1, 11, 17, K.white);
+  // têtière et pied de lit
+  m.box(0, 6, 0, W, 18, 1, frame);
+  m.box(2, 15, 0, W - 2, 16, 1, SLOT.NEON_CYAN);
+  m.box(0, 6, D - 1, W, 13, D, frame);
+  m.box(5, 10, D - 1, 11, 12, D, K.black);
+  m.box(6, 11, D - 1, 10, 12, D, SLOT.NEON_GREEN);
+  // barrières latérales
+  for (const x of [0, W - 1]) {
+    m.box(x, 8, 6, x + 1, 12, 7, K.chrome);
+    m.box(x, 8, 20, x + 1, 12, 21, K.chrome);
+    m.box(x, 11, 6, x + 1, 12, 21, K.chrome);
+  }
+  // potence à perfusion et moniteur de constantes
+  m.box(W - 2, 0, 0, W - 1, 26, 1, K.chrome);
+  m.box(W - 4, 25, 0, W, 26, 1, K.chrome);
+  m.box(W - 4, 21, 0, W - 2, 25, 2, 0xd0e4e8);
+  m.box(1, 18, 0, 8, 24, 2, K.black);
+  m.box(2, 19, 1, 7, 23, 2, SLOT.SCREEN);
+  m.box(4, 16, 0, 5, 18, 1, K.chrome);
+  return m;
+}
+
+/** Bras chirurgical robotisé : socle, colonne, scialytique à LED, trois bras articulés et outils. */
+function surgeryArm(v: number): M {
+  const m = mk('SURGERY_ARM', 0.2);
+  const W = m.sx;
+  const white = 0xe8ecef;
+  const joint = K.gunLt;
+  // socle et colonne
+  discXZ(m, 8, 5, 5.5, 0, 2, white);
+  discXZ(m, 8, 5, 5.5, 2, 3, (dx, dz, d) => (d > 4.5 ? SLOT.NEON_CYAN : white));
+  m.box(6, 3, 3, 10, 31, 7, white);
+  m.box(6, 12, 7, 10, 13, 8, SLOT.NEON_CYAN);
+  // potence et scialytique (face vers le bas)
+  m.box(7, 31, 4, 9, 33, 12, joint);
+  discXZ(m, 8, 11, 5, 29, 31, (dx, dz, d) => (d > 4.2 ? K.chrome : white));
+  discXZ(m, 8, 11, 4.2, 28, 29, (dx, dz, d) => (d < 1.2 ? K.gunLt : SLOT.LED));
+  // deux bras articulés (épaule, coude, poignet) penchés vers le patient (+Z)
+  const tube = (a: [number, number, number], b: [number, number, number], col: number) => {
+    const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * 2);
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const x = a[0] + (b[0] - a[0]) * t;
+      const y = a[1] + (b[1] - a[1]) * t;
+      const z = a[2] + (b[2] - a[2]) * t;
+      m.box(Math.round(x - 1), Math.round(y - 1), Math.round(z - 1), Math.round(x - 1) + 2, Math.round(y - 1) + 2, Math.round(z - 1) + 2, col);
+    }
+  };
+  for (const side of [-1, 1]) {
+    const sx = 8 + side * 3;
+    const sh: [number, number, number] = [sx, 24, 7];
+    const el: [number, number, number] = [8 + side * 6, 22, 12];
+    const wr: [number, number, number] = [8 + side * 3, 15, 15];
+    tube(sh, el, white);
+    tube(el, wr, white);
+    m.box(sh[0] - 1, sh[1] - 2, sh[2] - 2, sh[0] + 1, sh[1] + 1, sh[2] + 1, joint);
+    m.box(el[0] - 1, el[1] - 1, el[2] - 1, el[0] + 1, el[1] + 1, el[2] + 1, joint);
+    m.box(wr[0] - 1, wr[1] - 1, wr[2] - 1, wr[0] + 1, wr[1] + 1, wr[2] + 1, K.gunDk);
+    m.box(wr[0], wr[1] - 4, wr[2], wr[0] + 1, wr[1] - 1, wr[2] + 1, K.chrome);
+    m.set(wr[0], wr[1] - 5, wr[2], side < 0 ? SLOT.NEON_RED : SLOT.NEON_CYAN);
+  }
+  // écran de contrôle sur la colonne (côté +Z)
+  m.box(5, 15, 7, 11, 20, 8, K.black);
+  m.box(6, 16, 8, 10, 19, 9, SLOT.SCREEN);
+  void v;
+  return m;
+}
+
+/** Caméra de studio holographique sur pied à roulettes : corps, objectif à anneau lumineux, écran de visée. */
+function holoCamera(v: number): M {
+  const m = mk('HOLO_CAMERA');
+  const W = m.sx;
+  const D = m.sz;
+  const c = (W - 1) / 2;
+  // pied : trois branches et roulettes
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + Math.PI / 2;
+    const ex = c + Math.cos(a) * 5.5;
+    const ez = c + Math.sin(a) * 5.5;
+    line6(m, c, 2, c, ex, 1, ez, K.gun);
+    m.box(Math.round(ex) - 1, 0, Math.round(ez) - 1, Math.round(ex) + 1, 1, Math.round(ez) + 1, K.black);
+  }
+  m.box(c - 1, 1, c - 1, c + 2, 3, c + 2, K.gunDk);
+  // colonne télescopique
+  m.box(c - 1, 3, c - 1, c + 2, 12, c + 2, K.gunLt);
+  m.box(c, 12, c, c + 1, 19, c + 1, K.chrome);
+  m.box(c - 2, 19, c - 2, c + 3, 20, c + 3, K.gunDk);
+  // corps de caméra
+  m.box(3, 20, 1, W - 3, 27, D - 3, K.carbon);
+  m.box(3, 26, 1, W - 3, 27, D - 3, K.gunLt);
+  m.box(3, 22, 3, 4, 25, 8, K.gun);
+  m.box(W - 4, 22, 3, W - 3, 25, 8, K.gun);
+  // objectif et anneau holographique
+  m.cylZ(c + 0.5, 23.5, 2.8, D - 3, D - 1, K.black);
+  m.cylZ(c + 0.5, 23.5, 2.2, D - 1, D, K.gunDk);
+  m.cylZ(c + 0.5, 23.5, 1.4, D - 1, D, SLOT.GLASS);
+  discXY(m, c + 0.5, 23.5, 3.6, D - 2, D - 1, (dx, dy, d) => (d > 2.8 ? (v % 2 ? SLOT.NEON_PINK : SLOT.NEON_CYAN) : -2));
+  // voyant rouge, émetteurs, poignées et écran de visée à l'arrière
+  m.box(c, 27, D - 5, c + 1, 28, D - 4, SLOT.NEON_RED);
+  for (const x of [4, 6, 8]) m.set(x, 27, 3, SLOT.LED);
+  m.box(2, 21, 0, 11, 26, 1, K.black);
+  m.box(3, 22, 0, 10, 25, 1, SLOT.SCREEN);
+  for (const x of [0, W - 1]) m.box(x, 20, 0, x + 1, 21, 4, K.chrome);
+  m.box(0, 20, 3, W, 21, 4, K.gunDk);
+  return m;
+}
+
+/** Bureau de journal télévisé : façade galbée bleu nuit, écran-logo, inscription lumineuse, plateau blanc. */
+function newsDesk(v: number): M {
+  const m = mk('NEWS_DESK', 0.3);
+  const W = m.sx;
+  const D = m.sz;
+  const cx = (W - 1) / 2;
+  const T = 16;
+  const zf = (x: number) => D - 3 + Math.round(2 * (1 - ((x - cx) / cx) ** 2));
+  for (let x = 0; x < W; x++) {
+    const f = zf(x);
+    m.box(x, 0, 3, x + 1, T, f + 1, K.navy);
+    m.set(x, 0, f, SLOT.NEON_BLUE);
+    m.box(x, T, 1, x + 1, T + 2, f + 1, K.white);
+    m.set(x, T, f, SLOT.NEON_BLUE);
+    if (x % 8 === 3) m.box(x, 3, f, x + 1, T - 1, f + 1, K.chrome);
+  }
+  // creux pour les jambes des présentateurs (côté −Z)
+  m.box(4, 0, 3, W - 4, T - 2, 8, -1);
+  m.box(4, 0, 7, W - 4, T - 2, 8, K.blueDk);
+  // écran-logo et inscription
+  for (let x = 14; x < 34; x++) m.box(x, 8, zf(x), x + 1, 15, zf(x) + 1, SLOT.SCREEN);
+  for (let x = 13; x < 35; x++) m.set(x, 7, zf(x), K.chrome);
+  for (const x of [13, 34]) m.box(x, 7, zf(x), x + 1, 15, zf(x) + 1, K.chrome);
+  const tw = textWidth('NEWS 24');
+  textAt(m, 'NEWS 24', SLOT.LED, (u, r) => [Math.round(cx - tw / 2) + u, 5 - r, zf(Math.round(cx - tw / 2) + u)]);
+  // objets : portables (écran vers les présentateurs), feuillets, tasse, micros
+  for (const x0 of [10, 30]) {
+    m.box(x0, T + 2, 4, x0 + 7, T + 3, 8, K.alu);
+    m.box(x0, T + 3, 8, x0 + 7, T + 7, 9, K.alu);
+    m.box(x0 + 1, T + 4, 8, x0 + 6, T + 6, 9, SLOT.SCREEN);
+  }
+  m.box(20, T + 2, 4, 25, T + 3, 8, K.paper);
+  m.box(26, T + 2, 5, 28, T + 4, 7, K.white);
+  for (const x of [8, 39]) {
+    m.box(x, T + 2, 6, x + 1, T + 5, 7, K.black);
+    m.set(x, T + 5, 6, K.gunLt);
+  }
+  void v;
+  return m;
+}
+
+/** Projecteur de studio sur trépied : lyre, panneau LED à volets coupe-flux. */
+function studioLight(v: number): M {
+  const m = mk('STUDIO_LIGHT');
+  const W = m.sx;
+  const c = (W - 1) / 2;
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 - Math.PI / 2;
+    line6(m, c, 12, c, c + Math.cos(a) * 6, 0, c + Math.sin(a) * 6, K.black);
+  }
+  m.box(c - 1, 10, c - 1, c + 2, 13, c + 2, K.gunDk);
+  m.box(c, 13, c, c + 1, 27, c + 1, K.chrome);
+  m.box(c - 1, 18, c - 1, c + 2, 19, c + 2, K.black);
+  // lyre
+  m.box(1, 26, 4, W - 1, 27, 6, K.gunDk);
+  m.box(1, 26, 4, 2, 31, 6, K.gunDk);
+  m.box(W - 2, 26, 4, W - 1, 31, 6, K.gunDk);
+  // tête : boîtier, face LED, volets
+  m.box(2, 27, 2, W - 2, 35, 9, K.black);
+  m.box(3, 28, 9, W - 3, 34, 10, SLOT.LED);
+  m.box(2, 35, 8, W - 2, 35, 12, K.gun);
+  m.box(2, 34, 10, W - 2, 35, 12, K.gun);
+  m.box(2, 27, 10, W - 2, 28, 12, K.gun);
+  m.box(2, 28, 10, 3, 34, 11, K.gun);
+  m.box(W - 3, 28, 10, W - 2, 34, 11, K.gun);
+  m.box(4, 29, 1, W - 4, 33, 2, K.gunLt);
+  m.set(c, 30, 1, SLOT.NEON_GREEN);
+  void v;
+  return m;
+}
+
+/** Poste de trader : six écrans sur bras (deux rangées), courbe boursière, clavier, téléphone. */
+function tradingDesk(v: number): M {
+  const m = mk('TRADING_DESK', 0.4);
+  const W = m.sx;
+  const D = m.sz;
+  const T = 11;
+  // bureau
+  m.box(0, T, 0, W, T + 1, D, K.gunLt);
+  m.box(0, T, D - 1, W, T + 1, D, K.black);
+  m.box(1, T - 1, D - 1, W - 1, T, D, SLOT.NEON_GREEN);
+  for (const x of [0, W - 2]) {
+    m.box(x, 0, 1, x + 2, T, 2, K.gunDk);
+    m.box(x, 0, D - 3, x + 2, T, D - 2, K.gunDk);
+    m.box(x, 0, 1, x + 2, 1, D - 2, K.gunDk);
+  }
+  m.box(2, 3, 1, W - 2, T, 2, K.gun);
+  // mât et bras des écrans
+  m.box(15, T + 1, 1, 17, 24, 3, K.gunDk);
+  m.box(1, 17, 2, W - 1, 18, 3, K.gunDk);
+  // six moniteurs (rangée basse inclinée vers l'utilisateur)
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 2; j++) {
+      const x0 = 1 + i * 10;
+      const y0 = T + 1 + j * 7;
+      const z = j === 0 ? 3 : 2;
+      monitor(m, x0, y0, x0 + 10, y0 + 7, z, K.black);
+    }
+  // courbe boursière statique sur l'écran central haut
+  for (let x = 12; x < 20; x++) m.set(x, T + 9, 4, 0x08160c);
+  m.box(12, T + 9, 4, 20, T + 13, 4, -1);
+  m.box(12, T + 9, 3, 20, T + 13, 4, 0x07120a);
+  const pts = [1, 2, 1, 3, 2, 3, 4, 3];
+  pts.forEach((h, i) => m.set(12 + i, T + 9 + h - 1, 3, i > 5 ? SLOT.NEON_GREEN : i % 3 === 2 ? SLOT.NEON_RED : SLOT.NEON_GREEN));
+  // clavier, souris, téléphone, café
+  m.box(10, T + 1, 8, 20, T + 2, 11, K.carbon);
+  m.box(11, T + 1, 9, 19, T + 2, 10, K.gunLt);
+  m.box(22, T + 1, 9, 24, T + 2, 11, K.black);
+  m.box(3, T + 1, 7, 7, T + 2, 11, K.black);
+  m.box(3, T + 2, 9, 7, T + 3, 10, K.gunDk);
+  m.box(27, T + 1, 8, 29, T + 3, 10, K.white);
+  void v;
+  return m;
+}
+
+/** Comptoir d'accueil : façade de marbre veiné, filet doré, écusson, socle lumineux, sonnette et bouquet. */
+function receptionDesk(v: number): M {
+  const m = mk('RECEPTION_DESK', 0.3);
+  const W = m.sx;
+  const D = m.sz;
+  const dark = v % 2 === 1;
+  const stone = dark ? K.marbleBlk : K.marble;
+  const vein = dark ? K.marbleBlkVein : K.marbleVein;
+  const trim = dark ? K.chrome : K.gold;
+  const led = dark ? SLOT.NEON_CYAN : SLOT.LED;
+  // façade haute (côté visiteurs)
+  m.box(0, 0, D - 5, W, 16, D - 1, stone);
+  m.box(1, 0, D - 1, W - 1, 2, D, K.black);
+  m.box(1, 1, D - 1, W - 1, 2, D, led);
+  m.box(0, 2, D - 1, W, 16, D, stone);
+  // veines
+  line6(m, 2, 4, D - 1, 9, 14, D - 1, vein);
+  line6(m, 6, 2, D - 1, 14, 9, D - 1, mix(vein, stone, 0.5));
+  line6(m, 33, 3, D - 1, 37, 14, D - 1, vein);
+  line6(m, 40, 2, D - 1, 46, 11, D - 1, mix(vein, stone, 0.5));
+  // tablette haute de marbre, filet doré
+  m.box(0, 16, D - 6, W, 18, D, stone);
+  m.box(0, 15, D - 1, W, 16, D, trim);
+  m.box(0, 17, D - 1, W, 18, D, trim);
+  // écusson du propriétaire au centre
+  crest(m, W / 2 - 3, 12, D - 1, false);
+  // poste de travail du réceptionniste (côté −Z)
+  m.box(0, 0, 0, W, 11, D - 5, shade(stone, 0.9));
+  m.box(2, 0, 0, W - 2, 10, 4, -1);
+  m.box(0, 11, 0, W, 12, D - 5, dark ? K.gunDk : K.walnut);
+  m.box(18, 12, 2, 28, 17, 3, K.black);
+  m.box(19, 13, 2, 27, 16, 3, SLOT.SCREEN);
+  m.box(20, 12, 4, 26, 13, 6, K.carbon);
+  // sonnette, registre, bouquet
+  discXZ(m, 12, D - 3.5, 1.3, 18, 19, trim);
+  m.set(12, 19, D - 4, trim);
+  m.box(31, 18, D - 5, 35, 19, D - 2, K.leatherRed);
+  m.box(4, 18, D - 5, 7, 22, D - 2, K.white);
+  for (const [x, y, z, c] of [
+    [4, 22, D - 5, 0xe84a6a],
+    [6, 23, D - 4, K.white],
+    [5, 23, D - 3, 0xf0c040],
+    [3, 22, D - 3, 0x3a8a3a],
+    [7, 22, D - 5, 0x3a8a3a],
+    [5, 24, D - 4, 0xe84a6a],
+  ] as [number, number, number, number][])
+    m.box(x, y, z, x + 1, y + 1, z + 1, c);
+  return m;
+}
+
+/** Chariot à bagages d'hôtel : plateau moquetté, arceau de laiton, valises, carton à chapeau, housse. */
+function luggageCart(v: number): M {
+  const m = mk('LUGGAGE_CART');
+  const W = m.sx;
+  const H = m.sy;
+  const D = m.sz;
+  // roues, plateau
+  for (const x of [1, W - 3]) for (const z of [0, D - 2]) m.box(x, 0, z, x + 2, 2, z + 2, K.black);
+  m.box(0, 2, 0, W, 3, D, K.brass);
+  m.box(1, 3, 1, W - 1, 4, D - 1, 0x8a1a22);
+  m.box(0, 3, 0, W, 4, 1, K.brassLt);
+  m.box(0, 3, D - 1, W, 4, D, K.brassLt);
+  // montants et arceau de laiton
+  for (const x of [1, W - 2]) m.box(x, 3, 4, x + 1, H - 3, 6, K.brass);
+  for (let x = 1; x < W - 1; x++) {
+    const t = (x - 1) / (W - 3);
+    const y = H - 3 + Math.round(Math.sin(t * Math.PI) * 2);
+    m.box(x, H - 3, 4, x + 1, y + 1, 6, -1);
+    m.set(x, y, 4, K.brassLt);
+    m.set(x, y, 5, K.brassLt);
+  }
+  m.box(1, H - 3, 4, W - 1, H - 2, 6, K.brass);
+  // bagages
+  const leatherC = v % 2 ? 0x2a3a5a : 0x6a4a2a;
+  m.box(2, 4, 1, 14, 8, 9, leatherC);
+  m.box(2, 7, 1, 14, 8, 9, shade(leatherC, 1.2));
+  m.box(7, 8, 4, 9, 9, 6, K.brass);
+  m.box(3, 8, 2, 8, 17, 5, v % 2 ? 0xc8ccd0 : 0x2a8a8a);
+  m.box(4, 10, 2, 7, 11, 5, shade(v % 2 ? 0xc8ccd0 : 0x2a8a8a, 0.8));
+  m.box(5, 17, 3, 6, 18, 4, K.black);
+  m.cylY(11.5, 6.5, 2.4, 8, 12, K.canvas);
+  m.cylY(11.5, 6.5, 2.5, 10, 11, K.red);
+  // housse à vêtements suspendue
+  m.box(9, H - 4, 4, 10, H - 3, 6, K.chrome);
+  m.box(8, 13, 4, 14, H - 4, 6, K.navy);
+  m.box(10, 14, 6, 11, H - 5, 7, K.chrome);
+  return m;
+}
+
+/** Socle d'exposition blanc et son objet précieux : œuf d'or serti, amphore, crâne de cristal, artefact holographique. */
+function artPedestal(v: number): M {
+  const m = mk('ART_PEDESTAL', 0.5);
+  const W = m.sx;
+  const c = W / 2;
+  const T = 15;
+  m.box(1, 0, 1, W - 1, 1, W - 1, K.gunDk);
+  m.box(1, 1, 1, W - 1, T, W - 1, K.white);
+  m.box(0, T, 0, W, T + 1, W, K.white);
+  m.box(4, 8, W - 1, 9, 10, W, K.brass);
+  const k = v % 4;
+  const y = T + 1;
+  if (k === 0) {
+    // œuf d'or serti de pierres sur son pied
+    discXZ(m, c, c, 1.6, y, y + 1, K.goldDk);
+    m.ellipsoid(c, y + 4.2, c, 2.3, 3.4, 2.3, K.gold);
+    for (const [dx, dy, dz, col] of [
+      [-2, 4, 0, 0xc0203a],
+      [2, 5, 0, 0x2a5ab0],
+      [0, 3, 2, 0xc0203a],
+      [0, 6, -2, 0x2a8a5a],
+      [0, 4, -2, 0xc0203a],
+      [1, 7, 1, 0xf0f0f0],
+    ])
+      m.set(Math.floor(c + dx), y + dy, Math.floor(c + dz), col);
+    m.set(Math.floor(c), y + 8, Math.floor(c), K.goldLt);
+  } else if (k === 1) {
+    // amphore à figures noires
+    const terra = 0xb0583a;
+    m.cylY(c, c, 1.4, y, y + 1, terra);
+    m.ellipsoid(c, y + 3.5, c, 2.8, 3, 2.8, terra);
+    m.cylY(c, c, 1.2, y + 6, y + 8, terra);
+    m.cylY(c, c, 1.7, y + 8, y + 9, terra);
+    m.cylY(c, c, 2.9, y + 3, y + 4, K.ink);
+    m.cylY(c, c, 1.3, y + 7, y + 8, K.ink);
+    m.box(Math.floor(c) - 3, y + 5, Math.floor(c), Math.floor(c) - 2, y + 8, Math.floor(c) + 1, terra);
+    m.box(Math.floor(c) + 2, y + 5, Math.floor(c), Math.floor(c) + 3, y + 8, Math.floor(c) + 1, terra);
+  } else if (k === 2) {
+    // crâne de cristal
+    const cr = 0xcfe4f0;
+    m.ellipsoid(c, y + 3, c, 2.4, 2.6, 2.8, cr);
+    m.box(Math.floor(c) - 1, y, Math.floor(c) + 1, Math.floor(c) + 1, y + 2, Math.floor(c) + 3, cr);
+    m.set(Math.floor(c) - 1, y + 3, Math.floor(c) + 2, 0x2a3a4a).set(Math.floor(c), y + 3, Math.floor(c) + 2, 0x2a3a4a);
+    m.set(Math.floor(c) - 2, y + 3, Math.floor(c) + 2, 0x2a3a4a).set(Math.floor(c) + 1, y + 3, Math.floor(c) + 2, 0x2a3a4a);
+    m.set(Math.floor(c), y + 1, Math.floor(c) + 3, 0x2a3a4a);
+  } else {
+    // artefact holographique : cube filaire flottant au-dessus d'un émetteur
+    discXZ(m, c, c, 2.4, y, y + 1, (dx, dz, d) => (d > 1.4 ? K.chrome : SLOT.LED));
+    const s = 2;
+    const cy = y + 5;
+    const pts: [number, number, number][] = [];
+    for (const a of [-1, 1]) for (const b of [-1, 1]) for (const d of [-1, 1]) pts.push([a, b, d]);
+    const rot = (p: [number, number, number]): [number, number, number] => {
+      const ca = Math.cos(0.6);
+      const sa = Math.sin(0.6);
+      const x = p[0] * ca - p[2] * sa;
+      const z = p[0] * sa + p[2] * ca;
+      const cb = Math.cos(0.5);
+      const sb = Math.sin(0.5);
+      return [c - 0.5 + x * s, cy + p[1] * cb * s - z * sb * s, c - 0.5 + p[1] * sb * s + z * cb * s];
+    };
+    for (let i = 0; i < 8; i++)
+      for (let j = i + 1; j < 8; j++) {
+        const diff = Math.abs(pts[i][0] - pts[j][0]) + Math.abs(pts[i][1] - pts[j][1]) + Math.abs(pts[i][2] - pts[j][2]);
+        if (diff !== 2) continue;
+        const a = rot(pts[i]);
+        const b = rot(pts[j]);
+        line6(m, a[0], a[1], a[2], b[0], b[1], b[2], i % 2 ? SLOT.NEON_PINK : SLOT.NEON_CYAN);
+      }
+  }
+  return m;
+}
+
+/** Remplit un cube tourné de `ang` autour de Y (centre, demi-côté en voxels). */
+function rotCube(m: M, cx: number, y0: number, cz: number, half: number, ang: number, col: number): void {
+  const ca = Math.cos(ang);
+  const sa = Math.sin(ang);
+  const r = Math.ceil(half * 1.5);
+  for (let y = y0; y < y0 + Math.round(half * 2); y++)
+    for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++)
+      for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+        const dx = x + 0.5 - cx;
+        const dz = z + 0.5 - cz;
+        const u = dx * ca + dz * sa;
+        const w = -dx * sa + dz * ca;
+        if (Math.abs(u) <= half && Math.abs(w) <= half) m.set(x, y, z, col);
+      }
+}
+
+/** Sculpture moderne abstraite : ruban chromé torsadé, cubes empilés, bronze troué, sphère filaire néon. */
+function sculpture(v: number): M {
+  const m = mk('SCULPTURE');
+  const W = m.sx;
+  const H = m.sy;
+  const c = W / 2;
+  const k = v % 4;
+  // socle noir
+  m.box(2, 0, 2, W - 2, 3, W - 2, K.black);
+  m.box(3, 3, 3, W - 3, 4, W - 3, K.gunDk);
+  if (k === 0) {
+    // ruban chromé en anneau torsadé
+    const n = 220;
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      const x = c - 0.5 + Math.cos(t) * 5.6;
+      const y = 17 + Math.sin(t) * 11;
+      const z = c - 0.5 + Math.sin(2 * t) * 3.2;
+      const col = Math.sin(t) > 0.3 ? K.chromeHi : Math.sin(t) < -0.5 ? K.steelLt : K.chrome;
+      m.box(x, y, z, x + 2, y + 1.2, z + 1.2, col);
+    }
+    m.box(c - 1, 4, c - 1, c + 1, 7, c + 1, K.chrome);
+  } else if (k === 1) {
+    // cubes empilés en torsion, sphère dorée au sommet
+    rotCube(m, c, 4, c, 5, 0.25, K.black);
+    rotCube(m, c, 14, c, 3.8, 0.75, K.gold);
+    rotCube(m, c, 21, c, 2.8, 1.25, K.white);
+    m.sphere(c, 28.5, c, 2.4, K.goldLt);
+  } else if (k === 2) {
+    // bronze abstrait percé (figure couchée)
+    const br = 0x8a6a3a;
+    m.ellipsoid(c, 11, c, 6.5, 7, 4.5, br);
+    m.ellipsoid(c + 1, 20, c - 1, 4.5, 5, 3.6, shade(br, 1.1));
+    m.ellipsoid(c - 2, 26, c, 2.6, 3, 2.6, shade(br, 1.2));
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const d = Math.hypot(x + 0.5 - c, y + 0.5 - 12);
+        if (d < 3.2) m.box(x, y, 0, x + 1, y + 1, W, -1);
+      }
+    m.forEach((x, y, z, col) => (col === br && hash3(x >> 1, y >> 1, z >> 1, 9) > 0.8 ? K.verdigris : undefined));
+    m.box(2, 0, 2, W - 2, 3, W - 2, K.black);
+  } else {
+    // sphère filaire en néon (art numérique)
+    const R = 6.5;
+    const cy = 17;
+    const ring = (f: (t: number) => [number, number, number], col: number) => {
+      const n = 90;
+      for (let i = 0; i < n; i++) {
+        const p = f((i / n) * Math.PI * 2);
+        const q = f(((i + 1) / n) * Math.PI * 2);
+        line6(m, p[0], p[1], p[2], q[0], q[1], q[2], col);
+      }
+    };
+    for (const a of [0, Math.PI / 3, (2 * Math.PI) / 3])
+      ring((t) => [c - 0.5 + Math.cos(t) * R * Math.cos(a), cy + Math.sin(t) * R, c - 0.5 + Math.cos(t) * R * Math.sin(a)], SLOT.NEON_PINK);
+    for (const h of [-0.5, 0, 0.5]) {
+      const rr = R * Math.sqrt(1 - h * h);
+      ring((t) => [c - 0.5 + Math.cos(t) * rr, cy + h * R, c - 0.5 + Math.sin(t) * rr], SLOT.NEON_CYAN);
+    }
+    m.box(c - 1, 4, c - 1, c + 1, 10, c + 1, K.chrome);
+  }
+  return m;
+}
+
+/** Juke-box rétro-futuriste : arche à néons, fenêtre du carrousel, boutons, grille chromée. */
+function jukebox(v: number): M {
+  const m = mk('JUKEBOX');
+  const W = m.sx;
+  const H = m.sy;
+  const D = m.sz;
+  const alt = v % 2 === 1;
+  const wood = alt ? K.carbon : K.walnut;
+  const n1 = alt ? SLOT.NEON_AMBER : SLOT.NEON_PINK;
+  const n2 = alt ? SLOT.NEON_GREEN : SLOT.NEON_CYAN;
+  const cx = W / 2;
+  // caisse et arche
+  m.box(0, 0, 0, W, 18, D - 1, wood);
+  discXY(m, cx, 18, 7, 0, D - 1, wood);
+  discXY(m, cx, 18, 7, D - 2, D, (dx, dy, d) => (dy < 0 ? -2 : d > 6 ? n1 : d > 5 ? K.chrome : d > 4 ? n2 : -2));
+  // piliers lumineux latéraux
+  m.box(0, 2, D - 1, 1, 18, D, n1);
+  m.box(W - 1, 2, D - 1, W, 18, D, n1);
+  m.box(1, 2, D - 1, 2, 18, D, K.chrome);
+  m.box(W - 2, 2, D - 1, W - 1, 18, D, K.chrome);
+  // fenêtre du carrousel (disques), titres
+  m.box(3, 13, D - 1, W - 3, 21, D, K.black);
+  m.box(4, 15, D - 1, W - 4, 21, D, SLOT.SCREEN);
+  discXY(m, cx, 17.5, 2.6, D - 1, D, (dx, dy, d) => (d < 0.8 ? K.gold : K.black));
+  m.box(3, 11, D - 1, W - 3, 13, D, K.chrome);
+  for (let x = 4; x < W - 4; x += 2) m.set(x, 12, D - 1, x % 4 ? SLOT.LED : K.red);
+  // grille du haut-parleur
+  m.box(3, 3, D - 1, W - 3, 10, D, K.black);
+  for (let x = 4; x < W - 3; x += 2) m.box(x, 3, D - 1, x + 1, 10, D, K.chrome);
+  m.box(0, 0, D - 1, W, 2, D, K.chrome);
+  return m;
+}
+
+/** Pied de micro : socle rond, mât chromé, micro vintage (ou à anneau lumineux), câble. */
+function micStand(v: number): M {
+  const m = mk('MIC_STAND');
+  const W = m.sx;
+  const c = W / 2;
+  discXZ(m, c, c, 2.9, 0, 1, K.black);
+  m.box(c - 1, 1, c - 1, c + 1, 2, c + 1, K.gunDk);
+  m.set(c, 2, c, K.chrome);
+  m.box(c - 1, 1, c - 1, c, 24, c, K.chrome);
+  // micro : corps chromé, grille arrondie, bague (lumineuse en variante)
+  m.box(c - 1, 22, c - 1, c, 24, c, K.chrome);
+  m.box(c - 2, 24, c - 2, c + 1, 26, c + 1, K.steelLt);
+  m.box(c - 1, 26, c - 1, c, 26, c, K.steelLt);
+  m.box(c - 2, 24, c - 2, c + 1, 25, c + 1, v % 2 ? SLOT.NEON_CYAN : K.gunDk);
+  // câble au sol
+  m.box(c, 0, 0, c + 1, 1, c - 1, K.black);
+  m.box(c - 1, 1, c - 1, c, 2, c, K.black);
+  return m;
+}
+
+/** Rangée de fauteuils de théâtre en velours rouge : dossiers capitonnés, accoudoirs, flancs ouvragés. */
+function seatRow(v: number): M {
+  const m = mk('SEAT_ROW');
+  const W = m.sx;
+  const D = m.sz;
+  const vel = v % 2 ? K.feltBlue : K.velvet;
+  const velDk = shade(vel, 0.65);
+  const n = 4;
+  const sw = (W - 2) / n;
+  // flancs ouvragés (fonte noire et or) et accoudoirs
+  for (let i = 0; i <= n; i++) {
+    const x = Math.round(1 + i * sw) - 1;
+    m.box(x, 0, 2, x + 1, 9, D - 1, K.black);
+    m.box(x, 9, 2, x + 1, 10, D, K.walnutDk);
+    if (i === 0 || i === n) {
+      m.box(x, 2, 4, x + 1, 7, 7, K.gold);
+      m.box(x, 3, 5, x + 1, 6, 6, K.black);
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const x0 = Math.round(1 + i * sw);
+    const x1 = Math.round(1 + (i + 1) * sw) - 1;
+    // assise et dossier galbé
+    m.box(x0, 5, 3, x1, 7, D - 1, vel);
+    m.box(x0, 7, 3, x1, 8, D - 1, velDk);
+    m.box(x0, 5, 0, x1, 16, 3, vel);
+    m.box(x0, 15, 0, x1, 16, 3, velDk);
+    m.box(x0, 5, 0, x1, 16, 1, K.walnutDk);
+    m.box(x0 + 1, 8, 2, x1 - 1, 15, 3, shade(vel, 1.12));
+    // plaque numérotée
+    m.box(x0 + 2, 15, 0, x1 - 2, 16, 1, K.brass);
+  }
+  m.box(0, 0, 3, W, 1, 4, K.black);
+  return m;
+}
+
+/** Guichet Art déco : caisse vitrée, comptoir de laiton, enseigne lumineuse « TICKETS » (ou horloge de gare). */
+function ticketBooth(v: number): M {
+  const m = mk('TICKET_BOOTH');
+  const W = m.sx;
+  const H = m.sy;
+  const D = m.sz;
+  const station = v % 2 === 1;
+  const body = station ? 0x2a4a3a : K.redDk;
+  const trim = station ? K.brass : K.gold;
+  // socle, caisse
+  m.box(0, 0, 0, W, 2, D, K.marbleBlk);
+  m.box(1, 2, 1, W - 1, 30, D - 1, body);
+  // ailerons Art déco aux angles avant
+  for (const x of [0, W - 2]) {
+    m.box(x, 2, D - 3, x + 2, 32, D, trim);
+    m.box(x, 4, D - 2, x + 2, 30, D - 1, body);
+  }
+  // guichet : ouverture, grille, comptoir, intérieur éclairé
+  m.box(4, 13, D - 1, W - 4, 26, D, -1);
+  m.box(4, 13, D - 3, W - 4, 26, D - 1, -1);
+  m.box(4, 13, D - 4, W - 4, 26, D - 3, SLOT.GLOW);
+  for (let x = 6; x < W - 4; x += 3) m.box(x, 18, D - 1, x + 1, 26, D, trim);
+  m.box(4, 25, D - 1, W - 4, 26, D, trim);
+  m.box(3, 12, D - 3, W - 3, 13, D + 0, trim);
+  m.box(11, 13, D - 2, 15, 14, D - 1, K.black);
+  // panneaux inférieurs moulurés
+  for (const x0 of [3, 14]) {
+    m.box(x0, 4, D - 1, x0 + 9, 10, D, shade(body, 1.25));
+    m.box(x0 + 1, 5, D - 1, x0 + 8, 9, D, body);
+  }
+  // corniche à gradins et enseigne
+  m.box(0, 30, 0, W, 31, D, trim);
+  m.box(1, 31, 1, W - 1, H - 1, D - 1, body);
+  m.box(4, H - 1, 4, W - 4, H, D - 4, trim);
+  if (station) {
+    // horloge de gare à quatre faces (face avant détaillée)
+    discXY(m, W / 2, 34.5, 3.4, D - 1, D, (dx, dy, d) => (d > 2.8 ? trim : K.white));
+    m.box(Math.floor(W / 2) - 1, 34, D - 1, Math.floor(W / 2), 37, D, K.black);
+    m.box(Math.floor(W / 2) - 1, 34, D - 1, Math.floor(W / 2) + 2, 35, D, K.black);
+    m.box(2, 32, D - 1, 8, 36, D, K.black);
+    m.box(18, 32, D - 1, 24, 36, D, K.black);
+    m.box(3, 33, D - 1, 7, 35, D, SLOT.NEON_AMBER);
+    m.box(19, 33, D - 1, 23, 35, D, SLOT.NEON_AMBER);
+  } else {
+    m.box(0, 31, D - 1, W, H, D, K.black);
+    textFront(m, 'TICKETS', 1, H - 2, D - 1, SLOT.NEON_AMBER);
+    m.box(0, 31, D - 1, W, 32, D, SLOT.NEON_RED);
+    m.box(0, H - 1, D - 1, W, H, D, SLOT.NEON_RED);
+  }
+  return m;
+}
+
+// ====================================================================== parc, industrie, services, police
+
+/** Poutre de section carrée (size voxels) entre deux points. */
+function beam(m: M, a: [number, number, number], b: [number, number, number], size: number, col: number): void {
+  const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * 2) + 1;
+  const h = size / 2;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const x = Math.round(a[0] + (b[0] - a[0]) * t - h);
+    const y = Math.round(a[1] + (b[1] - a[1]) * t - h);
+    const z = Math.round(a[2] + (b[2] - a[2]) * t - h);
+    m.box(x, y, z, x + size, y + size, z + size, col);
+  }
+}
+
+/** Barque de Central Park : coque peinte à liston, intérieur verni, bancs, avirons, dames de nage. */
+function boat(v: number): M {
+  const m = mk('BOAT');
+  const W = m.sx;
+  const D = m.sz;
+  const k = v % 2;
+  const hull = k ? K.white : 0x2f6a46;
+  const stripe = k ? K.red : K.white;
+  const inner = K.oak;
+  const cx = (W - 1) / 2;
+  const half = (z: number) => (z <= 22 ? 6.2 + 3 * Math.sin((z / 22) * (Math.PI / 2)) : 9.2 * Math.cos(((z - 22) / 29) * (Math.PI / 2)) + 0.4);
+  for (let z = 0; z < D; z++) {
+    const hw = half(z);
+    const sheer = 8 + Math.round(Math.max(0, z - 36) / 7);
+    for (let x = 0; x < W; x++) {
+      const dx = Math.abs(x - cx);
+      if (dx > hw) continue;
+      const bottom = Math.round(((dx / Math.max(1, hw)) ** 2) * 4);
+      m.box(x, bottom, z, x + 1, sheer + 1, z + 1, hull);
+      // intérieur creusé (bordé d'un voxel)
+      if (dx < hw - 1.2 && z > 0 && z < D - 3) m.box(x, bottom + 1, z, x + 1, sheer + 1, z + 1, -1);
+      if (dx < hw - 1.2 && z > 0 && z < D - 3) m.set(x, bottom + 1, z, inner);
+      if (dx >= hw - 1.2) {
+        m.set(x, sheer, z, K.walnut);
+        m.set(x, sheer - 2, z, stripe);
+      }
+    }
+  }
+  // tableau arrière, bancs, avirons, dames de nage
+  m.box(Math.round(cx - 6), 3, 0, Math.round(cx + 7), 9, 1, K.walnut);
+  for (const z of [6, 22, 36]) {
+    const hw = Math.floor(half(z)) - 1;
+    m.box(Math.round(cx - hw), 6, z, Math.round(cx + hw + 1), 7, z + 3, K.oakDk);
+  }
+  for (const side of [-1, 1]) {
+    const x = Math.round(cx + side * 3);
+    m.box(x, 7, 8, x + 1, 8, 44, K.pineLt);
+    m.box(x - 1, 7, 38, x + 2, 8, 44, K.pineLt);
+    const ox = Math.round(cx + side * (half(25) - 0.5));
+    m.box(ox, 9, 25, ox + 1, 10, 26, K.brass);
+  }
+  // numéro sur la proue
+  m.set(Math.round(cx - 5), 6, 30, K.ink).set(Math.round(cx + 5), 6, 30, K.ink);
+  return m;
+}
+
+/** Cuve de fermentation inox : fût cylindrique brossé, dôme, cône, pieds, trou d'homme, vannes, afficheur. */
+function brewTank(v: number): M {
+  const m = mk('BREW_TANK');
+  const W = m.sx;
+  const H = m.sy;
+  const c = W / 2;
+  const copper = v % 2 === 1;
+  const base = copper ? K.copper : 0xb8c0c8;
+  // section en « super-ellipse » : flancs presque plats (reflets réguliers), angles arrondis
+  const ring = (r: number, y0: number, y1: number, col: number) => {
+    for (let x = 0; x < W; x++)
+      for (let z = 0; z < W; z++) {
+        const dx = Math.abs(x + 0.5 - c) / r;
+        const dz = Math.abs(z + 0.5 - c) / r;
+        if (dx ** 3 + dz ** 3 <= 1) m.box(x, y0, z, x + 1, y1, z + 1, col);
+      }
+  };
+  // pieds
+  for (const [x, z] of [
+    [3, 3],
+    [W - 5, 3],
+    [3, W - 5],
+    [W - 5, W - 5],
+  ])
+    m.box(x, 0, z, x + 2, 14, z + 2, K.steel);
+  // cône inférieur, fût, dôme
+  for (let y = 5; y < 12; y++) ring(3 + ((y - 5) / 7) * 8.4, y, y + 1, shade(base, 0.92));
+  ring(11.4, 12, 46, base);
+  for (let y = 46; y < H; y++) ring(Math.max(2, 11.4 * Math.sqrt(Math.max(0, 1 - ((y - 45) / (H - 45)) ** 2))), y, y + 1, shade(base, 1.06));
+  // jaquette de refroidissement (bande en léger relief, liseré de soudure)
+  ring(11.8, 34, 40, shade(base, 0.9));
+  ring(11.8, 35, 39, base);
+  // sortie et vanne papillon
+  m.box(c - 1, 1, c - 1, c + 1, 5, c + 1, K.chrome);
+  m.box(c - 1, 1, c, c + 1, 3, W - 2, K.chrome);
+  m.box(c - 2, 1, W - 3, c + 2, 3, W - 2, K.red);
+  // trou d'homme ovale (face avant)
+  discXY(m, c, 21, 3.6, W - 2, W, (dx, dy, d) => (d > 2.6 ? K.chrome : shade(base, 0.9)));
+  m.box(c - 1, 21, W - 1, c + 1, 22, W, K.black);
+  // afficheur de température, sonde, échelle de jauge
+  m.box(c + 4, 26, W - 3, c + 8, 29, W - 1, K.black);
+  m.box(c + 5, 27, W - 2, c + 7, 28, W - 1, SLOT.NEON_GREEN);
+  m.box(c - 8, 24, W - 4, c - 7, 38, W - 3, K.alu);
+  m.box(c - 8, 24, W - 3, c - 7, 31, W - 2, copper ? K.brass : 0xd8b050);
+  // conduite de CO2 au sommet
+  m.box(c - 1, H - 1, c - 1, c + 1, H, c + 1, K.chrome);
+  m.box(c - 1, H - 2, c, c + 1, H - 1, W - 1, K.chrome);
+  return m;
+}
+
+/** Convoyeur d'usine : châssis jaune, bande noire, rouleaux, arche de scan lumineuse, pièces de drones. */
+function conveyor(v: number): M {
+  const m = mk('CONVEYOR', 0.3);
+  const W = m.sx;
+  const D = m.sz;
+  const T = 12;
+  // pieds et entretoises
+  for (const x of [2, 15, 31, 44]) {
+    m.box(x, 0, 2, x + 2, T, 4, K.gun);
+    m.box(x, 0, D - 4, x + 2, T, D - 2, K.gun);
+    m.box(x, 4, 2, x + 2, 5, D - 2, K.gun);
+    m.box(x - 1, 0, 1, x + 3, 1, D - 1, K.gunDk);
+  }
+  // longerons jaunes à bandes de danger, bande noire, rouleaux d'extrémité
+  m.box(0, T - 2, 1, W, T + 1, 3, K.yellow);
+  m.box(0, T - 2, D - 3, W, T + 1, D - 1, K.yellow);
+  for (let x = 0; x < W; x += 4) {
+    m.box(x, T - 2, D - 1, x + 2, T + 1, D, K.black);
+    m.box(x, T - 2, 0, x + 2, T + 1, 1, K.black);
+  }
+  m.box(0, T - 2, D - 1, W, T + 1, D, -1);
+  m.box(0, T - 2, 0, W, T + 1, 1, -1);
+  for (let x = 1; x < W; x += 4) {
+    m.box(x, T - 2, D - 3, x + 2, T + 1, D - 2, K.black);
+    m.box(x, T - 2, 2, x + 2, T + 1, 3, K.black);
+  }
+  m.box(0, T - 1, 3, W, T, D - 3, K.rubber);
+  m.cylX(T - 1, D / 2, 1.6, 0, W, K.gunLt);
+  m.box(0, T, 3, W, T + 1, D - 3, K.rubber);
+  // arche de scan
+  m.box(20, 0, 0, 23, T + 9, 2, K.gunDk);
+  m.box(20, 0, D - 2, 23, T + 9, D, K.gunDk);
+  m.box(20, T + 8, 0, 23, T + 10, D, K.gunDk);
+  m.box(21, T + 7, 2, 22, T + 8, D - 2, SLOT.NEON_CYAN);
+  m.box(21, T + 1, 2, 22, T + 7, 3, SLOT.NEON_CYAN);
+  m.box(21, T + 1, D - 3, 22, T + 7, D - 2, SLOT.NEON_CYAN);
+  // pièces sur la bande : coques de drones et caisses
+  for (const x of [5, 30, 40]) {
+    m.box(x, T + 1, 5, x + 5, T + 3, 11, v % 2 ? K.black : K.white);
+    m.box(x + 1, T + 3, 6, x + 4, T + 4, 10, K.gunLt);
+    m.set(x + 2, T + 2, 11, SLOT.NEON_GREEN);
+  }
+  m.box(12, T + 1, 5, 17, T + 4, 11, K.cardboard);
+  // boîtier de commande
+  m.box(44, 4, D - 2, 48, 9, D, K.gunDk);
+  m.set(45, 7, D - 1, SLOT.NEON_GREEN).set(47, 7, D - 1, SLOT.NEON_RED);
+  m.box(45, 5, D - 1, 47, 6, D, K.yellow);
+  return m;
+}
+
+/** Bras robot industriel : socle, tourelle, bras et avant-bras, poignet, pince, câbles, voyant. */
+function robotArm(v: number): M {
+  const m = mk('ROBOT_ARM');
+  const W = m.sx;
+  const paintC = v % 2 ? K.white : K.orange;
+  const dk = v % 2 ? K.plastG : K.orangeDk;
+  const c = W / 2;
+  discXZ(m, c, c, 7.4, 0, 2, K.gunDk);
+  discXZ(m, c, c, 7.4, 2, 3, (dx, dz, d) => (d > 6.4 ? SLOT.NEON_GREEN : K.gunDk));
+  discXZ(m, c, c, 5.6, 3, 8, paintC);
+  discXZ(m, c, c, 5.8, 7, 8, dk);
+  // épaule
+  m.box(c - 4, 8, c - 4, c + 4, 13, c + 3, paintC);
+  m.cylX(11, c - 1, 3, c - 5, c + 5, K.gunDk);
+  // bras (incliné vers l'arrière), coude, avant-bras vers l'avant, poignet
+  beam(m, [c, 12, c - 1], [c, 25, c - 4], 4, paintC);
+  m.cylX(25.5, c - 4, 2.6, c - 4, c + 4, K.gunDk);
+  beam(m, [c, 26, c - 3], [c, 24, c + 6], 3, paintC);
+  m.box(c - 2, 22, c + 6, c + 2, 26, c + 8, dk);
+  // pince
+  m.box(c - 1, 19, c + 6, c + 1, 22, c + 8, K.chrome);
+  m.box(c - 2, 16, c + 6, c - 1, 19, c + 7, K.gunDk);
+  m.box(c + 1, 16, c + 6, c + 2, 19, c + 7, K.gunDk);
+  // câbles et marquage
+  line6(m, c + 2, 12, c - 4, c + 2, 24, c - 7, K.black);
+  line6(m, c + 2, 24, c - 7, c + 2, 27, c - 2, K.black);
+  m.box(c - 4, 9, c + 3, c + 4, 11, c + 4, K.black);
+  m.box(c - 3, 10, c + 3, c + 3, 11, c + 4, K.yellow);
+  return m;
+}
+
+/** Drone de livraison posé : quatre rotors carénés, corps, patins, caisson de colis, feux d'état. */
+function droneParked(v: number): M {
+  const m = mk('DRONE_PARKED', 0.1);
+  const W = m.sx;
+  const k = v % 2;
+  const body = k ? K.carbon : K.white;
+  const box = k ? K.yellow : K.orange;
+  const c = W / 2;
+  // patins
+  for (const x of [5, W - 6]) {
+    m.box(x, 0, 3, x + 1, 1, W - 3, K.gunDk);
+    m.box(x, 1, 6, x + 1, 3, 7, K.gunDk);
+    m.box(x, 1, W - 7, x + 1, 3, W - 6, K.gunDk);
+  }
+  // caisson de colis sous le corps
+  m.box(6, 2, 6, W - 6, 5, W - 6, box);
+  m.box(6, 4, 6, W - 6, 5, W - 6, shade(box, 0.8));
+  m.box(8, 2, W - 7, 11, 4, W - 6, K.white);
+  // corps
+  cbox(m, 5, 5, 5, W - 5, 8, W - 5, body, 2);
+  m.box(7, 8, 7, W - 7, 9, W - 7, k ? K.gun : K.plastW);
+  m.set(Math.floor(c), 6, W - 6, SLOT.NEON_GREEN);
+  m.set(Math.floor(c), 6, 4, SLOT.NEON_RED);
+  // bras et rotors carénés
+  for (const [sx, sz] of [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+  ]) {
+    const rx = c + sx * 5.6;
+    const rz = c + sz * 5.6;
+    line6(m, c + sx * 2, 7, c + sz * 2, rx, 7, rz, body);
+    discXZ(m, rx, rz, 3.9, 6, 8, (dx, dz, d) => (d > 3.1 ? body : -2));
+    discXZ(m, rx, rz, 3.9, 7, 8, (dx, dz, d) => (d > 3.1 ? (k ? SLOT.NEON_AMBER : K.gunLt) : -2));
+    m.box(Math.floor(rx), 6, Math.floor(rz), Math.floor(rx) + 1, 8, Math.floor(rz) + 1, K.gunDk);
+    line6(m, rx - 2.5, 8, rz - 0.5, rx + 2.5, 8, rz + 0.5, K.black);
+  }
+  return m;
+}
+
+/** Fauteuil de tatoueur inclinable : piètement chromé, assise, dossier, repose-jambes, encres sur l'accoudoir. */
+function tattooChair(v: number): M {
+  const m = mk('TATTOO_CHAIR');
+  const W = m.sx;
+  const D = m.sz;
+  const lea = v % 2 ? K.leatherRed : K.leather;
+  const stitch = v % 2 ? K.black : K.red;
+  // piètement
+  discXZ(m, W / 2, 13, 5, 0, 1, K.chrome);
+  m.box(5, 1, 11, 8, 7, 15, K.chrome);
+  m.box(3, 6, 8, 10, 7, 18, K.gunDk);
+  // assise
+  m.box(1, 7, 9, W - 1, 10, 18, lea);
+  m.box(1, 9, 9, W - 1, 10, 18, shade(lea, 1.25));
+  // dossier incliné (vers −Z) et appui-tête
+  for (let z = 1; z < 10; z++) {
+    const y = 10 + Math.round((9 - z) * 0.8);
+    m.box(1, y - 2, z, W - 1, y + 1, z + 1, lea);
+    m.set(1, y, z, stitch).set(W - 2, y, z, stitch);
+  }
+  m.box(3, 17, 0, W - 3, 19, 3, lea);
+  m.box(4, 18, 0, W - 4, 19, 2, shade(lea, 1.25));
+  // repose-jambes (vers +Z, en pente)
+  for (let z = 18; z < D; z++) {
+    const y = 9 - Math.round((z - 18) * 0.45);
+    m.box(1, y - 2, z, W - 1, y + 1, z + 1, lea);
+    m.set(1, y, z, stitch).set(W - 2, y, z, stitch);
+  }
+  m.box(5, 1, D - 3, 8, 8 - Math.round((D - 19) * 0.45), D - 2, K.chrome);
+  // accoudoirs
+  for (const x of [0, W - 1]) {
+    m.box(x, 7, 12, x + 1, 11, 13, K.chrome);
+    m.box(x, 11, 9, x + 1, 12, 17, lea);
+  }
+  // encres et machine sur l'accoudoir droit
+  for (const [z, col] of [
+    [9, K.red],
+    [11, K.blue],
+    [13, K.black],
+    [15, 0x2a8a4a],
+  ] as [number, number][])
+    m.set(W - 1, 12, z, col);
+  m.box(0, 12, 14, 1, 13, 17, K.gunLt);
+  return m;
+}
+
+/** Rangée de lave-linge de laverie : hublots chromés (linge visible), afficheurs, monnayeurs, mot « en panne ». */
+function washerRow(v: number): M {
+  const m = mk('WASHER_ROW');
+  const W = m.sx;
+  const H = m.sy;
+  const D = m.sz;
+  const steel = v % 2 === 1;
+  const body = steel ? 0xa8b0b8 : K.white;
+  const laundry = [
+    [0x3a6aa8, K.white, K.red],
+    [K.yellow, 0x2a8a4a, K.white],
+    [0xc84a8a, 0x3a6aa8, K.black],
+    [K.white, K.white, 0x8ab0d0],
+  ];
+  for (let i = 0; i < 4; i++) {
+    const x0 = 1 + i * 9;
+    const x1 = x0 + 9;
+    m.box(x0, 0, 0, x1 - 0, H, D - 1, body);
+    m.box(x0, 0, D - 1, x1, 1, D, K.gunDk);
+    m.box(x1 - 1, 1, D - 1, x1, H, D, shade(body, 0.75));
+    // panneau de commande
+    m.box(x0, H - 3, D - 1, x1 - 1, H, D, steel ? K.gun : 0xc8ccd0);
+    m.box(x0 + 1, H - 2, D - 1, x0 + 4, H - 1, D, K.black);
+    m.set(x0 + 1, H - 2, D - 1, i === 2 ? SLOT.NEON_RED : SLOT.NEON_GREEN);
+    m.set(x0 + 2, H - 2, D - 1, SLOT.NEON_GREEN);
+    m.box(x0 + 6, H - 2, D - 1, x0 + 7, H - 1, D, K.chrome);
+    // hublot : bague chromée, linge coloré dans le tambour
+    const cx = x0 + 4;
+    const cy = 6.5;
+    const pal = laundry[i];
+    discXY(m, cx, cy, 3.6, D - 1, D, (dx, dy, d) => {
+      if (d > 2.7) return K.chrome;
+      if (i === 3) return 0x2a3038;
+      return pal[(Math.floor(dx + 3) + Math.floor(dy + 3) * 2) % 3];
+    });
+    discXY(m, cx, cy, 3.6, D, D, K.chrome);
+  }
+  m.box(0, 0, 0, 1, H, D, shade(body, 0.85));
+  m.box(W - 1, 0, 0, W, H, D, shade(body, 0.85));
+  // mot « en panne » scotché sur la dernière machine
+  m.box(29, 9, D - 1, 33, 12, D, K.paper);
+  m.box(30, 10, D - 1, 32, 11, D, K.red);
+  return m;
+}
+
+/** Comptoir d'accueil du commissariat (2085) : façade bleu nuit, insigne doré, rampe bleu-rouge, vitre blindée. */
+function policeDesk(v: number): M {
+  const m = mk('POLICE_DESK', 0.6);
+  const W = m.sx;
+  const D = m.sz;
+  const T = 17;
+  // façade haute (côté public)
+  m.box(0, 0, D - 5, W, T, D, K.navy);
+  m.box(0, 0, D - 1, W, 1, D, K.black);
+  m.box(0, T - 1, D - 6, W, T + 1, D, K.gunDk);
+  m.box(0, T - 1, D - 1, W, T, D, K.chrome);
+  for (const x of [3, W - 4]) m.box(x, 1, D - 1, x + 1, T - 1, D, K.chrome);
+  // insigne : bouclier doré, étoile, bandeau
+  pix(
+    m,
+    ['.ggggggg.', 'gggg.gggg', 'ggg...ggg', 'gg.....gg', 'ggg...ggg', 'gg..g..gg', '.ggggggg.', '..ggggg..', '...ggg...', '....g....'],
+    { g: K.gold },
+    'xy',
+    Math.floor(W / 2) - 4,
+    15,
+    D - 1,
+  );
+  // inscription lumineuse sous l'insigne
+  const tw = textWidth('POLICE');
+  textFront(m, 'POLICE', Math.round(W / 2 - tw / 2), 5, D - 1, SLOT.LED);
+  // rampe lumineuse bleu-rouge
+  for (let x = 0; x < W; x++) m.set(x, 0, D - 1, x < W / 2 ? SLOT.NEON_BLUE : SLOT.NEON_RED);
+  // vitre blindée sur montants
+  for (const x of [0, Math.floor(W / 2), W - 1]) m.box(x, T + 1, D - 4, x + 1, m.sy, D - 3, K.chrome);
+  m.box(1, T + 1, D - 4, W - 1, m.sy - 1, D - 3, SLOT.GLASS);
+  m.box(12, T + 1, D - 4, 23, T + 3, D - 3, -1);
+  m.box(0, m.sy - 1, D - 4, W, m.sy, D - 3, K.chrome);
+  // poste de l'agent (côté −Z) : bureau, terminal, radio, café, dossiers
+  m.box(0, 0, 0, W, 11, D - 5, K.gunDk);
+  m.box(2, 0, 0, W - 2, 10, 4, -1);
+  m.box(0, 11, 0, W, 12, D - 5, K.gunLt);
+  m.box(6, 12, 3, 14, 17, 4, K.black);
+  m.box(7, 13, 3, 13, 16, 4, SLOT.SCREEN);
+  m.box(8, 12, 5, 13, 13, 7, K.carbon);
+  m.box(20, 12, 4, 22, 15, 6, K.black);
+  m.set(21, 15, 5, SLOT.NEON_RED);
+  m.box(25, 12, 3, 27, 14, 5, K.white);
+  m.box(28, 12, 2, 33, 14, 6, 0xd8c8a0);
+  void v;
+  return m;
+}
+
+/** Barreaux de cellule : cadre d'acier, barreaux, porte à serrure lumineuse, faisceaux d'énergie. */
+function cellBars(v: number): M {
+  const m = mk('CELL_BARS');
+  const W = m.sx;
+  const H = m.sy;
+  const beamC = v % 2 ? SLOT.NEON_RED : SLOT.NEON_BLUE;
+  m.box(0, 0, 0, W, 2, 2, K.gunDk);
+  m.box(0, H - 2, 0, W, H, 2, K.gunDk);
+  m.box(0, 0, 0, 2, H, 2, K.gunDk);
+  m.box(W - 2, 0, 0, W, H, 2, K.gunDk);
+  for (let x = 4; x < W - 2; x += 3) m.box(x, 2, 0, x + 1, H - 2, 2, K.steelLt);
+  for (const y of [14, 28]) m.box(2, y, 0, W - 2, y + 1, 2, K.steel);
+  // porte : montants, serrure, gonds
+  m.box(18, 2, 0, 19, H - 2, 2, K.gunDk);
+  m.box(W - 4, 16, 0, W - 2, 22, 2, K.black);
+  m.set(W - 3, 20, 1, SLOT.NEON_GREEN);
+  m.set(W - 4, 18, 1, beamC);
+  for (const y of [6, 34]) m.box(17, y, 0, 18, y + 3, 2, K.steel);
+  // faisceaux d'énergie entre les barreaux
+  for (let y = 4; y < H - 3; y += 4) {
+    if (y === 28) continue;
+    for (let x = 2; x < W - 2; x++) if ((x - 4) % 3 !== 0 && x !== 18) m.set(x, y, 1, beamC);
+  }
+  return m;
+}
+
+/** Lits superposés métalliques : matelas, oreillers, couvertures, échelle, garde-corps. */
+function bunkBed(v: number): M {
+  const m = mk('BUNK_BED');
+  const W = m.sx;
+  const H = m.sy;
+  const D = m.sz;
+  const frame = v % 2 ? 0x8a9098 : 0x3e4a32;
+  const blanket = v % 2 ? 0xc86a1e : 0x5a6a3a;
+  for (const x of [0, W - 1]) for (const z of [0, D - 1]) m.box(x, 0, z, x + 1, H, z + 1, frame);
+  for (const y of [4, 17]) {
+    // sommier et cadre
+    m.box(0, y, 0, W, y + 1, D, frame);
+    m.box(1, y, 1, W - 1, y + 1, D - 1, K.gunLt);
+    // matelas, oreiller, couverture pliée en bas
+    m.box(1, y + 1, 1, W - 1, y + 3, D - 1, 0xc8ccd0);
+    m.box(2, y + 3, 1, W - 2, y + 4, 5, K.white);
+    m.box(1, y + 2, 10, W - 1, y + 3, D - 1, blanket);
+    m.box(1, y + 1, 10, 2, y + 3, D - 1, blanket);
+    m.box(W - 2, y + 1, 10, W - 1, y + 3, D - 1, blanket);
+    m.box(2, y + 3, 10, W - 2, y + 4, 13, shade(blanket, 1.15));
+  }
+  // têtes de lit, garde-corps du haut
+  for (const z of [0, D - 1]) {
+    m.box(0, 7, z, W, 8, z + 1, frame);
+    m.box(0, 20, z, W, 21, z + 1, frame);
+    m.box(0, H - 1, z, W, H, z + 1, frame);
+  }
+  m.box(W - 1, 22, 0, W, 23, D - 10, frame);
+  m.box(W - 1, H - 1, 0, W, H, D, frame);
+  m.box(0, 22, 0, 1, 23, D, frame);
+  // échelle (côté +X, au pied)
+  m.box(W - 1, 0, D - 9, W, H - 6, D - 8, frame);
+  for (let y = 3; y < H - 6; y += 4) m.box(W - 1, y, D - 8, W, y + 1, D - 1, frame);
+  return m;
+}
+
 // ====================================================================== registre
 
 export const VENUE_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
@@ -2899,4 +3964,28 @@ export const VENUE_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
   STORE_SHELF: { variants: 3, make: storeShelf },
   CHECKOUT: { variants: 2, make: checkout },
   HERB_SHELF: { variants: 1, make: herbShelf },
+  MEDICAL_BED: { variants: 2, make: medicalBed },
+  SURGERY_ARM: { variants: 1, make: surgeryArm },
+  HOLO_CAMERA: { variants: 2, make: holoCamera },
+  NEWS_DESK: { variants: 1, make: newsDesk },
+  STUDIO_LIGHT: { variants: 1, make: studioLight },
+  TRADING_DESK: { variants: 1, make: tradingDesk },
+  RECEPTION_DESK: { variants: 2, make: receptionDesk },
+  LUGGAGE_CART: { variants: 2, make: luggageCart },
+  ART_PEDESTAL: { variants: 4, make: artPedestal },
+  SCULPTURE: { variants: 4, make: sculpture },
+  JUKEBOX: { variants: 2, make: jukebox },
+  MIC_STAND: { variants: 2, make: micStand },
+  SEAT_ROW: { variants: 2, make: seatRow },
+  TICKET_BOOTH: { variants: 2, make: ticketBooth },
+  BOAT: { variants: 2, make: boat },
+  BREW_TANK: { variants: 2, make: brewTank },
+  CONVEYOR: { variants: 2, make: conveyor },
+  ROBOT_ARM: { variants: 2, make: robotArm },
+  DRONE_PARKED: { variants: 2, make: droneParked },
+  TATTOO_CHAIR: { variants: 2, make: tattooChair },
+  WASHER_ROW: { variants: 2, make: washerRow },
+  POLICE_DESK: { variants: 1, make: policeDesk },
+  CELL_BARS: { variants: 2, make: cellBars },
+  BUNK_BED: { variants: 2, make: bunkBed },
 };

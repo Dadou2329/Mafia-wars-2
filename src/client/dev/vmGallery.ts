@@ -1,14 +1,16 @@
 // Banc d'essai de la vue subjective (développement, route ?vm) : une ruelle simple, la vue
 // subjective attachée à la caméra, et des commandes pour passer en revue chaque arme, chaque
-// parrain, la visée, le tir, les coups, le rechargement, le jour et la nuit.
+// parrain, la visée, le tir (automatique pour le Wasp), les coups, le rechargement, le jour et
+// la nuit.
 //
-// Clavier : 1-6 arme · L Dadou/Even · clic droit (ou A) viser · clic gauche (ou F) tirer/frapper
-// · R recharger · W marcher · Maj courir · Espace sauter · N jour/nuit/intérieur · M repère de
-// bouche du canon · P pause · glisser la souris pour tourner la tête.
+// Clavier : 1-7 arme · L Dadou/Even · clic droit (ou A) viser · clic gauche (ou F) tirer/frapper
+// (maintenu : rafale) · R recharger · W marcher · Maj courir · Espace sauter · N jour/nuit/intérieur
+// · M repère de bouche du canon · P pause · glisser la souris (Maj + clic) pour tourner la tête.
 //
-// API pour les captures automatiques : window.__vm (set, step, fire, swing, reload, render…).
-// Avec ?vm&still la boucle d'animation est arrêtée : on avance le temps avec __vm.step().
-// Avec ?vm&inspect les modèles sont affichés à plat, en grand, pour les vérifier.
+// API pour les captures automatiques : window.__vm (set, step, fire, burst, swing, reload,
+// reloadAt, render…). Avec ?vm&still la boucle d'animation est arrêtée : on avance le temps avec
+// __vm.step(). Avec ?vm&inspect les modèles sont affichés à plat, en grand, pour les vérifier
+// (?vm&inspect=pistol,smg%2Bdadou… ; sans liste : tous).
 
 import * as THREE from 'three';
 import { WEAPONS, Weapon } from '../../shared/characters';
@@ -23,14 +25,8 @@ import { createObjectMaterial } from '../render/voxelObjectMaterial';
 
 type EnvKind = 'day' | 'night' | 'indoor';
 
-const WEAPON_NAMES: Record<number, string> = {
-  [Weapon.FISTS]: 'Poings',
-  [Weapon.PISTOL]: 'Revolver Webley',
-  [Weapon.SHOTGUN]: 'Fusil juxtaposé',
-  [Weapon.RIFLE]: 'Martini-Henry',
-  [Weapon.KNIFE]: 'Couteau Bowie',
-  [Weapon.CLUB]: 'Matraque',
-};
+const WEAPON_NAMES: Record<number, string> = Object.fromEntries(Object.values(WEAPONS).map((d) => [d.id, d.name]));
+const ORDER = [Weapon.FISTS, Weapon.PISTOL, Weapon.SHOTGUN, Weapon.RIFLE, Weapon.KNIFE, Weapon.CLUB, Weapon.SMG];
 
 /** Volume de lumière minimal (2×2×2, uniforme) : ciel, lampes. */
 function lightTexture(): THREE.Data3DTexture {
@@ -172,11 +168,7 @@ export function startVmGallery(root: HTMLElement): void {
   const weapons = {
     current: Weapon.PISTOL as Weapon,
     reloadUntil: 0,
-    mag: new Map<Weapon, number>([
-      [Weapon.PISTOL, 6],
-      [Weapon.SHOTGUN, 2],
-      [Weapon.RIFLE, 1],
-    ]),
+    mag: new Map<Weapon, number>(ORDER.filter((w) => WEAPONS[w].ranged).map((w) => [w, WEAPONS[w].magazine])),
     reloading(now: number) {
       return now < this.reloadUntil;
     },
@@ -190,6 +182,9 @@ export function startVmGallery(root: HTMLElement): void {
     paused: params.has('still'),
     aimToggle: false,
     jumpT: -1,
+    /** Bouton de tir maintenu (rafale du Wasp). */
+    trigger: false,
+    nextShot: 0,
   };
   let now = 1;
   let flashT = 0;
@@ -228,13 +223,16 @@ export function startVmGallery(root: HTMLElement): void {
       reload();
       return;
     }
+    if (now < state.nextShot) return;
+    state.nextShot = now + def.cooldown;
     weapons.mag.set(w, m - 1);
     const big = w === Weapon.SHOTGUN || w === Weapon.RIFLE;
+    const smg = w === Weapon.SMG;
     const p = vm.muzzleWorld(camera);
     flash.position.copy(p);
     flash.visible = true;
-    flashT = 0.06;
-    vm.kick(big ? 1.4 : 1);
+    flashT = smg ? 0.03 : 0.06;
+    vm.kick(big ? 1.4 : smg ? 0.5 : 1);
   };
   const reload = () => {
     const w = weapons.current;
@@ -251,6 +249,7 @@ export function startVmGallery(root: HTMLElement): void {
   const setWeapon = (w: Weapon) => {
     weapons.current = w;
     weapons.reloadUntil = 0;
+    state.nextShot = 0;
   };
 
   // ---------------------------------------------------------------- simulation
@@ -272,6 +271,8 @@ export function startVmGallery(root: HTMLElement): void {
         pending[i].fn();
         pending.splice(i, 1);
       }
+    // tir automatique tant que la détente est tenue
+    if (state.trigger && WEAPONS[weapons.current].auto) fire();
     // caméra : œil à 1,64 m, zoom de visée comme en jeu
     const fovT = player.aiming ? (weapons.current === Weapon.RIFLE ? baseFov * 0.5 : weapons.current === Weapon.FISTS || weapons.current === Weapon.KNIFE || weapons.current === Weapon.CLUB ? baseFov : baseFov * 0.72) : player.sprint && state.walk ? baseFov * 1.06 : baseFov;
     camera.fov += (fovT - camera.fov) * Math.min(1, dt * 12);
@@ -319,7 +320,7 @@ export function startVmGallery(root: HTMLElement): void {
     };
     bar.appendChild(b);
   };
-  for (const w of [Weapon.FISTS, Weapon.PISTOL, Weapon.SHOTGUN, Weapon.RIFLE, Weapon.KNIFE, Weapon.CLUB]) button(`${w + 1} ${WEAPON_NAMES[w]}`, () => setWeapon(w));
+  for (const w of ORDER) button(`${w + 1} ${WEAPON_NAMES[w]}`, () => setWeapon(w));
   button('L Dadou/Even', () => api.set({ look: state.look === 'dadou' ? 'even' : 'dadou' }));
   button('A viser', () => (state.aimToggle = player.aiming = !player.aiming));
   button('F tirer/frapper', fire);
@@ -336,7 +337,7 @@ export function startVmGallery(root: HTMLElement): void {
   };
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k >= '1' && k <= '6') setWeapon((Number(k) - 1) as Weapon);
+    if (k >= '1' && k <= '7') setWeapon((Number(k) - 1) as Weapon);
     else if (k === 'l') api.set({ look: state.look === 'dadou' ? 'even' : 'dadou' });
     else if (k === 'a') state.aimToggle = player.aiming = !player.aiming;
     else if (k === 'f') fire();
@@ -354,11 +355,15 @@ export function startVmGallery(root: HTMLElement): void {
     if (e.button === 2) player.aiming = true;
     else if (e.button === 0) {
       if (e.shiftKey) drag = { x: e.clientX, y: e.clientY };
-      else fire();
+      else {
+        state.trigger = true;
+        fire();
+      }
     }
   });
   window.addEventListener('mouseup', (e) => {
     if (e.button === 2) player.aiming = state.aimToggle;
+    if (e.button === 0) state.trigger = false;
     drag = null;
   });
   window.addEventListener('mousemove', (e) => {
@@ -405,8 +410,26 @@ export function startVmGallery(root: HTMLElement): void {
       render();
     },
     fire,
+    /** Rafale : `n` tirs au rythme de l'arme (la simulation avance entre deux tirs). */
+    burst(n: number) {
+      for (let i = 0; i < n; i++) {
+        fire();
+        const dt = Math.max(1 / 60, WEAPONS[weapons.current].cooldown);
+        const k = Math.max(1, Math.round(dt * 60));
+        for (let j = 0; j < k; j++) step(1 / 60);
+      }
+      render();
+    },
     swing: () => vm.swing(),
     reload,
+    /** Fige le rechargement de l'arme courante à la fraction `t` (0..1) puis dessine. */
+    reloadAt(t: number) {
+      const def = WEAPONS[weapons.current];
+      if (!def.ranged) return;
+      weapons.reloadUntil = now + 1e-4 + def.reload * (1 - t);
+      step(1e-4);
+      render();
+    },
     jump: () => (state.jumpT = 0),
     render,
     now: () => now,
@@ -430,7 +453,7 @@ export function startVmGallery(root: HTMLElement): void {
   if (!state.paused) requestAnimationFrame(loop);
 }
 
-/** Planche des modèles (?vm&inspect=revolver,shotgun…) : chaque pièce à plat, sous plusieurs angles. */
+/** Planche des modèles (?vm&inspect=pistol,smg…) : chaque pièce à plat, sous plusieurs angles. */
 function startInspect(renderer: THREE.WebGLRenderer, which: string): void {
   envUniforms.uNight.value = 0;
   envUniforms.uSkyAmb.value.setRGB(0.52, 0.56, 0.66);
@@ -450,42 +473,47 @@ function startInspect(renderer: THREE.WebGLRenderer, which: string): void {
     VM.armLookFor(
       boss,
       boss === 'dadou'
-        ? { skin: 0xe0b896, coat: 0x161418, coat2: 0x8e1b22, shirt: 0xece6da, accent: 0xd4a640, vest: 0x5a1218 }
+        ? { skin: 0xdcb08a, coat: 0x161418, coat2: 0x9e1b26, shirt: 0xece6da, accent: 0xd9a640, vest: 0x5a1218 }
         : { skin: 0xecc6a4, coat: 0x1d3461, coat2: 0x2c4a80, shirt: 0xf2eee6, accent: 0xc9d1dc, vest: 0x8a8f98 },
     );
+  const mesh = (m: Parameters<typeof meshModel>[0], pos: [number, number, number] = [0, 0, 0], rot: [number, number, number] = [0, 0, 0]) => {
+    const o = new THREE.Mesh(meshModel(m), mat);
+    o.position.set(...pos);
+    o.rotation.set(...rot);
+    return o;
+  };
+  const group = (...objs: THREE.Object3D[]) => {
+    const g = new THREE.Group();
+    g.add(...objs);
+    return g;
+  };
   const groups: Record<string, () => THREE.Object3D> = {
-    revolver: () => {
-      const r = VM.revolverModels();
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(meshModel(r.frame), mat));
-      const grip = new THREE.Mesh(meshModel(r.grip), mat);
-      grip.rotation.set(...VM.REVOLVER.gripRot);
-      g.add(grip);
-      const b = new THREE.Mesh(meshModel(r.barrel), mat);
-      b.position.set(...VM.REVOLVER.pivot!);
-      g.add(b);
-      return g;
+    pistol: () => {
+      const p = VM.pistolModels();
+      return group(mesh(p.frame), mesh(p.slide), mesh(p.grip, [0, 0, 0], VM.PISTOL.gripRot), mesh(p.mag, [0, 0, 0], VM.PISTOL.gripRot));
+    },
+    smg: () => {
+      const p = VM.smgModels();
+      return group(mesh(p.body), mesh(p.grip, [0, 0, 0], VM.SMG.gripRot), mesh(p.foregrip, VM.SMG.support!, VM.SMG.supportRot), mesh(p.mag), mesh(p.handle));
     },
     shotgun: () => {
-      const s = VM.shotgunModels();
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(meshModel(s.body), mat));
-      const b = new THREE.Mesh(meshModel(s.barrels), mat);
-      b.position.set(...VM.SHOTGUN.pivot!);
-      g.add(b);
-      return g;
+      const p = VM.shotgunModels();
+      return group(mesh(p.body), mesh(p.grip, [0, 0, 0], VM.SHOTGUN.gripRot), mesh(p.pump));
     },
     rifle: () => {
-      const s = VM.rifleModels();
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(meshModel(s.body), mat));
-      const l = new THREE.Mesh(meshModel(s.lever), mat);
-      l.position.set(...VM.RIFLE.pivot!);
-      g.add(l);
-      return g;
+      const p = VM.rifleModels();
+      return group(mesh(p.body), mesh(p.grip, [0, 0, 0], VM.RIFLE.gripRot), mesh(p.cell), ...p.ringsLit.map((m) => mesh(m)));
     },
-    knife: () => new THREE.Mesh(meshModel(VM.knifeModel()), mat),
-    club: () => new THREE.Mesh(meshModel(VM.clubModel()), mat),
+    rifleOff: () => {
+      const p = VM.rifleModels();
+      return group(mesh(p.body), mesh(p.grip, [0, 0, 0], VM.RIFLE.gripRot), mesh(p.cell), ...p.rings.map((m) => mesh(m)));
+    },
+    knife: () => mesh(VM.knifeModel()),
+    club: () => mesh(VM.clubModel()),
+    items: () => {
+      const kinds: VM.CasingKind[] = ['pistol', 'shell', 'mag', 'smgMag', 'cell', 'cellSpent'];
+      return group(...kinds.map((k, i) => mesh(VM.casingModel(k), [0, 0, -i * 0.06])));
+    },
   };
   // arme + main(s) dans leur repère commun (comme en jeu)
   const withHands = (name: string, slots: [VM.HandPose, 'R' | 'L', [number, number, number], [number, number, number]][], boss: 'dadou' | 'even') => {
@@ -493,16 +521,16 @@ function startInspect(renderer: THREE.WebGLRenderer, which: string): void {
       const g = groups[name]();
       for (const [pose, side, pos, rot] of slots) {
         const a = VM.armModels(side, pose, look(boss));
-        const h = new THREE.Mesh(meshModel(a.hand), mat);
-        h.position.set(...pos);
-        h.rotation.set(...rot);
-        g.add(h);
+        g.add(mesh(a.hand, pos, rot));
       }
       return g;
     };
   };
   for (const boss of ['dadou', 'even'] as const) {
-    withHands('revolver', [['pistol', 'R', [0, 0, 0], VM.REVOLVER.gripRot]], boss);
+    withHands('pistol', [['pistol', 'R', [0, 0, 0], VM.PISTOL.gripRot]], boss);
+    withHands('smg', [['pistol', 'R', [0, 0, 0], VM.SMG.gripRot], ['pistol', 'L', VM.SMG.support!, VM.SMG.supportRot]], boss);
+    withHands('shotgun', [['pistol', 'R', [0, 0, 0], VM.SHOTGUN.gripRot], ['support', 'L', VM.SHOTGUN.support!, VM.SHOTGUN.supportRot]], boss);
+    withHands('rifle', [['pistol', 'R', [0, 0, 0], VM.RIFLE.gripRot], ['support', 'L', VM.RIFLE.support!, VM.RIFLE.supportRot]], boss);
     withHands('knife', [['blade', 'R', [0, 0, 0], [0, 0, 0]]], boss);
     withHands('club', [['blade', 'R', [0, 0, 0], [0, 0, 0]]], boss);
   }
@@ -511,13 +539,8 @@ function startInspect(renderer: THREE.WebGLRenderer, which: string): void {
       groups[`${pose}-${boss}`] = () => {
         const side = pose === 'support' ? 'L' : 'R';
         const a = VM.armModels(side, pose, look(boss));
-        const g = new THREE.Group();
-        g.add(new THREE.Mesh(meshModel(a.hand), mat));
-        const f = new THREE.Mesh(meshModel(a.forearm), mat);
-        f.position.set(...a.wrist);
-        f.rotation.x = -0.6;
-        g.add(f);
-        return g;
+        const f = mesh(a.forearm, a.wrist, [-0.6, 0, 0]);
+        return group(mesh(a.hand), f);
       };
     }
   }

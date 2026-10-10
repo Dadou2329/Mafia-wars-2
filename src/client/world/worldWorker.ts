@@ -9,15 +9,15 @@ const post = (msg: unknown, transfer: Transferable[] = []) => (self as unknown a
 
 self.onmessage = () => {
   const t0 = performance.now();
-  post({ type: 'progress', step: 'Pavage des rues et construction des bâtiments…', f: 0.05 });
+  post({ type: 'progress', step: 'Construction des gratte-ciel et des rues…', f: 0.05 });
   const city = generateCity();
-  post({ type: 'progress', step: 'Allumage des becs de gaz…', f: 0.3 });
+  post({ type: 'progress', step: 'Allumage des néons…', f: 0.3 });
   const light = computeLightVolume(city.world, city.ctx.lights);
   const tint = computeTintVolume(city.world, city.ctx.lights);
   post({ type: 'progress', step: 'Tracé des itinéraires…', f: 0.5 });
   const nav = buildCityNav(city);
-  post({ type: 'progress', step: 'Taille des pierres et des briques…', f: 0.55 });
-  const regions = meshRegions(city.world, (f) => post({ type: 'progress', step: 'Taille des pierres et des briques…', f: 0.55 + f * 0.4 }));
+  post({ type: 'progress', step: 'Assemblage des façades…', f: 0.55 });
+  const regions = meshRegions(city.world, (f) => post({ type: 'progress', step: 'Assemblage des façades…', f: 0.55 + f * 0.4 }));
   const chunks = city.world.chunks;
   const transfer: Transferable[] = [light.data.buffer, tint.data.buffer, city.groundMap.buffer, city.world.fillMat.buffer, ...nav.transferables()];
   for (const c of chunks) if (c) transfer.push(c.buffer);
@@ -37,6 +37,8 @@ self.onmessage = () => {
       lights: city.ctx.lights,
       buildings: city.buildings,
       smokes: city.ctx.smokes,
+      screens: city.ctx.screens,
+      holos: city.ctx.holos,
       groundMap: city.groundMap,
       gw: city.gw,
       gd: city.gd,

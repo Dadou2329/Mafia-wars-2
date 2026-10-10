@@ -22,26 +22,35 @@ uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform float uDusk;
+uniform float uRain;
+uniform float uFlash;
 varying vec3 vDir;
 ${NOISE_GLSL}
-float skyline(float az) {
-  float a = az * 60.0;
-  float bin = floor(a);
-  float h = 0.012 + 0.018 * h12(vec2(bin, 1.0));
-  // cheminées et clochers
+// Silhouette lointaine de New York 2085 : forêt de tours, flèches, antennes et méga-tours.
+float skyline(float az, out float bin, out float spire) {
+  float a = az * 46.0;
+  bin = floor(a);
+  float r = h12(vec2(bin, 1.0));
+  float h = 0.018 + 0.05 * r * r;
+  // grappes de très hautes tours (Midtown au nord, Lower Manhattan au sud, Jersey City à l'ouest)
+  float c1 = exp(-pow((az - 0.15) * 3.2, 2.0));
+  float c2 = exp(-pow((az + 2.9) * 3.0, 2.0)) + exp(-pow((az - 3.05) * 3.0, 2.0));
+  float c3 = exp(-pow((az + 1.45) * 2.6, 2.0));
+  h += (0.06 * c1 + 0.045 * c2 + 0.03 * c3) * h12(vec2(bin, 5.0));
+  // retraits en gradins (art déco) près du sommet
   float f = fract(a);
-  float b2 = floor(az * 240.0);
-  if (h12(vec2(b2, 7.0)) > 0.93) h += 0.02 * step(0.3, fract(az * 240.0)) * step(fract(az * 240.0), 0.7);
-  // dôme de Saint-Paul
-  float dd = abs(az - 0.35);
-  if (dd < 0.05) h = max(h, 0.035 + sqrt(max(0.0, 0.0025 - dd * dd)) * 0.9);
-  if (dd < 0.006) h = max(h, 0.095);
-  // tours de Westminster au sud-ouest
-  float dw = abs(az + 2.2);
-  if (dw < 0.012) h = max(h, 0.09);
-  // grues des docks
-  float dk = abs(az - 2.4);
-  if (dk < 0.15 && h12(vec2(floor(az * 300.0), 3.0)) > 0.8) h = max(h, 0.05);
+  float step1 = step(0.18, f) * step(f, 0.82);
+  h -= 0.008 * (1.0 - step1) * step(0.5, h12(vec2(bin, 9.0)));
+  // flèches et antennes
+  spire = 0.0;
+  if (h12(vec2(bin, 3.0)) > 0.8) {
+    float w = abs(f - 0.5);
+    spire = max(0.0, 0.035 * (1.0 - w * 9.0)) * (0.5 + c1);
+    h += spire;
+  }
+  // tours basses intercalées
+  float b2 = floor(az * 160.0);
+  if (h12(vec2(b2, 7.0)) > 0.7) h = max(h, 0.012 + 0.012 * h12(vec2(b2, 8.0)));
   return h;
 }
 void main() {
@@ -49,32 +58,52 @@ void main() {
   float el = d.y;
   vec3 col = mix(uHorizon, uZenith, pow(clamp(el, 0.0, 1.0), 0.55));
   col = mix(col, uHorizon * 0.7, smoothstep(0.0, -0.15, el));
+  float clear = 1.0 - uRain;
   float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (pow(sd, 900.0) * 4.0 + pow(sd, 10.0) * 0.22 + pow(sd, 3.0) * 0.12 * uDusk) * (1.0 - uNightS);
+  col += uSunColor * (pow(sd, 900.0) * 4.0 * clear + pow(sd, 10.0) * 0.22 + pow(sd, 3.0) * 0.12 * uDusk) * (1.0 - uNightS);
   float md = max(dot(d, uMoonDir), 0.0);
-  col += vec3(0.92, 0.94, 1.0) * smoothstep(0.99955, 0.9997, md) * uNightS;
-  col += vec3(0.2, 0.24, 0.32) * pow(md, 24.0) * 0.5 * uNightS;
+  col += vec3(0.92, 0.94, 1.0) * smoothstep(0.99955, 0.9997, md) * uNightS * clear;
+  col += vec3(0.2, 0.24, 0.32) * pow(md, 24.0) * 0.5 * uNightS * clear;
   if (el > 0.03) {
     vec3 sp = floor(d * 260.0);
     float s = h13(sp);
     float tw = 0.55 + 0.45 * sin(uTimeS * 2.5 + s * 60.0);
-    col += vec3(step(0.9982, s)) * tw * uNightS * smoothstep(0.05, 0.35, el) * 0.85;
+    // peu d'étoiles : la pollution lumineuse de la ville les efface
+    col += vec3(step(0.9988, s)) * tw * uNightS * smoothstep(0.12, 0.5, el) * 0.6 * clear;
   }
-  vec2 cp = d.xz / max(el, 0.06) * 0.5 + vec2(uTimeS * 0.0035, uTimeS * 0.001);
+  // nuages (couverture plus épaisse sous la pluie), éclairés par en dessous par les néons
+  vec2 cp = d.xz / max(el, 0.06) * 0.5 + vec2(uTimeS * 0.0045, uTimeS * 0.0015);
   float cl = fbm(cp * 1.6);
-  cl = smoothstep(0.42, 0.85, cl) * smoothstep(0.0, 0.2, el);
+  cl = smoothstep(0.42 - 0.3 * uRain, 0.85 - 0.25 * uRain, cl) * smoothstep(0.0, 0.2, el);
   vec3 cloudCol = mix(uHorizon * 1.08, uZenith * 0.75, 0.35) + uSunColor * uDusk * 0.15;
-  col = mix(col, cloudCol, cl * 0.75);
+  cloudCol += vec3(0.3, 0.08, 0.32) * uNightS * 0.35 * exp(-el * 4.0);
+  cloudCol += vec3(0.75, 0.8, 1.0) * uFlash * 1.6;
+  col = mix(col, cloudCol, cl * (0.75 + 0.2 * uRain));
+  col += vec3(0.55, 0.6, 0.85) * uFlash * 0.5 * smoothstep(0.0, 0.3, el);
   float az = atan(d.x, d.z);
-  float sh = skyline(az);
+  float bin;
+  float spire;
+  float sh = skyline(az, bin, spire);
   float haze = exp(-max(el, 0.0) * 9.0);
   col = mix(col, uHorizon, haze * 0.75);
+  // halo de la ville la nuit (néons magenta et cyan sous le smog)
+  col += mix(vec3(0.42, 0.1, 0.42), vec3(0.08, 0.3, 0.45), 0.5 + 0.5 * sin(az * 3.0)) * exp(-max(el, 0.0) * 14.0) * uNightS * 0.32;
   if (el < sh && el > -0.2) {
-    vec3 sil = mix(uHorizon, vec3(0.0), 0.32 + 0.25 * (1.0 - el / max(sh, 0.001)));
-    // fenêtres éclairées lointaines
-    vec2 wg = vec2(az * 900.0, el * 900.0);
-    float win = step(0.86, h12(floor(wg))) * step(0.25, fract(wg.x)) * step(fract(wg.y), 0.6);
-    sil += vec3(1.0, 0.7, 0.35) * win * 0.25 * uNightS * step(0.004, sh - el);
+    vec3 sil = mix(uHorizon, vec3(0.0), 0.38 + 0.28 * (1.0 - el / max(sh, 0.001)));
+    // fenêtres éclairées : blanc chaud, cyan, magenta
+    vec2 wg = vec2(az * 1100.0, el * 1300.0);
+    float win = step(0.8, h12(floor(wg))) * step(0.3, fract(wg.x)) * step(fract(wg.y), 0.55);
+    float hue = h12(vec2(bin, 11.0));
+    vec3 wc = hue < 0.55 ? vec3(1.0, 0.78, 0.5) : hue < 0.8 ? vec3(0.35, 0.9, 1.0) : vec3(1.0, 0.35, 0.8);
+    sil += wc * win * 0.32 * mix(0.25, 1.0, uNightS) * step(0.004, sh - el - spire);
+    // bandeaux de LED horizontaux sur certaines tours
+    float band = step(0.86, h12(vec2(bin, 13.0))) * step(abs(fract(el * 55.0) - 0.5), 0.06);
+    sil += mix(vec3(1.0, 0.2, 0.6), vec3(0.2, 0.9, 1.0), h12(vec2(bin, 17.0))) * band * 0.7 * uNightS * step(0.003, sh - el - spire);
+    // feux d'obstacle rouges qui clignotent au sommet
+    float top = smoothstep(0.004, 0.0, abs(el - (sh - 0.002))) * step(0.04, sh);
+    float blink = step(0.5, fract(uTimeS * 0.6 + h12(vec2(bin, 21.0))));
+    sil += vec3(1.0, 0.08, 0.05) * top * blink * step(0.4, abs(fract(az * 46.0) - 0.5) * 2.0 + 0.4) * 1.4;
+    sil += vec3(0.55, 0.6, 0.85) * uFlash * 0.12;
     col = sil;
   }
   gl_FragColor = vec4(col, 1.0);
@@ -88,6 +117,13 @@ export class Atmosphere {
   /** Heure du jour 0..1 (0 = minuit, 0.5 = midi). */
   time = 0.84;
   night = 1;
+  /** Pluie affichée (0..1) et orage (éclairs). */
+  rain = 0;
+  storm = 0;
+  /** Instant (horloge du rendu) du prochain coup de tonnerre, 0 si aucun. */
+  thunderAt = 0;
+  private flash = 0;
+  private flashHold = 0;
   private sunDir = new THREE.Vector3();
   private moonDir = new THREE.Vector3();
   private shadowSize = 48;
@@ -105,6 +141,8 @@ export class Atmosphere {
         uHorizon: { value: new THREE.Color() },
         uSunColor: { value: new THREE.Color() },
         uDusk: { value: 0 },
+        uRain: { value: 0 },
+        uFlash: { value: 0 },
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -153,14 +191,31 @@ export class Atmosphere {
     const dusk = clamp(1 - Math.abs(elev) / 0.28, 0, 1);
     this.night = night;
 
-    const zDay = new THREE.Color(0x7d93ab);
-    const hDay = new THREE.Color(0xbdb6a6);
-    const zDusk = new THREE.Color(0x3b4666);
-    const hDusk = new THREE.Color(0xc98a62);
-    const zNight = new THREE.Color(0x070b16);
-    const hNight = new THREE.Color(0x1d2433);
+    // New York 2085 : ciel enfumé le jour, crépuscule rose orangé, nuit violette (pollution lumineuse)
+    const zDay = new THREE.Color(0x6f8db5);
+    const hDay = new THREE.Color(0xc4b9b0);
+    const zDusk = new THREE.Color(0x2c2f62);
+    const hDusk = new THREE.Color(0xe07a68);
+    const zNight = new THREE.Color(0x05060f);
+    const hNight = new THREE.Color(0x261a36);
     const zenith = zDay.clone().lerp(zNight, night).lerp(zDusk, dusk * 0.7);
     const horizon = hDay.clone().lerp(hNight, night).lerp(hDusk, dusk * 0.75);
+    // pluie : ciel bas et gris
+    const rain = clamp(this.rain, 0, 1);
+    zenith.lerp(new THREE.Color(0x3a4048).lerp(new THREE.Color(0x0a0b10), night), rain * 0.65);
+    horizon.lerp(new THREE.Color(0x5a5e66).lerp(new THREE.Color(0x1c1822), night), rain * 0.55);
+    // éclairs pendant les averses fortes et les orages
+    this.flash = Math.max(0, this.flash - dt * 5);
+    if (this.flashHold > 0) {
+      this.flashHold -= dt;
+      if (Math.random() < dt * 14) this.flash = Math.max(this.flash, 0.5 + Math.random() * 0.5);
+    }
+    const stormy = Math.max(this.storm, smoothstep(0.75, 1, rain));
+    if (stormy > 0.01 && Math.random() < dt * 0.07 * stormy) {
+      this.flash = 1;
+      this.flashHold = 0.25 + Math.random() * 0.35;
+      this.thunderAt = elapsed + 0.7 + Math.random() * 2.5;
+    }
     const u = this.skyMat.uniforms;
     u.uSunDir.value.copy(this.sunDir);
     u.uMoonDir.value.copy(this.moonDir);
@@ -170,6 +225,8 @@ export class Atmosphere {
     u.uHorizon.value.copy(horizon);
     u.uSunColor.value.set(0xffd2a0).lerp(new THREE.Color(0xff7a3a), dusk);
     u.uDusk.value = dusk;
+    u.uRain.value = rain;
+    u.uFlash.value = this.flash;
     this.sky.position.copy(camera.position);
 
     // lumière directionnelle : soleil le jour, lune la nuit
@@ -184,6 +241,7 @@ export class Atmosphere {
       this.sun.color.copy(sunCol);
       this.sun.intensity = 2.7 * (1 - night) * (0.45 + 0.55 * smoothstep(0, 0.35, elev));
     }
+    this.sun.intensity *= 1 - 0.6 * rain;
     // la caméra d'ombre suit le point d'intérêt, alignée sur les texels
     const texel = (this.shadowSize * 2) / this.sun.shadow.mapSize.x;
     const fx = Math.round(focus.x / texel) * texel;
@@ -199,11 +257,12 @@ export class Atmosphere {
     const ambDay = new THREE.Color(0.52, 0.56, 0.66);
     const ambNight = new THREE.Color(0.075, 0.085, 0.13);
     e.uSkyAmb.value.copy(ambDay).lerp(ambNight, night);
-    e.uSkyAmb.value.lerp(new THREE.Color(0.4, 0.3, 0.3), dusk * 0.3);
+    e.uSkyAmb.value.lerp(new THREE.Color(0.4, 0.28, 0.36), dusk * 0.3);
+    e.uSkyAmb.value.multiplyScalar(1 - 0.25 * rain);
+    e.uSkyAmb.value.add(new THREE.Color(0.55, 0.6, 0.8).multiplyScalar(this.flash * 0.9));
     e.uLampCol.value.setRGB(1.0, 0.72, 0.45);
     e.uLampPower.value = lerp(0.75, 1.9, night);
-    e.uFogColor.value.copy(horizon).lerp(new THREE.Color(0x2a2c30), 0.15 * (1 - night));
-    e.uFogDensity.value = lerp(0.0095, 0.0175, night);
-    void dt;
+    e.uFogColor.value.copy(horizon).lerp(new THREE.Color(0x2a2c34), 0.15 * (1 - night));
+    e.uFogDensity.value = lerp(0.0095, 0.0175, night) * (1 + 0.8 * rain);
   }
 }

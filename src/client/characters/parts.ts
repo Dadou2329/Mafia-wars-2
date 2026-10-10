@@ -245,8 +245,8 @@ export function torso(style: TorsoStyle, fem = false): VoxelModel {
   const hw = (y: number) => torsoHW(y, fem, bulk);
   switch (style) {
     case 'longcoat': {
-      // Dadou : revers cramoisis liserés de néon rouge, gilet cramoisi, boutons d'or
-      suitFront(m, { low: 3, inner: SLOT.VEST, lapel: SLOT.COAT2, edge: SLOT.NEON, tie: true });
+      // Dadou : revers cramoisis liserés d'or, gilet cramoisi, boutons d'or
+      suitFront(m, { low: 3, inner: SLOT.VEST, lapel: SLOT.COAT2, edge: SLOT.ACCENT, tie: true });
       tFront(m, 0, 0, 3, 3, SLOT.ACCENT);
       tFront(m, 0, 0, 5, 5, SLOT.ACCENT);
       // chaîne de montre en or sur le gilet, épingle de cravate
@@ -310,9 +310,9 @@ export function torso(style: TorsoStyle, fem = false): VoxelModel {
     }
     case 'hoodie': {
       band(m, 0, 0, SLOT.COAT2);
-      // poche kangourou, cordons, imprimé lumineux en chevron
-      tFront(m, 0, 3, 5, 5, SLOT.COAT2);
-      tFront(m, 3, 3, 1, 4, SLOT.COAT2);
+      // poche kangourou (couture sombre), cordons, imprimé lumineux en chevron
+      tFront(m, 0, 3, 5, 5, SLOT.DRESS);
+      tFront(m, 3, 3, 1, 4, SLOT.DRESS);
       tFront(m, 1, 1, 10, 13, SLOT.TIE);
       tFront(m, 0, 0, 7, 7, SLOT.NEON);
       tFront(m, 1, 1, 8, 8, SLOT.NEON);
@@ -470,17 +470,18 @@ export function torso(style: TorsoStyle, fem = false): VoxelModel {
       break;
     }
     case 'mandarin': {
-      // veste à col mao, brandebourgs et passepoil jade, dragon stylisé dans le dos
+      // veste à col mao, brandebourgs et passepoil jade, sapèque de jade dans le dos
       front(m, TX, TX, 0, 14, SLOT.COAT2);
       for (const y of [3, 6, 9, 12]) tFront(m, 0, 1, y, y, SLOT.COAT2);
       neckCollar(m, 15, 16, SLOT.COAT);
       paint(m, TX - 2, TX + 1, 16, 16, TZ + 1, TZ + 1, SLOT.COAT2);
       band(m, 0, 0, SLOT.COAT2);
       front(m, TX + 3, TX + 3, 11, 11, SLOT.NEON);
-      const dragon = ['..##..', '.#..#.', '....#.', '...#..', '..#...', '.#....', '.#..#.', '..##..'];
-      dragon.forEach((row, j) => {
-        for (let i = 0; i < row.length; i++) if (row[i] === '#') back(m, TX - 3 + i, TX - 3 + i, 12 - j, 12 - j, SLOT.COAT2);
+      const coin = ['..####..', '.#....#.', '#..##..#', '#.#..#.#', '#.#..#.#', '#..##..#', '.#....#.', '..####..'];
+      coin.forEach((row, j) => {
+        for (let i = 0; i < row.length; i++) if (row[i] === '#') back(m, TX - 4 + i, TX - 4 + i, 12 - j, 12 - j, SLOT.COAT2);
       });
+      back(m, TX - 1, TX, 8, 9, SLOT.NEON);
       break;
     }
     case 'crop': {
@@ -864,8 +865,7 @@ export function head(style: HeadStyle): VoxelModel {
   switch (style) {
     case 'dadou':
       hair('slick');
-      // sourcils noirs arqués, grande moustache en guidon aux pointes relevées, dent en or
-      m.set(HX(2), 7, FZ, H).set(HX(6), 7, FZ, H);
+      // grande moustache en guidon aux pointes relevées, dent en or
       fill(m, HX(1), HX(7), 2, 2, FZ + 1, FZ + 1, SLOT.BEARD);
       fill(m, HX(2), HX(6), 3, 3, FZ + 1, FZ + 1, SLOT.BEARD);
       fill(m, HX(0), HX(0), 3, 3, FZ, FZ + 1, SLOT.BEARD);

@@ -433,6 +433,8 @@ export function explodeVehicle(g: Game, e: Ent, attacker: Ent | null): void {
   const def = vdef(e);
   g.emitAll({ t: 'boom', x: e.x, y: e.y + 1, z: e.z, r: def.cls === 'drone' ? 2 : 5 });
   g.emitAll({ t: 'sound', s: 'explosion', x: e.x, y: e.y + 1, z: e.z });
+  // le souffle brise les vitres alentour
+  g.shatter(e.x, e.y + 1.2, e.z, def.cls === 'drone' ? 1.5 : 3.2);
   // occupants
   const driver = veh.driver >= 0 ? g.ents.get(veh.driver) : undefined;
   ejectPassengers(g, e);

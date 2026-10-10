@@ -108,7 +108,6 @@ export function updateConvoys(g: Game, dt: number): void {
       if (e) {
         s.loot.push({ x: e.x, z: e.z, y: e.y, reward: c.reward, until: g.time + 120 });
         g.notify('all', `Un convoi a été détruit ! Son butin (${formatMoney(c.reward)}) traîne sur la chaussée.`, 'alert');
-        g.emitAll({ t: 'event', kind: 'loot', text: '', x: e.x, z: e.z, until: g.time + 120 });
       }
       s.convoys.delete(id);
       continue;
@@ -196,7 +195,6 @@ export function updateConvoys(g: Game, dt: number): void {
       f.earned += l.reward;
       g.notify(slot, `Butin du convoi récupéré : +${formatMoney(l.reward)} !`, 'money');
       g.notify(otherSlot(slot), `${boss.role === 'boss' ? BOSS_NAME[slot] : boss.name ?? 'Un lieutenant'} a raflé le butin du convoi (${BOSS_NAME[slot]}).`, 'bad');
-      g.emitAll({ t: 'event', kind: 'loot-end', text: '', x: l.x, z: l.z, until: 0 });
       s.loot.splice(i, 1);
       break;
     }

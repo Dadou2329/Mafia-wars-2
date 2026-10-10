@@ -64,6 +64,8 @@ const hex = (c: number, a = 1): string => `rgba(${(c >> 16) & 255},${(c >> 8) & 
 
 export class CityMap {
   readonly base: HTMLCanvasElement;
+  /** Habillage de la carte stratégique (cartouche, rose des vents, échelle) : pas sur la mini-carte. */
+  readonly decor: HTMLCanvasElement;
   readonly w = WORLD_W * MAP_SCALE;
   readonly d = WORLD_D * MAP_SCALE;
   readonly buildings: BuildingInfo[];
@@ -73,11 +75,14 @@ export class CityMap {
     this.base = document.createElement('canvas');
     this.base.width = this.w;
     this.base.height = this.d;
+    this.decor = document.createElement('canvas');
+    this.decor.width = this.w;
+    this.decor.height = this.d;
     this.draw(world);
   }
 
   private draw(world: WorldData): void {
-    const c = this.base.getContext('2d')!;
+    let c = this.base.getContext('2d')!;
     const S = MAP_SCALE;
     const r = rng(2085);
     // fond : nuit profonde
@@ -268,7 +273,9 @@ export class CityMap {
       c.fillStyle = 'rgba(170,210,255,0.7)';
       c.fillText(b.name, ((b.rect[0] + b.rect[2]) / 2) * S, b.rect[1] * S - 10);
     }
-    // cartouche
+    // cartouche (sur la couche d'habillage)
+    c = this.decor.getContext('2d')!;
+    c.textAlign = 'center';
     const cw = 360;
     const ch = 86;
     const cx = this.w - cw - 28;

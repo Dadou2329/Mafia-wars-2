@@ -273,7 +273,12 @@ export class LoopManager {
     if (on) {
       tail.connect(w.bus);
     } else {
+      // Hors de portée : plus aucun chemin vers la sortie, le navigateur cesse de calculer la boucle.
       try { tail.disconnect(w.bus); } catch { /* ignorer */ }
+      if (l.sendTarget) {
+        try { l.send.disconnect(l.sendTarget); } catch { /* ignorer */ }
+        l.sendTarget = null;
+      }
     }
     l.connected = on;
   }

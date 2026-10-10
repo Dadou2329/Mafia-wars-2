@@ -112,18 +112,6 @@ function ellXZ(m: VoxelModel, cx: number, cz: number, rx: number, rz: number, y0
     }
 }
 
-/** Boîte aux arêtes verticales abattues. */
-function rbox(m: VoxelModel, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: number): void {
-  m.box(x0, y0, z0, x1, y1, z1, c);
-  for (const [x, z] of [
-    [x0, z0],
-    [x1 - 1, z0],
-    [x0, z1 - 1],
-    [x1 - 1, z1 - 1],
-  ])
-    m.box(x, y0, z, x + 1, y1, z + 1, -1);
-}
-
 /** Coussin : boîte dont les arêtes supérieures avant/latérales sont arrondies. */
 function cushion(m: VoxelModel, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: number, roundBack = false): void {
   m.box(x0, y0, z0, x1, y1, z1, c);
@@ -170,18 +158,6 @@ function pixXY(m: VoxelModel, rows: string[], legend: Record<string, number>, x0
       const col = legend[row[k]];
       if (col === undefined) continue;
       for (let d = 0; d < depth; d++) m.set(x0 + k, yTop - r, z + d, col);
-    }
-  }
-}
-
-/** Pixel art dans le plan XZ (vu de dessus) à la hauteur y : ligne 0 = arrière (z0). */
-function pixXZ(m: VoxelModel, rows: string[], legend: Record<string, number>, x0: number, z0: number, y: number): void {
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r];
-    for (let k = 0; k < row.length; k++) {
-      const col = legend[row[k]];
-      if (col === undefined) continue;
-      m.set(x0 + k, y, z0 + r, col);
     }
   }
 }
@@ -256,7 +232,7 @@ interface SofaPal {
 
 const SOFA_PAL: SofaPal[] = [
   { fab: 0x75716a, dark: 0x5a5751, pillow: 0xc8963a, pillow2: 0xe2dccf, legs: K.walnutDark }, // gris chiné
-  { fab: 0x8e1b22, dark: 0x60121a, pillow: 0x18141a, pillow2: K.gold, legs: K.gold }, // Dadou
+  { fab: 0x7c161e, dark: 0x520e14, pillow: 0x18141a, pillow2: K.gold, legs: K.gold }, // Dadou
   { fab: 0x22385f, dark: 0x16253f, pillow: 0xd6dbe2, pillow2: 0x8a9098, legs: K.chrome }, // Even
   { fab: 0x245a47, dark: 0x183e31, pillow: 0xd8c49a, pillow2: 0xb08d3c, legs: K.brass }, // émeraude (club)
   { fab: 0xd5cab6, dark: 0xb3a892, pillow: 0x4f6478, pillow2: 0x9a5a3a, legs: K.walnut }, // lin crème (suite, hall)
@@ -306,14 +282,9 @@ function makeSofa(v: number): VoxelModel {
   }
   // coussins décoratifs
   // coussins décoratifs posés contre le dossier
-  const pil = (x0: number, c: number) => {
-    m.box(x0, 7, 6, x0 + 5, 11, 8, c);
-    m.box(x0, 10, 7, x0 + 5, 11, 8, -1);
-    m.set(x0, 10, 6, -1).set(x0 + 4, 10, 6, -1);
-  };
-  pil(5, p.pillow);
-  pil(W - 10, p.pillow);
-  pil(W - 14, p.pillow2);
+  pillow(m, 5, 7, 6, p.pillow);
+  pillow(m, W - 10, 7, 6, p.pillow);
+  pillow(m, W - 15, 7, 6, p.pillow2);
   return m;
 }
 
@@ -973,11 +944,12 @@ function makeMattress(): VoxelModel {
   // creux au milieu
   m.box(4, 2, 11, 12, 3, 21, -1);
   // taches jaunâtres et brunes
-  const st = (c: number) => mix(c, 0x9a7a3a, 0.45);
-  stain(m, 5, 2.5, 6, 2.6, st, 61);
-  stain(m, 11, 2.5, 25, 3, st, 62);
-  stain(m, 8, 1.5, 15, 2.4, (c) => mix(c, 0x6a5030, 0.5), 63);
-  stain(m, 15, 1.5, 9, 2, st, 64);
+  const st = (c: number) => mix(c, 0x8a6a28, 0.6);
+  stain(m, 5, 2.5, 6, 2.8, st, 61);
+  stain(m, 11, 2.5, 25, 3.2, st, 62);
+  stain(m, 8, 1.5, 15, 2.6, (c) => mix(c, 0x5a4020, 0.6), 63);
+  stain(m, 15, 1.5, 9, 2.2, st, 64);
+  stain(m, 2, 2.5, 28, 2, (c) => mix(c, 0x6a3a2a, 0.45), 67);
   // coin éventré : ressorts et mousse
   m.box(12, 1, D - 4, W, 3, D, -1);
   m.box(12, 0, D - 4, W, 1, D, 0x9a9488);
@@ -1191,13 +1163,12 @@ function makeTableSmall(v: number): VoxelModel {
       return Math.floor((a + Math.PI) / (Math.PI / 6)) % 2 ? shade(col, 0.95) : undefined;
     });
     m.cylY(c, c, 7, 11, 12, 0xf6f3ec);
-    m.cylY(c, c, 6.4, 1, 11, -1);
+    // petite lampe de table : pied de laiton, abat-jour rouge éclairé par-dessous
     m.box(6, 12, 6, 8, 13, 8, K.brass);
     m.box(6, 13, 6, 7, 14, 7, K.brass);
-    m.box(5, 14, 5, 9, 16, 9, 0x9a2a1e);
-    m.box(6, 14, 6, 8, 15, 8, SLOT.GLOW);
-    m.box(5, 15, 5, 9, 16, 9, 0x9a2a1e);
-    m.set(6, 14, 8, SLOT.GLOW).set(7, 14, 8, SLOT.GLOW);
+    m.box(5, 14, 5, 8, 16, 8, 0x9a2a1e);
+    m.box(6, 14, 6, 7, 15, 7, SLOT.GLOW);
+    m.box(5, 14, 7, 8, 15, 8, 0xb83a2a);
     m.box(10, 12, 9, 11, 14, 10, 0xe0eaee);
     m.set(10, 14, 9, 0xc8a040);
     return m;
@@ -1559,6 +1530,11 @@ function makeKitchenette(): VoxelModel {
   m.box(14, 2, 5, 15, 6, 6, 0x2a6ab0);
   m.set(14, 6, 5, 0xe8e8e8);
   m.set(16, 12, 8, 0x8a8a86);
+  // traces de doigts graisseuses et coulures sur les façades
+  stain(m, 3, 9, 8.5, 2, (c) => mix(c, 0x6a5a3a, 0.35), 123);
+  stain(m, 6, 3, 8.5, 1.8, (c) => mix(c, 0x5a4a2a, 0.4), 124);
+  stain(m, 15, 10, 8.5, 1.5, (c) => mix(c, 0x6a5a3a, 0.35), 125);
+  for (let y = 4; y < 12; y += 2) m.set(2, y, 8, mix(L, 0x7a6a4a, 0.3));
   // vieux four émaillé sous le réchaud
   m.box(17, 1, 0, W, 13, 9, 0xd6d2c4);
   m.box(18, 2, 8, W - 1, 9, 9, 0x2a2826);
@@ -1966,7 +1942,7 @@ function makePendantLight(): VoxelModel {
 /** Ampoule nue au bout de son fil (1/32 m) : cache-piton, fil torsadé, douille, globe lumineux. */
 function makeBareBulb(): VoxelModel {
   const m = new VoxelModel(7, 16, 7, R32); // 0,22 × 0,5 × 0,22
-  m.box(1, 15, 1, 6, 16, 6, 0x3a3836);
+  m.box(2, 15, 2, 5, 16, 5, 0x3a3836);
   m.box(3, 7, 3, 4, 15, 4, 0x151413);
   m.set(3, 12, 3, 0x2a2826).set(3, 9, 3, 0x2a2826);
   // douille de bakélite
@@ -1994,14 +1970,14 @@ function makeNeonTube(): VoxelModel {
 
 /** Lustre « pluie de cristal » à LED (1/32 m) : couronne dorée à bougies, plateau doré cerclé de LED, rideau de pampilles en cône inversé, goutte finale. */
 function makeChandelier(): VoxelModel {
-  const m = new VoxelModel(51, 38, 51, R32); // 1,59 × 1,19 × 1,59
+  const m = new VoxelModel(51, 39, 51, R32); // 1,59 × 1,22 × 1,59 (le pavillon touche le plafond)
   const c = 25.5;
   const G = K.gold;
   const Gl = K.goldLight;
   const crystal = 0xe2f0fc;
   const bead = 0xb8d8f0;
   // pavillon, tige, couronne à bougies
-  m.cylY(c, c, 4.5, 36, 38, G);
+  m.cylY(c, c, 4.5, 36, 39, G);
   m.box(25, 33, 25, 26, 36, 26, G);
   m.cylY(c, c, 11, 32, 33, Gl);
   m.cylY(c, c, 10, 32, 33, G);
@@ -2806,7 +2782,11 @@ function makeGrandPiano(): VoxelModel {
         m.set(x, 12, z, K.gold);
         if (x % 2 === 1 && z > 2) m.set(x, 13, z, 0xd8d8d0);
       }
-      if (edge) m.set(x, 14, z, HI);
+      if (edge) {
+        m.set(x, 14, z, HI);
+        // reflet oblique sur la laque
+        if ((x + z) % 11 === 0) m.set(x, 12, z, 0x3a3a44).set(x, 11, z, 0x2a2a32);
+      }
     }
   // couvercle levé (charnière côté gauche), béquille
   const tan = 0.36;
@@ -3124,6 +3104,522 @@ function makeStatueBust(): VoxelModel {
   return m;
 }
 
+// =========================================================================== salle de bains, buanderie
+
+/** Baignoire : 0 îlot ovale de luxe (robinetterie dorée, mousse, plateau bougie et champagne) ; 1 vieille baignoire émaillée rouillée. */
+function makeBathtub(v: number): VoxelModel {
+  const m = new VoxelModel(27, 13, 13, 1 / 16); // 1,69 × 0,6 (+ robinet) × 0,81
+  const W = m.sx;
+  const c = 13.5;
+  const cz = 6.5;
+  if (v === 0) {
+    const Wt = 0xf4f2ee;
+    ellXZ(m, c, cz, 11.6, 4.9, 0, 1, Wt);
+    ellXZ(m, c, cz, 13.2, 6.3, 1, 10, Wt);
+    ellXZ(m, c, cz, 12.0, 5.1, 2, 10, -1);
+    ellXZ(m, c, cz, 12.0, 5.1, 7, 8, 0x9cd4e0);
+    ellXZ(m, c, cz, 13.2, 6.3, 9, 10, 0xfcfbf8);
+    ellXZ(m, c, cz, 12.0, 5.1, 9, 10, -1);
+    // mousse et canard
+    for (const [x, z, r] of [
+      [7, 5, 2.2],
+      [9, 8, 1.8],
+      [5, 7, 1.5],
+      [18, 4, 1.4],
+    ] as const)
+      ellXZ(m, x, z, r, r, 8, 9, 0xfafcfc);
+    m.set(20, 8, 8, 0xf0c818).set(21, 8, 8, 0xf0c818).set(20, 9, 8, 0xf0c818).set(19, 9, 8, 0xe07a1a);
+    // socle doré, robinet colonne
+    ellXZ(m, c, cz, 10.5, 4.2, 0, 1, K.gold);
+    m.box(0, 0, 6, 1, 12, 7, K.gold);
+    m.box(0, 12, 6, 3, 13, 7, K.gold);
+    m.set(2, 11, 6, K.goldLight);
+    m.box(0, 9, 5, 1, 10, 8, K.goldDark);
+    // plateau de teck : bougie et coupe de champagne
+    m.box(15, 10, 1, 19, 11, 12, 0x7a4e2a);
+    m.set(16, 11, 4, 0xf2ecdc).set(16, 12, 4, SLOT.GLOW);
+    m.set(17, 11, 8, 0xdde8ec).set(17, 12, 8, 0xe8d088);
+    return m;
+  }
+  // vieille baignoire encastrée émaillée
+  const E = 0xdcd5c0;
+  m.box(0, 0, 0, W, 9, 13, E);
+  m.box(2, 2, 2, W - 2, 9, 11, -1);
+  m.box(2, 1, 2, W - 2, 2, 11, shade(E, 0.95));
+  m.box(0, 0, 12, W, 9, 13, shade(E, 0.92));
+  // anneau de crasse, coulée de rouille sous le robinet, éclats d'émail
+  for (let x = 2; x < W - 2; x++) {
+    m.set(x, 5, 2, 0xa89a78);
+    m.set(x, 5, 10, 0xa89a78);
+  }
+  m.box(2, 5, 2, 3, 6, 11, 0xa89a78);
+  m.box(W - 3, 5, 2, W - 2, 6, 11, 0xa89a78);
+  for (let y = 2; y < 9; y++) m.set(3 + (y % 2), y, 2, y < 4 ? 0x8a4a1a : 0xa86a3a);
+  m.box(3, 1, 3, 7, 2, 6, 0x9a6a3a);
+  for (const [x, z] of [
+    [10, 0],
+    [17, 12],
+    [24, 0],
+    [6, 12],
+  ])
+    m.set(x, 8, z, 0x2a2a2a);
+  // vieux robinet terne et bouchon à chaînette
+  m.box(4, 9, 0, 6, 10, 2, 0x9a9a94);
+  m.box(4, 10, 0, 5, 11, 1, 0x9a9a94);
+  m.box(4, 9, 2, 5, 9, 3, 0x9a9a94);
+  m.set(4, 8, 2, 0x8a8a84);
+  m.set(6, 2, 5, 0x1a1a1a);
+  return m;
+}
+
+/** WC : 0 vieux WC jauni (lunette relevée, réservoir fêlé, tartre) ; 1 cuvette suspendue design. */
+function makeToilet(v: number): VoxelModel {
+  const m = new VoxelModel(7, 13, 10, 1 / 16); // 0,44 × 0,81 × 0,63
+  if (v === 0) {
+    const P = 0xe2dcc8;
+    // réservoir et couvercle fêlé
+    m.box(0, 6, 0, 7, 12, 3, P);
+    m.box(0, 12, 0, 7, 13, 4, shade(P, 1.03));
+    m.set(1, 12, 1, 0x6a6458).set(2, 12, 2, 0x6a6458).set(3, 12, 2, 0x6a6458);
+    m.set(0, 10, 1, 0xa8a8a2);
+    // pied et cuvette
+    m.box(2, 0, 3, 5, 5, 8, P);
+    m.box(1, 0, 3, 6, 1, 8, shade(P, 0.95));
+    ellXZ(m, 3.5, 6.3, 3.4, 3.6, 5, 8, P);
+    ellXZ(m, 3.5, 6.5, 2.2, 2.4, 6, 8, -1);
+    ellXZ(m, 3.5, 6.5, 2.2, 2.4, 6, 7, 0x8a9a92);
+    m.set(3, 6, 7, 0x9a8250).set(4, 7, 8, 0xa88a50);
+    // lunette relevée contre le réservoir
+    m.box(1, 8, 3, 6, 12, 4, 0xece8dc);
+    m.box(2, 9, 3, 5, 11, 4, -1);
+    // rouleau de papier, traînée de tartre
+    m.box(5, 13, 1, 7, 13, 3, 0xf4f4f0);
+    stain(m, 3.5, 1, 7.5, 1.6, (c) => mix(c, 0x8a7a4a, 0.4), 231);
+    return m;
+  }
+  // cuvette suspendue sur bâti, plaque de commande chromée
+  m.box(0, 0, 0, 7, 13, 2, 0x1c1c20);
+  m.box(2, 8, 2, 5, 10, 3, K.chrome);
+  m.set(3, 9, 2, K.chromeLight);
+  m.box(1, 3, 2, 6, 6, 4, 0xf6f6f2);
+  ellXZ(m, 3.5, 6, 3.3, 3.5, 3, 7, 0xf6f6f2);
+  ellXZ(m, 3.5, 6.3, 2.2, 2.3, 5, 7, -1);
+  ellXZ(m, 3.5, 6.3, 2.2, 2.3, 5, 6, 0xb8dce4);
+  ellXZ(m, 3.5, 6, 3.3, 3.5, 7, 8, 0xeeeeea);
+  m.box(1, 3, 2, 6, 4, 9, -1);
+  return m;
+}
+
+/** Lavabo : 0 lavabo sur colonne en porcelaine (un peu de rouille) ; 1 meuble vasque laqué noir, marbre et robinet doré. */
+function makeSink(v: number): VoxelModel {
+  const m = new VoxelModel(10, 16, 8, 1 / 16); // 0,63 × 0,9 (+ robinet) × 0,5
+  if (v === 0) {
+    const P = 0xf0ede6;
+    m.box(2, 0, 1, 8, 1, 6, shade(P, 0.95));
+    m.box(3, 1, 2, 7, 10, 5, P);
+    m.box(1, 10, 0, 9, 13, 8, P);
+    m.box(0, 11, 0, 10, 13, 8, P);
+    m.box(2, 11, 2, 8, 13, 7, -1);
+    m.box(2, 10, 2, 8, 11, 7, shade(P, 0.94));
+    m.set(5, 10, 4, 0x3a3a3a);
+    // robinets et bec, coulée de rouille
+    for (const x of [2, 7]) m.box(x, 13, 0, x + 1, 14, 2, K.chrome);
+    m.box(4, 13, 0, 6, 14, 3, K.chrome);
+    m.set(4, 12, 2, 0xb07a40).set(5, 11, 3, 0xa86a3a).set(5, 10, 3, 0xa86a3a);
+    // savon, verre à dents
+    m.box(8, 13, 4, 9, 14, 6, 0xe8a0b0);
+    m.box(0, 13, 1, 1, 15, 2, 0x5a9ad0);
+    m.set(0, 15, 1, 0xf0f0f0).set(0, 16 - 1, 1, 0x2ab0a0);
+    m.set(6, 3, 5, 0x9a968c).set(6, 4, 5, 0x9a968c);
+    return m;
+  }
+  // meuble vasque laqué noir, plateau de marbre, vasque posée, mitigeur doré
+  m.box(0, 1, 0, 10, 12, 8, 0x141416);
+  m.box(1, 0, 1, 9, 1, 7, 0x0a0a0a);
+  m.box(0, 6, 7, 10, 7, 8, 0x0a0a0c);
+  m.box(3, 9, 7, 7, 10, 8, K.gold);
+  m.box(3, 3, 7, 7, 4, 8, K.gold);
+  m.box(0, 12, 0, 10, 13, 8, K.marble);
+  m.set(2, 12, 6, K.marbleVein).set(3, 12, 5, K.marbleVein).set(7, 12, 1, K.goldDark);
+  ellXZ(m, 5, 4.5, 3.6, 3.2, 13, 15, 0xfafaf6);
+  ellXZ(m, 5, 4.5, 2.6, 2.2, 14, 15, -1);
+  m.box(4, 13, 0, 6, 16, 1, K.gold);
+  m.box(4, 15, 1, 5, 16, 3, K.gold);
+  m.box(8, 13, 1, 9, 14, 2, K.goldLight);
+  return m;
+}
+
+/** Douche à l'italienne vitrée : receveur, mur carrelé, parois de verre (bande dépolie), pomme pluie, étagère. */
+function makeShower(): VoxelModel {
+  const m = VoxelModel.meters(1.0, 2.2, 1.0); // 16 × 35 × 16
+  const W = m.sx;
+  const D = m.sz;
+  const H = m.sy;
+  // receveur et bonde
+  m.box(0, 0, 0, W, 1, D, 0xf0f0ec);
+  m.box(7, 0, 7, 9, 1, 9, 0x3a3e42);
+  // mur du fond carrelé (joints)
+  m.box(0, 1, 0, W, H - 1, 1, 0xe2eaee);
+  for (let y = 1; y < H - 1; y += 3) m.box(0, y, 0, W, y + 1, 1, 0xc2cacf);
+  for (let x = 0; x < W; x += 3) m.box(x, 1, 0, x + 1, H - 1, 1, 0xc2cacf);
+  // moisissures dans les joints du bas
+  for (const [x, y] of [
+    [0, 1],
+    [3, 1],
+    [6, 4],
+    [12, 1],
+    [15, 4],
+  ])
+    m.set(x, y, 0, 0x4a5a48);
+  // parois vitrées : montants et traverses chromés, bande dépolie
+  const F = K.chrome;
+  for (const [x, z] of [
+    [0, D - 1],
+    [W - 1, D - 1],
+    [0, 1],
+    [W - 1, 1],
+  ])
+    m.box(x, 1, z, x + 1, H - 1, z + 1, F);
+  m.box(0, H - 2, 1, 1, H - 1, D, F);
+  m.box(W - 1, H - 2, 1, W, H - 1, D, F);
+  m.box(0, H - 2, D - 1, W, H - 1, D, F);
+  m.box(0, 1, D - 1, W, 2, D, F);
+  m.box(0, 1, 1, 1, 2, D, F);
+  m.box(W - 1, 1, 1, W, 2, D, F);
+  const frost = 0xd2e0e6;
+  m.box(1, 13, D - 1, W - 1, 20, D, frost);
+  m.box(0, 13, 2, 1, 20, D - 1, frost);
+  m.box(W - 1, 13, 2, W, 20, D - 1, frost);
+  // porte : poignée
+  m.box(11, 13, D - 1, 12, 20, D, K.chromeLight);
+  m.set(11, 16, D - 2, K.chromeLight);
+  // pomme pluie, bras, mitigeur
+  m.box(7, H - 3, 1, 9, H - 2, 6, F);
+  m.box(5, H - 4, 4, 11, H - 3, 10, F);
+  m.box(6, H - 5, 5, 10, H - 4, 9, 0x8a9096);
+  m.box(7, 16, 1, 9, 18, 2, F);
+  m.box(8, 17, 2, 9, 18, 4, K.chromeLight);
+  // étagère d'angle : shampooings
+  m.box(1, 14, 1, 4, 15, 4, 0xe8eef0);
+  m.box(1, 15, 1, 2, 18, 2, 0x2a6ab0);
+  m.box(2, 15, 2, 3, 17, 3, 0xe08a20);
+  return m;
+}
+
+/** Lave-linge à hublot : 0 blanc ; 1 graphite. Tambour garni de linge, programmateur, afficheur, bidon de lessive. */
+function makeWashingMachine(v: number): VoxelModel {
+  const m = new VoxelModel(10, 16, 10, 1 / 16); // 0,63 × 0,88 (+ bidon) × 0,63
+  const B = v === 0 ? 0xeceae4 : 0x3a3c42;
+  const Bd = shade(B, 0.86);
+  m.box(0, 0, 0, 10, 14, 9, B);
+  m.box(0, 0, 8, 10, 1, 9, Bd);
+  // bandeau de commande
+  m.box(0, 11, 8, 10, 14, 9, shade(B, 1.04));
+  m.box(1, 12, 9, 4, 13, 10, Bd);
+  m.box(6, 11, 9, 8, 13, 10, K.chrome);
+  m.box(4, 12, 8, 6, 13, 9, SLOT.NEON_CYAN);
+  // hublot : couronne chromée, verre fumé, linge coloré
+  discXY(m, 5, 5.5, 4, 9, 10, (dx, dy, d) => (d > 3.1 ? K.chrome : d > 2.4 ? SLOT.GLASS : -2));
+  discXY(m, 5, 5.5, 2.4, 8, 9, (dx, dy) => (dx + dy > 1 ? 0x2a4a9a : dx - dy > 0.5 ? 0xb02030 : 0xe8e8e8));
+  m.set(9, 5, 9, Bd);
+  // bidon de lessive sur le dessus
+  m.box(5, 14, 3, 8, 16, 6, 0xe86a1a);
+  m.set(6, 16, 4, 0x2a6ab0);
+  return m;
+}
+
+// =========================================================================== rangement, déchets, son, tapis
+
+/** Livres serrés sur une tablette (dos vers +z), par collections de même reliure. */
+function bookRow(m: VoxelModel, x0: number, x1: number, y0: number, maxH: number, zb: number, zf: number, seed: number, pal: number[], gap = 0.1): void {
+  const r = rng(seed);
+  let x = x0;
+  while (x < x1) {
+    if (r() < gap) {
+      x++;
+      continue;
+    }
+    const n = Math.min(x1 - x, 1 + Math.floor(r() * 3));
+    const c = pal[Math.floor(r() * pal.length)];
+    const h = Math.max(2, maxH - Math.floor(r() * 2));
+    m.box(x, y0, zb, x + n, y0 + h, zf - (r() < 0.15 ? 1 : 0), c);
+    if (r() < 0.5) m.box(x, y0 + h - 2, zf - 1, x + n, y0 + h - 1, zf, K.gold);
+    x += n;
+  }
+}
+
+/** Bibliothèque : 0 noyer classique (reliures, globe, statuette, carafe) ; 1 acier noir et LED (livres d'art, vases, sculpture). */
+function makeBookshelf(v: number): VoxelModel {
+  const m = VoxelModel.meters(1.3, 2.3, 0.45); // 21 × 37 × 7
+  const W = m.sx;
+  const H = m.sy;
+  const F = v === 0 ? K.walnut : 0x16161a;
+  const Fl = v === 0 ? K.walnutLight : 0x2a2a30;
+  const back = v === 0 ? K.walnutDark : 0x0e0e10;
+  const pal = v === 0 ? [0x6e1c1c, 0x1f4a32, 0x22305a, 0x5a3220, 0x3a2416, 0xd8ccb0, 0x7a1820] : [0xe8e2d4, 0x1a1a1a, 0xc8a050, 0x8a1a1a, 0x2a3a5a];
+  m.box(0, 0, 0, W, H, 1, back);
+  m.box(0, 0, 0, 1, H, 7, F);
+  m.box(W - 1, 0, 0, W, H, 7, F);
+  m.box(0, H - 2, 0, W, H, 7, F);
+  m.box(0, H - 1, 6, W, H, 7, Fl);
+  m.box(0, 0, 0, W, 4, 7, F);
+  m.box(1, 1, 6, W - 1, 3, 7, Fl);
+  m.box(9, 2, 6, 12, 3, 7, v === 0 ? K.brass : K.chrome);
+  const shelves = [4, 10, 16, 22, 28];
+  for (const y of shelves) {
+    m.box(1, y, 1, W - 1, y + 1, 7, y === 4 ? F : Fl);
+    if (v === 1 && y > 4) m.box(1, y - 1, 5, W - 1, y, 6, SLOT.LED);
+  }
+  // rayonnages garnis
+  bookRow(m, 1, 12, 5, 4, 1, 6, 241 + v, pal);
+  bookRow(m, 6, W - 1, 11, 4, 1, 6, 242 + v, pal);
+  bookRow(m, 1, 9, 17, 4, 1, 6, 243 + v, pal);
+  bookRow(m, 12, W - 1, 23, 4, 1, 6, 244 + v, pal);
+  bookRow(m, 1, W - 1, 29, 5, 1, 6, 245 + v, pal, 0.25);
+  if (v === 0) {
+    // globe terrestre, statuette dorée, carafe de whisky, boîte à cigares
+    m.box(14, 5, 3, 16, 6, 5, K.brass);
+    m.sphere(15, 7.5, 4, 1.6, 0x3a6a9a);
+    m.set(15, 8, 5, 0x5a8a4a).set(14, 7, 5, 0x5a8a4a);
+    m.box(2, 11, 3, 4, 12, 5, 0x1a1a1a);
+    m.box(2, 12, 3, 4, 15, 4, K.gold);
+    m.box(11, 17, 2, 14, 19, 5, 0xc0d0d4);
+    m.box(11, 17, 2, 14, 18, 5, 0xb06a1a);
+    m.set(12, 19, 3, 0xc0d0d4).set(12, 20, 3, 0xc0d0d4);
+    m.box(15, 17, 2, 19, 18, 5, 0x5a3220);
+    m.box(15, 18, 2, 19, 19, 5, 0x6e4228);
+    m.box(2, 23, 2, 6, 26, 3, 0xd8ccb0);
+    m.box(3, 24, 3, 5, 25, 4, 0x8a8478);
+  } else {
+    m.box(13, 5, 2, 15, 9, 5, 0xe8e4dc);
+    m.box(16, 5, 3, 17, 8, 4, K.gold);
+    m.box(2, 11, 2, 4, 14, 4, 0x1a1a1a);
+    m.set(3, 14, 3, K.gold);
+    m.box(10, 17, 2, 13, 18, 5, K.gold);
+    m.box(11, 18, 3, 12, 21, 4, K.gold);
+    m.box(15, 17, 3, 17, 19, 5, 0x2a5a3a);
+    m.set(15, 19, 3, K.plantLight).set(16, 20, 4, K.plant);
+    m.box(3, 23, 2, 9, 24, 5, 0xe8e2d4);
+    m.box(4, 24, 2, 8, 25, 5, 0x1a1a1a);
+  }
+  return m;
+}
+
+/** Pile de cartons : rubans adhésifs, étiquettes, rabats ouverts, coins enfoncés (3 dispositions). */
+function makeCardboardBoxes(v: number): VoxelModel {
+  const m = VoxelModel.meters(1.0, 0.8, 0.8); // 16 × 13 × 13
+  const C = K.cardboard;
+  const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, open = false, seed = 0) => {
+    m.box(x0, y0, z0, x1, y1, z1, C);
+    m.box(x0, y0, z0, x1, y1, z0 + 1, shade(C, 0.9));
+    m.box(x1 - 1, y0, z0, x1, y1, z1, shade(C, 0.85));
+    if (open) {
+      m.box(x0 + 1, y1 - 1, z0 + 1, x1 - 1, y1, z1 - 1, 0x4a3a28);
+      m.box(x0, y1, z0, x1, y1 + 1, z0 + 1, shade(C, 1.08));
+      m.box(x0 - (x0 > 0 ? 1 : 0), y1 - 1, z1 - 1, x1, y1, z1, shade(C, 1.08));
+      m.set(x0 + 2, y1 - 1, z0 + 2, 0xd8d0c0).set(x0 + 3, y1 - 1, z0 + 3, 0xc04a2a);
+    } else {
+      const xm = Math.floor((x0 + x1) / 2);
+      m.box(xm, y1 - 1, z0, xm + 1, y1, z1, 0xd8b878);
+      m.box(xm, y0 + 1, z1 - 1, xm + 1, y1, z1, 0xd8b878);
+    }
+    // étiquette d'expédition (lignes grises) et marquage rouge
+    const lx = x0 + 1;
+    if (x1 - x0 >= 6) {
+      m.box(lx, y0 + 1, z1 - 1, lx + 4, y0 + 3, z1, 0xf0ece0);
+      m.box(lx + 1, y0 + 2, z1 - 1, lx + 3, y0 + 3, z1, 0x9a968c);
+    }
+    if (seed % 2) m.box(x1 - 4, y1 - 2, z1 - 1, x1 - 1, y1 - 1, z1, 0xb82a1a);
+    // coin enfoncé
+    m.set(x1 - 1, y1 - 1, z1 - 1, -1);
+  };
+  if (v === 0) {
+    box(0, 0, 0, 9, 7, 12, false, 1);
+    box(9, 0, 2, 16, 5, 13, true, 2);
+    box(1, 7, 2, 8, 12, 10, false, 3);
+  } else if (v === 1) {
+    box(0, 0, 1, 8, 6, 13, false, 4);
+    box(8, 0, 0, 16, 8, 11, false, 5);
+    box(9, 8, 2, 15, 13, 9, true, 6);
+    box(1, 6, 3, 6, 9, 10, false, 7);
+  } else {
+    box(0, 0, 0, 16, 6, 12, false, 8);
+    box(2, 6, 1, 10, 11, 10, true, 9);
+    box(10, 6, 4, 15, 9, 12, false, 10);
+  }
+  return m;
+}
+
+/** Cartons de pizza empilés (1/32 m) : graisse, logo, le dernier entrouvert sur des croûtes. */
+function makePizzaBoxes(): VoxelModel {
+  const m = new VoxelModel(16, 11, 16, R32); // 0,5 × 0,34 × 0,5
+  const C = 0xc9a874;
+  const offs: [number, number][] = [
+    [1, 2],
+    [2, 1],
+    [1, 1],
+    [2, 2],
+  ];
+  for (let i = 0; i < 3; i++) {
+    const [ox, oz] = offs[i];
+    const y = i * 2;
+    m.box(ox, y, oz, ox + 13, y + 2, oz + 13, C);
+    m.box(ox, y, oz, ox + 13, y + 1, oz + 13, shade(C, 0.88));
+    // logo (tomate et toque) et taches de graisse
+    m.box(ox + 4, y + 1, oz + 4, ox + 9, y + 2, oz + 9, 0xd8cdb0);
+    m.box(ox + 5, y + 1, oz + 5, ox + 8, y + 2, oz + 8, 0xc0281e);
+    m.set(ox + 6, y + 1, oz + 6, 0xf0f0f0);
+    stain(m, ox + 10, y + 1.5, oz + 3, 1.8, (c) => mix(c, 0x8a5a2a, 0.5), 251 + i);
+  }
+  // carton du dessus, une part de pizza oubliée posée dessus, canette
+  const ox = 2;
+  const oz = 1;
+  m.box(ox, 6, oz, ox + 13, 8, oz + 13, C);
+  m.box(ox, 6, oz, ox + 13, 7, oz + 13, shade(C, 0.88));
+  m.box(ox + 4, 7, oz + 4, ox + 9, 8, oz + 9, 0xd8cdb0);
+  m.box(ox + 5, 7, oz + 5, ox + 8, 8, oz + 8, 0xc0281e);
+  stain(m, ox + 3, 7.5, oz + 9, 2.2, (c) => mix(c, 0x8a5a2a, 0.55), 254);
+  // part triangulaire : croûte, fromage, pepperoni
+  for (let k = 0; k < 7; k++) m.box(ox + 3 + Math.floor(k / 2), 8, oz + 2 + k, ox + 10 - Math.floor(k / 2), 9, oz + 3 + k, 0xe0b040);
+  m.box(ox + 3, 8, oz + 1, ox + 10, 9, oz + 2, 0xb8783a);
+  m.box(ox + 3, 9, oz + 1, ox + 10, 10, oz + 2, 0xc88a44);
+  for (const [x, z] of [
+    [5, 3],
+    [8, 4],
+    [6, 6],
+  ])
+    m.set(ox + x, 9, oz + z, 0xa8261e);
+  m.box(13, 0, 1, 15, 4, 3, 0xb8202a);
+  m.box(13, 3, 1, 15, 4, 3, K.chrome);
+  // serviette froissée
+  m.box(13, 0, 13, 16, 1, 16, 0xf2f0ea);
+  m.set(14, 1, 14, 0xf2f0ea);
+  return m;
+}
+
+/** Tas d'ordures : sacs poubelle noirs luisants (l'un éventré), canettes, barquettes, papiers, bouteille, peau de banane. */
+function makeTrashPile(): VoxelModel {
+  const m = VoxelModel.meters(1.0, 0.5, 0.8); // 16 × 8 × 13
+  const Bg = 0x18181c;
+  const Bh = 0x3a3a46;
+  m.ellipsoid(5, 3, 5, 4.6, 3.6, 4, Bg);
+  m.ellipsoid(11, 2.6, 7, 4.2, 3, 3.8, Bg);
+  m.ellipsoid(8, 2.2, 10, 3.6, 2.4, 2.6, 0x22242a);
+  // reflets plastiques et nœuds
+  repaint(m, (x, y, z, c) => (c === Bg && m.get(x, y + 1, z) < 0 && h3(x, y, z, 261) < 0.3 ? Bh : undefined));
+  m.box(5, 6, 5, 6, 8, 6, Bg);
+  m.set(4, 7, 5, Bg).set(6, 7, 5, Bg);
+  m.box(11, 5, 7, 12, 7, 8, Bg);
+  m.set(12, 6, 7, Bg);
+  // sac éventré : déchets qui s'en échappent
+  m.box(12, 1, 10, 15, 2, 13, 0x2a2a2a);
+  m.box(13, 0, 11, 16, 1, 13, 0xe8e4dc);
+  m.set(14, 1, 11, 0xb8202a).set(15, 1, 12, 0xd8a040);
+  // canettes, barquette, papiers froissés, bouteille, gobelet, peau de banane
+  m.box(1, 0, 11, 3, 1, 12, 0xb8202a);
+  m.set(1, 0, 12, K.chrome);
+  m.box(14, 0, 2, 15, 2, 3, 0x2a6ab0);
+  m.box(0, 0, 1, 3, 1, 3, 0xf0ece4);
+  m.set(1, 1, 1, 0xf0ece4);
+  m.set(9, 0, 1, 0xe8e4dc).set(10, 1, 1, 0xd8d4cc).set(3, 0, 9, 0xe0dcd0);
+  m.box(6, 0, 12, 10, 1, 13, 0x2a5a2a);
+  m.set(10, 0, 12, 0x8ab08a);
+  m.box(15, 0, 6, 16, 2, 7, 0xf4f0e8);
+  m.set(15, 2, 6, 0x5a3a20);
+  m.set(2, 0, 7, 0xe8c830).set(1, 0, 6, 0xe8c830).set(3, 0, 6, 0x6a5a20);
+  return m;
+}
+
+/** Enceinte colonne : 0 laque noire, haut-parleurs à membranes, voyant ; 1 moniteur de studio à anneau LED. */
+function makeSpeaker(v: number): VoxelModel {
+  const m = VoxelModel.meters(0.5, 1.1, 0.45); // 8 × 18 × 7
+  const B = v === 0 ? 0x141416 : 0x1e1f24;
+  for (const x of [0, 7]) for (const z of [0, 6]) m.set(x, 0, z, K.chrome);
+  m.box(0, 1, 0, 8, 18, 7, B);
+  if (v === 0) {
+    m.box(0, 1, 0, 1, 18, 7, K.walnut);
+    m.box(7, 1, 0, 8, 18, 7, K.walnut);
+  }
+  const driver = (cy: number, r: number) => {
+    // suspension caoutchouc, membrane en creux, cache-noyau métallique
+    discXY(m, 4, cy, r, 6, 7, (dx, dy, d) => (d > r - 0.9 ? 0x2c2c30 : -1));
+    discXY(m, 4, cy, r - 0.9, 5, 6, 0x5a5a62);
+    discXY(m, 4, cy, 1, 5, 6, v === 0 ? K.brass : K.chrome);
+  };
+  driver(4.5, 3);
+  driver(10.5, 3);
+  discXY(m, 4, 15.5, 1.6, 6, 7, (dx, dy, d) => (d < 0.8 ? K.chromeLight : 0x2a2a2c));
+  if (v === 1) {
+    discXY(m, 4, 4.5, 3.2, 6, 7, (dx, dy, d) => (d > 2.4 ? SLOT.NEON_CYAN : -2));
+    discXY(m, 4, 10.5, 3.2, 6, 7, (dx, dy, d) => (d > 2.4 ? SLOT.NEON_CYAN : -2));
+  } else m.set(4, 2, 6, SLOT.NEON_BLUE);
+  return m;
+}
+
+/** Tapis (1/32 m) : 0 vieux tapis élimé (troué, effrangé, taché) ; 1 tapis persan de luxe (médaillon, bordures, franges) ; 2 tapis moderne géométrique. */
+function makeRug(v: number): VoxelModel {
+  const m = new VoxelModel(83, 1, 58, R32); // 2,59 × 0,03 × 1,81
+  const W = m.sx;
+  const D = m.sz;
+  const cx = (W - 1) / 2;
+  const cz = (D - 1) / 2;
+  for (let z = 0; z < D; z++)
+    for (let x = 0; x < W; x++) {
+      const bx = Math.min(x, W - 1 - x);
+      const bz = Math.min(z, D - 1 - z);
+      const b = Math.min(bx, bz);
+      const dx = (x - cx) / (W / 2);
+      const dz = (z - cz) / (D / 2);
+      const diamond = Math.abs(dx) + Math.abs(dz) * 1.2;
+      let c: number;
+      if (v === 2) {
+        // moderne : fond gris, lignes blanches et ocre en zigzag
+        const zig = Math.abs(((x + Math.abs((z % 16) - 8)) % 16) - 8);
+        c = b < 2 ? 0x2a2a2e : zig === 0 ? 0xe8e4dc : zig === 4 && z % 4 < 2 ? 0xc8902a : 0x6a6a70;
+      } else {
+        // persan : bordures, champ, médaillon central, coins
+        const R = v === 0 ? 0x7a3a2a : 0x7a0e18;
+        const N = v === 0 ? 0x3a3448 : 0x0e1a3a;
+        const Gc = v === 0 ? 0xa89060 : K.gold;
+        const Iv = v === 0 ? 0xb8a888 : 0xece2c8;
+        if (b < 2) c = N;
+        else if (b < 3) c = Gc;
+        else if (b < 7) {
+          const along = bz < bx ? x : z;
+          c = b === 4 && along % 6 === 3 ? Gc : Math.floor(along / 6) % 2 ? N : R;
+        }
+        else if (b < 8) c = Gc;
+        else if (diamond < 0.28) c = diamond < 0.12 ? Gc : diamond < 0.2 ? N : Iv;
+        else if (diamond < 0.32) c = Gc;
+        else if (diamond < 0.48 && (x + z) % 3 === 0) c = Gc;
+        else if (bx < 18 && bz < 14 && bx + bz < 26 && bx + bz > 20) c = Iv;
+        else c = R;
+      }
+      m.set(x, 0, z, c);
+    }
+  if (v === 0) {
+    // usure : centre délavé, taches, trou, brûlure, bords effrangés
+    stain(m, cx, 0.5, cz, 16, (c) => mix(c, 0xa89a80, 0.35), 271);
+    stain(m, 20, 0.5, 15, 5, (c) => shade(c, 0.6), 272);
+    stain(m, 60, 0.5, 40, 4, (c) => mix(c, 0x4a3a20, 0.5), 273);
+    for (let x = 52; x < 57; x++) for (let z = 18; z < 22; z++) if (h3(x, 0, z, 274) < 0.75) m.clear(x, 0, z);
+    m.set(30, 0, 44, 0x1a1410).set(31, 0, 44, 0x2a2018);
+    for (let x = 0; x < W; x++) {
+      if (h3(x, 0, 0, 275) < 0.3) m.clear(x, 0, 0);
+      if (h3(x, 0, 1, 276) < 0.3) m.clear(x, 0, D - 1);
+    }
+    for (let z = 0; z < D; z++) if (h3(0, 0, z, 277) < 0.25) m.clear(0, 0, z);
+  }
+  if (v === 1) {
+    // franges sur les petits côtés
+    for (let z = 2; z < D - 2; z += 2) {
+      m.set(0, 0, z, 0xf0e8d4);
+      m.set(W - 1, 0, z, 0xf0e8d4);
+    }
+  }
+  return m;
+}
+
 // =========================================================================== registre
 
 export const HOME_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
@@ -3168,12 +3664,15 @@ export const HOME_MODELS: Partial<Record<PropKind, PropModelEntry>> = {
   FIREPLACE: { variants: 2, make: makeFireplace },
   TROPHY_CASE: { variants: 1, make: makeTrophyCase },
   STATUE_BUST: { variants: 1, make: makeStatueBust },
+  BATHTUB: { variants: 2, make: makeBathtub },
+  TOILET: { variants: 2, make: makeToilet },
+  SINK: { variants: 2, make: makeSink },
+  SHOWER: { variants: 1, make: makeShower },
+  WASHING_MACHINE: { variants: 2, make: makeWashingMachine },
+  BOOKSHELF: { variants: 2, make: makeBookshelf },
+  CARDBOARD_BOXES: { variants: 3, make: makeCardboardBoxes },
+  PIZZA_BOXES: { variants: 1, make: makePizzaBoxes },
+  TRASH_PILE: { variants: 1, make: makeTrashPile },
+  SPEAKER: { variants: 2, make: makeSpeaker },
+  RUG: { variants: 3, make: makeRug },
 };
-
-void R32;
-void line6;
-void discXY;
-void rbox;
-void pixXY;
-void pixXZ;
-void rng;

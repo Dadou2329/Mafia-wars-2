@@ -1,4 +1,6 @@
-// Portraits 3D des deux parrains, rendus une seule fois pour les menus et le salon.
+// Portraits 3D des deux parrains (New York, 2085), rendus une seule fois pour les menus et le
+// salon : lumière principale chaude, contre-jour au néon de la couleur du parrain (cramoisi pour
+// Dadou, cyan pour Even), liserés lumineux de la tenue allumés comme la nuit.
 
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
@@ -49,12 +51,13 @@ export async function renderPortraits(width = 360, height = 480): Promise<Portra
   envUniforms.uFogDensity.value = 0;
   envUniforms.uNight.value = 0.6;
   const scene = new THREE.Scene();
-  const key = new THREE.DirectionalLight(0xffe2b8, 2.6);
-  key.position.set(2, 3, 4);
+  const key = new THREE.DirectionalLight(0xffe8cc, 2.4);
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0x9ab8ff, 1.2);
-  rim.position.set(-3, 2, -2);
+  // contre-jour néon (couleur du parrain) et débouchage froid de l'autre côté
+  const rim = new THREE.DirectionalLight(0xff3048, 2.2);
   scene.add(rim);
+  const fill = new THREE.DirectionalLight(0x8aa8ff, 0.5);
+  scene.add(fill);
   const cr = new CharacterRenderer();
   scene.add(cr.group);
   const camera = new THREE.PerspectiveCamera(28, width / height, 0.05, 50);
@@ -76,7 +79,8 @@ export async function renderPortraits(width = 360, height = 480): Promise<Portra
       vz: 0,
       anim: Anim.IDLE,
       aiming: false,
-      weapon: Weapon.PISTOL,
+      // Dadou garde son Vektor à la main ; Even, les mains dans le dos, n'en a pas besoin
+      weapon: slot === 'dadou' ? Weapon.PISTOL : Weapon.FISTS,
       shotAt: -10,
       hitAt: -10,
       meleeAt: -10,
@@ -84,8 +88,13 @@ export async function renderPortraits(width = 360, height = 480): Promise<Portra
       deathAt: -10,
     };
     // cadrage en pied, chapeau compris (le haut-de-forme d'Even dépasse 2 m)
-    camera.position.set(slot === 'dadou' ? 0.5 : -0.5, 1.5, 3.85);
+    const side = slot === 'dadou' ? 1 : -1;
+    camera.position.set(0.5 * side, 1.5, 3.85);
     camera.lookAt(0, 1.13, 0);
+    key.position.set(2 * side, 3, 4);
+    rim.color.setHex(slot === 'dadou' ? 0xff3048 : 0x46d8ff);
+    rim.position.set(-3 * side, 1.6, -2.5);
+    fill.position.set(-2.5 * side, 0.8, 2);
     for (let i = 0; i < 30; i++) cr.update([v], camera, 2 + i * 0.016, 0.016);
     renderer.render(scene, camera);
     out[slot] = canvas.toDataURL('image/png');

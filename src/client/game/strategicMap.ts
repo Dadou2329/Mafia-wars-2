@@ -33,7 +33,7 @@ import {
   type BuildingType,
   type DistrictId,
 } from '../../shared/city/plan';
-import type { LieutenantStatus, PrivateState } from '../../shared/protocol';
+import type { LieutenantStatus, PrivateState, Slot } from '../../shared/protocol';
 import { formatMoney } from '../../shared/util';
 import { audio } from '../audio/AudioEngine';
 import type { SfxName } from '../audio/types';
@@ -46,7 +46,7 @@ import { leNom } from '../../shared/french';
 
 export type Tab = 'orders' | 'recruit' | 'lieutenants' | 'upgrades' | 'armory' | 'view';
 
-type Sel = { kind: 'building'; id: number } | { kind: 'district'; id: DistrictId } | null;
+type Sel = { kind: 'building'; id: number } | { kind: 'district'; id: DistrictId } | { kind: 'convoy'; id: number } | null;
 
 interface Pending {
   order: OrderType;
@@ -98,7 +98,19 @@ export const TYPE_LABEL: Record<BuildingType, string> = {
 };
 
 const OWNER_RGB: Record<number, string> = { [Faction.DADOU]: '176,30,38', [Faction.EVEN]: '42,74,138' };
-const OWNER_CSS: Record<number, string> = { [Faction.DADOU]: '#d0444c', [Faction.EVEN]: '#6f95e0', [Faction.NEUTRAL]: '#c8b890' };
+const OWNER_CSS: Record<number, string> = { [Faction.DADOU]: '#ff4a5a', [Faction.EVEN]: '#6fa8ff', [Faction.NEUTRAL]: '#b8c4d8' };
+
+/** « Votre convoi », « Convoi de Dadou », « Convoi blindé » (banque). */
+function convoyName(slot: Slot | null, you: Slot): string {
+  if (!slot) return 'Convoi blindé';
+  return slot === you ? 'Votre convoi' : `Convoi ${DE_BOSS[slot]}`;
+}
+
+function convoyColor(slot: Slot | null, you: Slot): string {
+  if (!slot) return '#ffd23c';
+  if (slot === you) return '#50ffaa';
+  return slot === 'dadou' ? '#ff4a5a' : '#6fa8ff';
+}
 
 function initials(name: string): string {
   return name
@@ -387,6 +399,8 @@ export class StrategicMap {
   private pick(px: number, py: number): Sel {
     const { x, z } = this.toWorld(px, py);
     if (x < 0 || z < 0 || x > WORLD_W || z > WORLD_D) return null;
+    const tol = 16 / this.pxPerMeter();
+    for (const cv of this.gc.pub.convoys ?? []) if (Math.hypot(cv.x - x, cv.z - z) <= Math.max(3, tol)) return { kind: 'convoy', id: cv.id };
     for (const b of this.gc.world.buildings) {
       const f = b.footprint;
       if (x >= f[0] && x <= f[2] && z >= f[1] && z <= f[3]) return { kind: 'building', id: b.id };
@@ -431,6 +445,12 @@ export class StrategicMap {
       this.tooltip.appendChild(h('div', { class: 'dim' }, `${TYPE_LABEL[def.type]} — ${DISTRICT_BY_ID[def.district].name}`));
       this.tooltip.appendChild(h('div', null, this.ownerText(hv.id)));
       if (def.capturable && def.income) this.tooltip.appendChild(h('div', { class: 'c-good' }, `+${def.income} $/min`));
+    } else if (hv.kind === 'convoy') {
+      const cv = this.gc.pub.convoys.find((x) => x.id === hv.id);
+      if (!cv) return;
+      this.tooltip.appendChild(h('b', null, convoyName(cv.slot, this.gc.you)));
+      this.tooltip.appendChild(h('div', { class: 'dim' }, `Vers ${cv.dest}`));
+      this.tooltip.appendChild(h('div', { class: 'c-good' }, `${formatMoney(cv.reward)} à bord`));
     } else {
       const d = DISTRICT_BY_ID[hv.id];
       const owner = this.gc.pub.districts.find((x) => x.id === hv.id)?.owner ?? 0;
@@ -462,7 +482,7 @@ export class StrategicMap {
     const W = this.canvas.clientWidth;
     const H = this.canvas.clientHeight;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.fillStyle = '#c9b48a';
+    c.fillStyle = '#03050b';
     c.fillRect(0, 0, W, H);
     const { ox, oy, k } = this.origin();
     const S = k / MAP_SCALE;
@@ -475,6 +495,7 @@ export class StrategicMap {
     c.scale(S, S);
     c.imageSmoothingEnabled = true;
     c.drawImage(gc.map.base, 0, 0);
+    c.drawImage(gc.map.decor, 0, 0);
     const M = MAP_SCALE;
     // quartiers : teinte du propriétaire
     for (const d of DISTRICTS) {
@@ -489,7 +510,7 @@ export class StrategicMap {
       const selected = this.sel?.kind === 'district' && this.sel.id === d.id;
       const hovered = this.hover?.kind === 'district' && this.hover.id === d.id;
       if (selected || hovered || rgb) {
-        c.strokeStyle = selected ? '#f2c84a' : rgb ? `rgba(${rgb},0.85)` : 'rgba(60,30,10,0.5)';
+        c.strokeStyle = selected ? '#f2c84a' : rgb ? `rgba(${rgb},0.85)` : 'rgba(110,200,255,0.35)';
         c.lineWidth = (selected ? 5 : hovered ? 3 : 2.2) / S;
         c.setLineDash(selected ? [] : [14 / S, 8 / S]);
         c.strokeRect(r[0] * M + 3 / S, r[1] * M + 3 / S, (r[2] - r[0]) * M - 6 / S, (rz1 - r[1]) * M - 6 / S);
@@ -511,7 +532,7 @@ export class StrategicMap {
           c.fillStyle = `rgba(${rgb},0.6)`;
           c.fillRect(x, y, w, hh);
         } else if (def.capturable && st.guards > 0) {
-          c.fillStyle = 'rgba(70,55,40,0.28)';
+          c.fillStyle = 'rgba(150,160,190,0.18)';
           c.fillRect(x, y, w, hh);
         }
         if (st.cap > 0 && st.capBy) {
@@ -577,11 +598,55 @@ export class StrategicMap {
       c.font = `700 ${Math.max(22, 26 / S)}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillStyle = raid ? '#2a4a9a' : '#a8740a';
+      c.fillStyle = raid ? '#7fa8ff' : '#ffc94a';
       c.fillText(raid ? '⚑' : '$', ev.x * M, ev.z * M);
       c.font = `600 ${13 / S}px ${MAP_FONT}`;
-      c.fillStyle = '#2a1a0c';
+      c.fillStyle = '#e8f6ff';
       c.fillText(raid ? 'Descente de police' : 'Contrebande', ev.x * M, ev.z * M + 22 / S);
+    }
+    // convois blindés et butins sur la chaussée
+    for (const l of pub.loot ?? []) {
+      const r = (2.2 + (now % 1) * 2.4) * M;
+      c.strokeStyle = 'rgba(80,255,170,0.9)';
+      c.lineWidth = 3 / S;
+      c.beginPath();
+      c.arc(l.x * M, l.z * M, r, 0, Math.PI * 2);
+      c.stroke();
+      c.font = `700 ${Math.max(18, 22 / S)}px ${MAP_FONT_TITLE}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillStyle = '#50ffaa';
+      c.fillText('$', l.x * M, l.z * M);
+      c.font = `600 ${12 / S}px ${MAP_FONT}`;
+      c.fillStyle = '#e8f6ff';
+      c.fillText(`Butin : ${formatMoney(l.reward)}`, l.x * M, l.z * M + 20 / S);
+    }
+    for (const cv of pub.convoys ?? []) {
+      const col = convoyColor(cv.slot, gc.you);
+      const isSel = this.sel?.kind === 'convoy' && this.sel.id === cv.id;
+      const isHov = this.hover?.kind === 'convoy' && this.hover.id === cv.id;
+      const r = (isSel || isHov ? 15 : 12) / S;
+      const x = cv.x * M;
+      const z = cv.z * M;
+      c.fillStyle = col;
+      c.strokeStyle = isSel ? '#f2c84a' : '#ffffff';
+      c.lineWidth = (isSel ? 4 : 2.5) / S;
+      c.beginPath();
+      c.moveTo(x, z - r);
+      c.lineTo(x + r, z);
+      c.lineTo(x, z + r);
+      c.lineTo(x - r, z);
+      c.closePath();
+      c.fill();
+      c.stroke();
+      c.fillStyle = '#05070d';
+      c.font = `900 ${12 / S}px ${MAP_FONT_TITLE}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('$', x, z + 0.5 / S);
+      c.font = `600 ${12 / S}px ${MAP_FONT}`;
+      c.fillStyle = col;
+      c.fillText(`${convoyName(cv.slot, gc.you)} · ${formatMoney(cv.reward)}`, x, z + r + 10 / S);
     }
     // ennemis repérés
     for (const sp of priv.spotted) {
@@ -589,7 +654,7 @@ export class StrategicMap {
       c.beginPath();
       c.arc(sp.x * M, sp.z * M, (2 + Math.min(5, sp.n * 0.5)) * M, 0, Math.PI * 2);
       c.fill();
-      c.fillStyle = '#7a0c08';
+      c.fillStyle = '#ff8a7a';
       c.font = `700 ${Math.max(16, 18 / S)}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.fillText(`${sp.n}`, sp.x * M, sp.z * M + 6 / S);
@@ -636,7 +701,7 @@ export class StrategicMap {
       c.textBaseline = 'middle';
       c.fillText(initials(lt.name), lt.x * M, lt.z * M + 0.5 / S);
       c.font = `600 ${12 / S}px ${MAP_FONT}`;
-      c.fillStyle = '#2a1a0c';
+      c.fillStyle = '#e8f6ff';
       c.fillText(`${lt.name} (${lt.men})`, lt.x * M, lt.z * M + r + 10 / S);
     }
     // le parrain
@@ -658,7 +723,7 @@ export class StrategicMap {
     c.restore();
     c.font = `700 ${12 / S}px ${MAP_FONT_TITLE}`;
     c.textAlign = 'center';
-    c.fillStyle = '#1a0c06';
+    c.fillStyle = '#e8f6ff';
     c.fillText('VOUS', p.x * M, p.z * M - 18 / S);
     c.restore();
     // noms des quartiers
@@ -671,14 +736,14 @@ export class StrategicMap {
   private drawCompass(c: CanvasRenderingContext2D, x: number, y: number): void {
     c.save();
     c.translate(x, y);
-    c.fillStyle = 'rgba(239,226,191,0.75)';
+    c.fillStyle = 'rgba(8,14,28,0.8)';
     c.beginPath();
     c.arc(0, 0, 30, 0, Math.PI * 2);
     c.fill();
-    c.strokeStyle = '#3a2410';
+    c.strokeStyle = 'rgba(110,220,255,0.7)';
     c.lineWidth = 1.5;
     c.stroke();
-    c.fillStyle = '#3a2410';
+    c.fillStyle = 'rgba(150,230,255,0.85)';
     for (let i = 0; i < 4; i++) {
       c.rotate(Math.PI / 2);
       c.beginPath();
@@ -691,7 +756,7 @@ export class StrategicMap {
     c.rotate(0);
     c.font = `700 13px ${MAP_FONT_TITLE}`;
     c.textAlign = 'center';
-    c.fillStyle = '#7a1a10';
+    c.fillStyle = '#ff4fa0';
     c.fillText('N', 0, -32);
     c.restore();
   }
@@ -837,6 +902,8 @@ export class StrategicMap {
       );
     } else if (sel.kind === 'building') {
       b.appendChild(this.buildingCard(sel.id));
+    } else if (sel.kind === 'convoy') {
+      b.appendChild(this.convoyCard(sel.id));
     } else {
       b.appendChild(this.districtCard(sel.id));
     }
@@ -848,6 +915,37 @@ export class StrategicMap {
     for (const lt of lts) box.appendChild(this.ltCard(lt, true));
     b.appendChild(this.section('Vos lieutenants', box));
     void mine;
+  }
+
+  private convoyCard(id: number): HTMLElement {
+    const gc = this.gc;
+    const cv = gc.pub.convoys.find((x) => x.id === id);
+    const card = h('div', { class: 'sm-card' });
+    if (!cv) {
+      card.appendChild(h('div', { class: 'sm-card-title' }, 'Convoi'));
+      card.appendChild(h('p', { class: 'dim' }, 'Ce convoi n’est plus sur les routes (arrivé ou détruit).'));
+      return card;
+    }
+    const own = cv.slot === gc.you;
+    card.appendChild(h('div', { class: 'sm-card-title' }, convoyName(cv.slot, gc.you)));
+    card.appendChild(h('div', { class: 'dim' }, `Camion blindé en route vers ${cv.dest} — ${Math.round(cv.p * 100)} % du trajet`));
+    card.appendChild(h('div', { class: 'sm-owner', style: `color:${convoyColor(cv.slot, gc.you)}` }, `${formatMoney(cv.reward)} à bord`));
+    card.appendChild(
+      h(
+        'p',
+        { class: 'dim' },
+        own
+          ? 'Escortez-le jusqu’à destination : s’il est détruit, son butin reste sur la chaussée et le premier qui le ramasse l’empoche.'
+          : cv.slot
+            ? 'Détruisez le camion, puis ramassez le butin tombé sur la chaussée (vous ou un de vos lieutenants).'
+            : 'Convoi de la Banque Fédérale : détruisez-le pour rafler son chargement. Le NYPD n’appréciera pas.',
+      ),
+    );
+    const actions = h('div', { class: 'sm-actions' });
+    if (own) actions.appendChild(this.actionBtn('Escorter', '', () => this.choose({ order: 'escort', target: id, label: `${ORDER_LABEL.escort} : ${convoyName(cv.slot, gc.you)}`, confirm: 'Envoyer l’escorte' })));
+    else actions.appendChild(this.actionBtn('Intercepter', 'danger', () => this.choose({ order: 'intercept', target: id, label: `${ORDER_LABEL.intercept} : ${convoyName(cv.slot, gc.you)}`, confirm: 'Lancer l’interception' })));
+    card.appendChild(actions);
+    return card;
   }
 
   private buildingCard(id: number): HTMLElement {
@@ -868,7 +966,7 @@ export class StrategicMap {
       ),
     );
     card.appendChild(h('div', { class: 'dim' }, `${TYPE_LABEL[def.type]} — ${DISTRICT_BY_ID[def.district].name}${def.isKey ? ' — bâtiment clé' : ''}${hqOf ? ` — QG ${DE_BOSS[hqOf]}` : ''}`));
-    card.appendChild(h('div', { class: 'sm-owner', style: `color:${OWNER_CSS[st?.owner ?? 0] ?? '#c8b890'}` }, this.ownerText(id)));
+    card.appendChild(h('div', { class: 'sm-owner', style: `color:${OWNER_CSS[st?.owner ?? 0] ?? '#b8c4d8'}` }, this.ownerText(id)));
     if (def.capturable && def.income) card.appendChild(h('div', null, 'Revenus : ', h('b', { class: 'c-good' }, `+${def.income} $/min`)));
     card.appendChild(h('p', { class: 'sm-blurb' }, def.blurb));
     if (st && st.cap > 0) card.appendChild(h('div', { class: 'c-bad' }, `Capture en cours : ${Math.round(st.cap * 100)} %${st.contested ? ' (contesté)' : ''}`));
@@ -953,7 +1051,7 @@ export class StrategicMap {
     card.appendChild(
       h(
         'div',
-        { class: 'sm-owner', style: `color:${OWNER_CSS[owner] ?? '#c8b890'}` },
+        { class: 'sm-owner', style: `color:${OWNER_CSS[owner] ?? '#b8c4d8'}` },
         owner === Faction.DADOU ? 'Contrôlé par Dadou' : owner === Faction.EVEN ? 'Contrôlé par Even' : 'Territoire disputé',
       ),
     );
@@ -976,7 +1074,7 @@ export class StrategicMap {
               },
             },
           },
-          h('i', { style: `background:${OWNER_CSS[st?.owner ?? 0] ?? '#c8b890'}` }),
+          h('i', { style: `background:${OWNER_CSS[st?.owner ?? 0] ?? '#b8c4d8'}` }),
           `${gc.pub.hq.dadou === k.id || gc.pub.hq.even === k.id ? '♛' : '★'} ${k.name}`,
           h('span', { class: 'dim' }, ` — ${this.ownerText(k.id)}`),
         ),

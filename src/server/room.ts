@@ -210,6 +210,7 @@ export class Room {
       pub: g.publicState(),
       priv: g.privateState(slot),
       over: g.over,
+      glass: g.glassLog,
     });
   }
 

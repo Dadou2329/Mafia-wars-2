@@ -143,7 +143,7 @@ const decimal = (v: number, d = 2): string => v.toFixed(d).replace('.', ',');
 // ============================================================================ personnalisation
 
 type CustomKey = 'coat' | 'vest' | 'tie' | 'hatband';
-type Hat = 'bowler' | 'top' | 'flatcap';
+type Hat = 'bowler' | 'top' | 'flatcap' | 'fedora';
 
 interface Swatch {
   c: number;
@@ -209,6 +209,7 @@ const HATS: { value: Hat; label: string }[] = [
   { value: 'bowler', label: 'Melon' },
   { value: 'top', label: 'Haut-de-forme' },
   { value: 'flatcap', label: 'Casquette' },
+  { value: 'fedora', label: 'Feutre' },
 ];
 
 const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
@@ -220,7 +221,7 @@ function customValue(slot: Slot, key: CustomKey): number {
 
 function customHat(slot: Slot): Hat {
   const v = settings.custom[slot].hat;
-  return v === 'bowler' || v === 'top' || v === 'flatcap' ? v : DEFAULT_LOOK[slot].hat;
+  return v === 'bowler' || v === 'top' || v === 'flatcap' || v === 'fedora' ? v : DEFAULT_LOOK[slot].hat;
 }
 
 // ============================================================================ panneau

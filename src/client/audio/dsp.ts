@@ -207,19 +207,11 @@ export const periodicHz = (f: number, L: number): number => Math.max(1, Math.rou
  * Modulation lente, douce et exactement périodique sur L secondes : somme de
  * sinus de fréquences k/L (k = 1..maxK) à phases aléatoires, normalisée dans [-1, 1].
  */
-export function periodicMod(n: number, L: number, rng: Rng, maxK = 5, minK = 1): Float32Array<ArrayBuffer> {
+export function periodicMod(n: number, _L: number, rng: Rng, maxK = 5, minK = 1): Float32Array<ArrayBuffer> {
   const d = new Float32Array(n);
-  const terms: Array<[number, number, number]> = [];
-  for (let k = minK; k <= maxK; k++) terms.push([(TWO_PI * k) / n, rng() * TWO_PI, (0.4 + rng() * 0.6) / k]);
-  let p = 0;
-  for (let i = 0; i < n; i++) {
-    let s = 0;
-    for (const [w, ph, a] of terms) s += Math.sin(w * i + ph) * a;
-    d[i] = s;
-    const a = Math.abs(s);
-    if (a > p) p = a;
-  }
-  if (p > 1e-9) for (let i = 0; i < n; i++) d[i] /= p;
+  // k cycles sur n échantillons : addSine avec f = k et une « fréquence d'échantillonnage » n.
+  for (let k = minK; k <= maxK; k++) addSine(d, k, (0.4 + rng() * 0.6) / k, n, rng() * TWO_PI);
+  normalizePeak(d, 1);
   return d;
 }
 

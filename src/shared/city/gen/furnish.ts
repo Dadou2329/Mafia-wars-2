@@ -412,7 +412,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
       fu.dais(r.x0 + 3, r.z1 - 12, r.x1 - 3, r.z1, 4, M.FLOOR_DARK, M.GOLD);
       fu.fillFree(r.x0 + 3, fu.lv.floorTop + 4, r.z1 - 2, r.x1 - 3, fu.lv.ceil - 1, r.z1 - 1, M.SCREEN);
       for (let z = r.z0 + 5; z < r.z1 - 15; z += 4)
-        for (let x = r.x0 + 4; x < r.x1 - 6; x += 11) if (Math.abs(x + 5 - cx) > 3) fu.p('SEAT_ROW', x + 5, z, Math.PI);
+        for (let x = r.x0 + 4; x < r.x1 - 6; x += 11) if (Math.abs(x + 5 - cx) > 3) fu.p('SEAT_ROW', x + 5, z, 0);
       fu.ceiling('STAGE_LIGHTS', cx - 8, r.z1 - 14, 1);
       fu.ceiling('STAGE_LIGHTS', cx + 8, r.z1 - 14, 6);
       fu.lights(r, 'CHANDELIER', 22);
@@ -475,7 +475,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
     case 'kitchen': {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.TILE_WHITE);
       fu.lineWall(r, 'KITCHEN_COUNTER', 'back', 10, 2);
-      fu.againstWall(r, 'FRIDGE', 'left', cz);
+      fu.againstWall(r, 'FRIDGE', 'left', cz, 1);
       fu.p('KITCHEN_ISLAND', cx, cz, 0);
       fu.lights(r, 'CEILING_LIGHT', 10);
       break;
@@ -594,7 +594,7 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
       fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_GREY);
       fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 12, 10, (x, z) => {
         fu.p('DESK', x, z, 0);
-        fu.p('COMPUTER', x, z - 0.6, Math.PI, 0, true, fu.lv.floorTop + 3);
+        fu.p('COMPUTER', x, z - 0.6, 0, 0, true, fu.lv.floorTop + 3);
         fu.p('OFFICE_CHAIR', x, z + 3, Math.PI);
       });
       fu.lineWall(r, 'FILING_CABINET', 'left', 3, 3);
@@ -619,8 +619,8 @@ export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
       fu.wall(r, 'SCREEN_WALL', 'back', cx - 6, 3);
       fu.wall(r, 'SCREEN_WALL', 'back', cx + 6, 3);
       fu.p('COMMAND_DESK', cx, r.z1 - 5, Math.PI, 0);
-      fu.p('OFFICE_CHAIR', cx - 3, r.z1 - 8, Math.PI);
-      fu.p('OFFICE_CHAIR', cx + 3, r.z1 - 8, Math.PI);
+      fu.p('OFFICE_CHAIR', cx - 3, r.z1 - 8, 0);
+      fu.p('OFFICE_CHAIR', cx + 3, r.z1 - 8, 0);
       fu.lineWall(r, 'SERVER_RACK', 'left', 3, 3);
       fu.lights(r, 'CEILING_LIGHT', 12);
       fu.mark('vault', cx, cz);

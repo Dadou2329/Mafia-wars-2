@@ -107,6 +107,38 @@ export function drawMinimap(
       c.fill();
     }
   }
+  // convois blindés et butins
+  if (pub) {
+    const t = Date.now() / 1000;
+    for (const l of pub.loot ?? []) {
+      c.strokeStyle = '#50ffaa';
+      c.lineWidth = 3 / s;
+      c.beginPath();
+      c.arc(l.x * MAP_SCALE, l.z * MAP_SCALE, (2 + (t % 1) * 3) * MAP_SCALE, 0, Math.PI * 2);
+      c.stroke();
+      c.fillStyle = '#50ffaa';
+      c.font = `700 ${26}px ${MAP_FONT_TITLE}`;
+      c.textAlign = 'center';
+      c.fillText('$', l.x * MAP_SCALE, l.z * MAP_SCALE + 9);
+    }
+    for (const cv of pub.convoys ?? []) {
+      const col = !cv.slot ? '#ffd23c' : cv.slot === me ? '#50ffaa' : cv.slot === 'dadou' ? '#ff4a5a' : '#6fa8ff';
+      const x = cv.x * MAP_SCALE;
+      const z = cv.z * MAP_SCALE;
+      const r = 2.6 * MAP_SCALE;
+      c.fillStyle = col;
+      c.strokeStyle = '#000';
+      c.lineWidth = 2 / s;
+      c.beginPath();
+      c.moveTo(x, z - r);
+      c.lineTo(x + r, z);
+      c.lineTo(x, z + r);
+      c.lineTo(x - r, z);
+      c.closePath();
+      c.fill();
+      c.stroke();
+    }
+  }
   // cargaison de contrebande / descente de police
   if (event && (event.kind === 'contraband' || event.kind === 'raid')) {
     const t = Date.now() / 1000;
@@ -144,6 +176,33 @@ export function drawMinimap(
       c.fillText('$', 0, 1);
       c.restore();
     }
+  }
+  // convois et butins hors de la mini-carte : flèches au bord
+  if (pub) {
+    const edge = (x: number, z: number, col: string, glyph: string): void => {
+      const dx = x - px;
+      const dz = z - pz;
+      const d = Math.hypot(dx, dz);
+      if (d <= radiusM * 0.9) return;
+      const r = W / 2 - 16;
+      c.save();
+      c.translate(W / 2 + (dx / d) * r, H / 2 + (dz / d) * r);
+      c.fillStyle = col;
+      c.strokeStyle = '#000';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(0, 0, 11, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      c.fillStyle = '#05070d';
+      c.font = `700 14px ${MAP_FONT_TITLE}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(glyph, 0, 1);
+      c.restore();
+    };
+    for (const l of pub.loot ?? []) edge(l.x, l.z, '#50ffaa', '$');
+    for (const cv of pub.convoys ?? []) edge(cv.x, cv.z, !cv.slot ? '#ffd23c' : cv.slot === me ? '#50ffaa' : cv.slot === 'dadou' ? '#ff4a5a' : '#6fa8ff', '◆');
   }
   // flèche du joueur
   c.save();

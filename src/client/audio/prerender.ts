@@ -6,7 +6,7 @@
  * régulièrement pour étaler le travail sur plusieurs images.
  */
 import {
-  Biquad, clamp, dcBlock, decayK, fadeOut, loopify, loopRate, mulberry32, normalizePeak, normalizeRms,
+  addSine, Biquad, clamp, dcBlock, decayK, fadeOut, loopify, loopRate, mulberry32, normalizePeak, normalizeRms,
   OnePole, PinkGen, Resonator, rms, rr, type Rng, scale, shotRate, toBuffer, TWO_PI,
 } from './dsp';
 import type { BufferJob } from './reverb';
@@ -64,8 +64,8 @@ function footstep(surface: Surface, fs: number, rng: Rng): Float32Array<ArrayBuf
   } else if (surface === 'concrete') {
     // Semelle de caoutchouc sur trottoir de béton : impact sourd et frottement granuleux.
     const bodyLp = Biquad.lowpass(fs, rr(rng, 320, 480), 0.9);
-    const scuffBp = Biquad.bandpass(fs, rr(rng, 950, 1700), 0.8);
-    const gritHp = Biquad.highpass(fs, rr(rng, 3000, 4200), 0.7);
+    const scuffBp = Biquad.bandpass(fs, rr(rng, 700, 1300), 0.8);
+    const gritHp = Biquad.highpass(fs, rr(rng, 2800, 3800), 0.7);
     const toeLp = Biquad.lowpass(fs, rr(rng, 500, 800), 0.8);
     const toeBp = Biquad.bandpass(fs, rr(rng, 1600, 2400), 1.1);
     const w = (TWO_PI * rr(rng, 70, 95)) / fs;
@@ -79,7 +79,7 @@ function footstep(surface: Surface, fs: number, rng: Rng): Float32Array<ArrayBuf
       const att = i < attN ? i / attN : 1;
       let x = bodyLp.process(n * att * eBody) * 2.4 + Math.sin(w * i) * eThump * att * 0.35;
       if (i >= scuffI) { x += scuffBp.process(n * eScuff * (0.55 + 0.45 * rng())) * 0.85; eScuff *= kScuff; }
-      x += gritHp.process(rng() < eGrit ? n : 0) * 0.22;
+      x += gritHp.process(rng() < eGrit ? n : 0) * 0.12;
       if (i >= toeI) {
         x += toeLp.process(n * eToe) * toeG + toeBp.process(n * eToeC) * 0.7 * toeG;
         eToe *= kToe; eToeC *= kToeC;
@@ -89,9 +89,9 @@ function footstep(surface: Surface, fs: number, rng: Rng): Float32Array<ArrayBuf
     }
   } else if (surface === 'metal') {
     // Bottes sur caillebotis / escalier de secours : claquement, modes métalliques, cliquetis.
-    const f0 = rr(rng, 170, 300);
+    const f0 = rr(rng, 280, 460);
     const modes: ReadonlyArray<readonly [number, number, number]> = [
-      [1, 1, 0.16], [1.58, 0.7, 0.12], [2.31, 0.55, 0.09], [3.17, 0.4, 0.07], [4.43, 0.3, 0.05], [5.9, 0.2, 0.035],
+      [1, 1, 0.1], [1.58, 0.75, 0.08], [2.31, 0.6, 0.065], [3.17, 0.45, 0.05], [4.43, 0.32, 0.04], [5.9, 0.22, 0.03],
     ];
     const bank = modes.map(([r, a, tau]) => ({ r: new Resonator(fs, f0 * r * rr(rng, 0.97, 1.03), tau * rr(rng, 0.8, 1.2)), a }));
     const excLp = Biquad.lowpass(fs, 3500, 0.7);
@@ -100,21 +100,22 @@ function footstep(surface: Surface, fs: number, rng: Rng): Float32Array<ArrayBuf
     const rattleBp = Biquad.bandpass(fs, rr(rng, 1800, 3200), 2);
     const kExc = decayK(fs, 0.0015), kThud = decayK(fs, 0.018), kClick = decayK(fs, 0.003);
     // Cliquetis : quelques petites excitations après l'impact (la grille vibre).
-    const rattles: number[] = [];
-    const nr = 3 + Math.floor(rng() * 4);
-    for (let k = 0; k < nr; k++) rattles.push(Math.floor(rr(rng, 0.012, 0.12) * fs));
+    const rattle = new Float32Array(len);
     const rattleN = Math.floor(0.0012 * fs);
+    const nr = 3 + Math.floor(rng() * 4);
+    for (let k = 0; k < nr; k++) {
+      const r0 = Math.floor(rr(rng, 0.012, 0.12) * fs);
+      for (let j = 0; j < rattleN && r0 + j < len; j++) rattle[r0 + j] += 0.35;
+    }
+    for (let j = 0; j < rattleN * 2 && toeI + j < len; j++) rattle[toeI + j] += toeG * 0.6 / 0.5;
     let eExc = 1, eThud = 1, eClick = 1;
     for (let i = 0; i < len; i++) {
       const n = rng() * 2 - 1;
-      let exc = n * eExc;
-      if (i >= toeI && i < toeI + rattleN * 2) exc += n * toeG * 0.6;
-      let rat = 0;
-      for (const r0 of rattles) if (i >= r0 && i < r0 + rattleN) rat += n * 0.35;
-      exc = excLp.process(exc + rat * 0.5);
+      const rat = n * rattle[i];
+      const exc = excLp.process(n * eExc + rat * 0.5);
       let ring = 0;
       for (const m of bank) ring += m.r.process(exc) * m.a;
-      out[i] = ring * 0.35 + thudLp.process(n * eThud) * 1.8 + clickBp.process(n * eClick) * 1.2 + rattleBp.process(rat) * 0.9;
+      out[i] = ring * 0.25 + thudLp.process(n * eThud) * 1.8 + clickBp.process(n * eClick) * 1.4 + rattleBp.process(rat) * 0.9;
       eExc *= kExc; eThud *= kThud; eClick *= kClick;
     }
   } else if (surface === 'wood') {
@@ -246,12 +247,12 @@ export function* makeCrowdLoop(ctx: BaseAudioContext): BufferJob {
     }
   }
   const fadeN = Math.floor(fadeS * fs);
+  dcBlock(L, fs);
   const outL = loopify(L, fadeN);
-  dcBlock(outL, fs);
   normalizeRms(outL, 0.22);
   yield;
+  dcBlock(R, fs);
   const outR = loopify(R, fadeN);
-  dcBlock(outR, fs);
   normalizeRms(outR, 0.22);
   yield;
   return toBuffer(ctx, [outL, outR], fs);
@@ -333,7 +334,9 @@ export function* makeDripLoop(ctx: BaseAudioContext): BufferJob {
       d[i] = bp.process(w) * (0.15 + Math.min(1, m)) * lvl;
       if ((i & 8191) === 8191) yield;
     }
+    dcBlock(d, fs, 15);
     beds.push(loopify(d, fadeN));
+    yield;
   }
   const [L, R] = beds;
   // Gouttes (bulle de Minnaert : sinus dont la hauteur monte) écrites circulairement.
@@ -361,15 +364,14 @@ export function* makeDripLoop(ctx: BaseAudioContext): BufferJob {
       const u = i / fs;
       ph += (f0 * (1 + Math.min(0.9, u * 18))) / fs;
       let x = Math.sin(TWO_PI * ph) * e * 0.6;
-      if (i < clickN) x += hp.process((rng() * 2 - 1) * a * (1 - i / clickN)) * 0.5;
+      if (i < clickN) x += hp.process((rng() * 2 - 1) * a * (1 - i / clickN)) * 0.2;
       e *= k;
       const j = (i0 + i) % N;
       L[j] += x * gl;
       R[j] += x * gr;
     }
   }
-  dcBlock(L, fs);
-  dcBlock(R, fs);
+  yield;
   normalizePair(L, R, 0.16);
   return toBuffer(ctx, [L, R], fs);
 }
@@ -420,8 +422,8 @@ export function* makeWaterLoop(ctx: BaseAudioContext): BufferJob {
       t += rr(rng, 0.45, 1.5);
       yield;
     }
+    dcBlock(d, fs);
     const out = loopify(d, Math.floor(fadeS * fs));
-    dcBlock(out, fs);
     normalizeRms(out, 0.18);
     chans.push(out);
     yield;
@@ -437,7 +439,7 @@ export function* makeWaterLoop(ctx: BaseAudioContext): BufferJob {
  */
 export function* makeTrafficLoop(ctx: BaseAudioContext): BufferJob {
   const fs = loopRate(ctx);
-  const seconds = 9;
+  const seconds = 8;
   const fadeS = 0.6;
   const N = Math.floor(seconds * fs);
   const fadeN = Math.floor(fadeS * fs);
@@ -455,13 +457,14 @@ export function* makeTrafficLoop(ctx: BaseAudioContext): BufferJob {
       d[i] = lp.process(brown * 3.5) * 0.55 + wash.process(w) * 0.05;
       if ((i & 8191) === 8191) yield;
     }
+    dcBlock(d, fs, 15);
     beds.push(loopify(d, fadeN));
+    yield;
   }
   const [L, R] = beds;
   // Passages, écrits circulairement (la boucle reste parfaitement raccordée).
   const bp = new Biquad();
   const lp = new Biquad();
-  const out = new Biquad();
   let t = rr(rng, 0, 0.5);
   while (t < seconds) {
     const dur = rr(rng, 1.8, 4.5);
@@ -472,10 +475,10 @@ export function* makeTrafficLoop(ctx: BaseAudioContext): BufferJob {
     const p1 = clamp(-p0 + rr(rng, -0.3, 0.3), -1, 1);
     bp.set('bp', fs, rr(rng, 600, 1500), 0.6);
     lp.set('lp', fs, rr(rng, 150, 260), 0.7);
-    out.set('lp', fs, rr(rng, 2200, 3800), 0.6);
     const hover = rng() < 0.4;
     const fw = rr(rng, 450, 1200);
     let ph = rng();
+    let gl = panL(p0), gr = panR(p0);
     for (let i = 0; i < n; i++) {
       const u = i / n;
       const s = Math.sin(Math.PI * u);
@@ -487,17 +490,16 @@ export function* makeTrafficLoop(ctx: BaseAudioContext): BufferJob {
         if (ph >= 1) ph -= 1;
         x += Math.sin(TWO_PI * ph) * 0.07;
       }
-      x = out.process(x * env);
-      const pan = p0 + (p1 - p0) * u;
+      x *= env;
+      if ((i & 127) === 0) { const pan = p0 + (p1 - p0) * u; gl = panL(pan); gr = panR(pan); }
       const j = (i0 + i) % N;
-      L[j] += x * panL(pan);
-      R[j] += x * panR(pan);
+      L[j] += x * gl;
+      R[j] += x * gr;
       if ((i & 8191) === 8191) yield;
     }
     t += -Math.log(1 - rng()) / 1.3;
   }
-  dcBlock(L, fs);
-  dcBlock(R, fs);
+  yield;
   normalizePair(L, R, 0.2);
   return toBuffer(ctx, [L, R], fs);
 }
@@ -510,7 +512,7 @@ export function* makeTrafficLoop(ctx: BaseAudioContext): BufferJob {
  */
 export function* makeSubwayLoop(ctx: BaseAudioContext): BufferJob {
   const fs = loopRate(ctx);
-  const seconds = 8;
+  const seconds = 6;
   const fadeS = 0.6;
   const N = Math.floor(seconds * fs);
   const fadeN = Math.floor(fadeS * fs);
@@ -525,26 +527,25 @@ export function* makeSubwayLoop(ctx: BaseAudioContext): BufferJob {
     const hiss = Biquad.highpass(fs, 3000, 0.7);
     const pink = new PinkGen();
     let brown = 0;
-    const ph = rng() * TWO_PI;
+    // Houle lente du grondement : un cycle par boucle.
+    const swell = new Float32Array(total).fill(0.7);
+    addSine(swell, 1, 0.3, N, rng() * TWO_PI);
     for (let i = 0; i < total; i++) {
       const w = rng() * 2 - 1;
       brown = (brown + 0.02 * w) / 1.02;
-      const swell = 0.7 + 0.3 * Math.sin((TWO_PI * i) / N + ph);
-      d[i] = lp2.process(lp1.process(brown * 3.5)) * 0.9 * swell + air.process(pink.next(w)) * 0.3 + hiss.process(w) * 0.012;
+      d[i] = lp2.process(lp1.process(brown * 3.5)) * 0.9 * swell[i] + air.process(pink.next(w)) * 0.3 + hiss.process(w) * 0.012;
       if ((i & 8191) === 8191) yield;
     }
+    dcBlock(d, fs, 15);
     beds.push(loopify(d, fadeN));
+    yield;
   }
   const [L, R] = beds;
-  // Bourdonnement secteur (exactement périodique sur la boucle : 60 Hz × 8 s).
-  const hum: ReadonlyArray<readonly [number, number]> = [[60, 0.02], [120, 0.035], [180, 0.014], [240, 0.007], [300, 0.004]];
-  for (let i = 0; i < N; i++) {
-    let h = 0;
-    for (const [f, a] of hum) h += Math.sin((TWO_PI * f * i) / fs) * a;
-    L[i] += h;
-    R[i] += h * 0.9;
-    if ((i & 16383) === 16383) yield;
-  }
+  // Bourdonnement secteur (exactement périodique sur la boucle : 60 Hz × 6 s).
+  const hum = new Float32Array(N);
+  for (const [f, a] of [[60, 0.02], [120, 0.035], [180, 0.014], [240, 0.007], [300, 0.004]] as const) addSine(hum, f, a, fs);
+  for (let i = 0; i < N; i++) { L[i] += hum[i]; R[i] += hum[i] * 0.9; }
+  yield;
   // Gouttes dans le tunnel.
   const drips = 3;
   for (let k = 0; k < drips; k++) {
@@ -564,8 +565,7 @@ export function* makeSubwayLoop(ctx: BaseAudioContext): BufferJob {
       R[j] += x * panR(pan);
     }
   }
-  dcBlock(L, fs, 15);
-  dcBlock(R, fs, 15);
+  yield;
   normalizePair(L, R, 0.2);
   return toBuffer(ctx, [L, R], fs);
 }
@@ -575,7 +575,7 @@ export function* makeSubwayLoop(ctx: BaseAudioContext): BufferJob {
 /** Ton de pièce moderne : souffle de ventilation, bourdonnement électrique, ventilateur lointain. */
 export function* makeHvacLoop(ctx: BaseAudioContext): BufferJob {
   const fs = loopRate(ctx);
-  const seconds = 7;
+  const seconds = 5;
   const fadeS = 0.5;
   const N = Math.floor(seconds * fs);
   const fadeN = Math.floor(fadeS * fs);
@@ -587,29 +587,25 @@ export function* makeHvacLoop(ctx: BaseAudioContext): BufferJob {
     const lp = Biquad.lowpass(fs, 420, 0.7);
     const vent = Biquad.bandpass(fs, 1100, 0.8);
     const pink = new PinkGen();
-    const ph = rng() * TWO_PI;
+    // Légère respiration du souffle : deux cycles par boucle.
+    const fl = new Float32Array(total).fill(0.85);
+    addSine(fl, 2, 0.15, N, rng() * TWO_PI);
     for (let i = 0; i < total; i++) {
       const p = pink.next(rng() * 2 - 1);
-      const fl = 0.85 + 0.15 * Math.sin((TWO_PI * 2 * i) / N + ph);
-      d[i] = (lp.process(p) * 1.2 + vent.process(p) * 0.22) * fl;
+      d[i] = (lp.process(p) * 1.2 + vent.process(p) * 0.22) * fl[i];
       if ((i & 8191) === 8191) yield;
     }
+    dcBlock(d, fs, 15);
     beds.push(loopify(d, fadeN));
+    yield;
   }
   const [L, R] = beds;
-  // Bourdonnement secteur et ventilateur (périodiques sur 7 s).
-  const tones: ReadonlyArray<readonly [number, number]> = [[60, 0.01], [120, 0.026], [180, 0.01], [240, 0.005], [455, 0.007]];
-  for (let i = 0; i < N; i++) {
-    let h = 0;
-    for (const [f, a] of tones) h += Math.sin((TWO_PI * f * i) / fs) * a;
-    // léger battement du ventilateur
-    h += Math.sin((TWO_PI * 457 * i) / fs) * 0.004;
-    L[i] += h;
-    R[i] += h;
-    if ((i & 16383) === 16383) yield;
-  }
-  dcBlock(L, fs, 15);
-  dcBlock(R, fs, 15);
+  // Bourdonnement secteur et ventilateur (périodiques sur 5 s ; 455/457 Hz battent légèrement).
+  const hum = new Float32Array(N);
+  for (const [f, a] of [[60, 0.01], [120, 0.026], [180, 0.01], [240, 0.005], [455, 0.007], [457, 0.004]] as const) addSine(hum, f, a, fs);
+  for (let i = 0; i < N; i++) { L[i] += hum[i]; R[i] += hum[i]; }
+  yield;
+  yield;
   normalizePair(L, R, 0.18);
   return toBuffer(ctx, [L, R], fs);
 }

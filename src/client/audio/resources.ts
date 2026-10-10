@@ -46,6 +46,24 @@ const STEPS: ReadonlyArray<readonly [Surface, number, number]> = [
   ['stone', 8, 11], ['concrete', 8, 44], ['metal', 8, 55], ['wood', 8, 22], ['carpet', 6, 33],
 ];
 
+type IrKind = 'streetIR' | 'roomIR' | 'hallIR' | 'tunnelIR';
+
+/**
+ * Matière déjà générée, partagée entre contextes de même fréquence
+ * d'échantillonnage (la spécification autorise un AudioBuffer dans plusieurs
+ * contextes) : un rendu hors ligne ou un nouveau déverrouillage après
+ * dispose() ne refont pas le travail.
+ */
+interface Shared {
+  noise?: [AudioBuffer, AudioBuffer, AudioBuffer];
+  ir: Partial<Record<IrKind, AudioBuffer>>;
+  banks: Partial<Record<BankName, AudioBuffer[]>>;
+  drums?: DrumKit;
+  loops: Partial<Record<LoopKind, AudioBuffer>>;
+  loopBufs: Partial<Record<LoopName, AudioBuffer>>;
+}
+const SHARED = new Map<number, Shared>();
+
 export class AudioResources {
   readonly ctx: BaseAudioContext;
   readonly white: AudioBuffer;
@@ -67,41 +85,71 @@ export class AudioResources {
   private readonly loops: Partial<Record<LoopKind, AudioBuffer>> = {};
   private readonly loopBufs: Partial<Record<LoopName, AudioBuffer>> = {};
   private readonly curves = new Map<number, Float32Array<ArrayBuffer>>();
-  private jobs: Job[];
+  private jobs: Job[] = [];
 
   constructor(ctx: BaseAudioContext) {
     this.ctx = ctx;
     const fs = ctx.sampleRate;
-    const rng = mulberry32(0x2085);
-    this.white = toBuffer(ctx, [whiteNoise(Math.floor(fs * 2), rng)], fs);
-    this.pink = toBuffer(ctx, [pinkNoise(Math.floor(fs * 2.5), rng)], fs);
-    this.brown = toBuffer(ctx, [brownNoise(Math.floor(fs * 2.5), rng)], fs);
+    let sh = SHARED.get(fs);
+    if (!sh) { sh = { ir: {}, banks: {}, loops: {}, loopBufs: {} }; SHARED.set(fs, sh); }
+    const shared = sh;
+    if (!shared.noise) {
+      const rng = mulberry32(0x2085);
+      shared.noise = [
+        toBuffer(ctx, [whiteNoise(Math.floor(fs * 2), rng)], fs),
+        toBuffer(ctx, [pinkNoise(Math.floor(fs * 2.5), rng)], fs),
+        toBuffer(ctx, [brownNoise(Math.floor(fs * 2.5), rng)], fs),
+      ];
+    }
+    [this.white, this.pink, this.brown] = shared.noise;
     const ready = (k: ResourceKind): void => { this.onReady?.(k); };
-    const bank = (name: BankName, gen: Generator<undefined, AudioBuffer[], unknown>): Job =>
-      job('bank', gen, (b) => { this.banks[name] = b; ready('bank'); });
-    const gun = (name: GunBankName, seed: number): Job => bank(name, makeGunBank(ctx, name, seed));
-    const amb = (k: LoopKind, gen: Generator<undefined, AudioBuffer, unknown>): Job =>
-      job(k, gen, (b) => { this.loops[k] = b; ready(k); });
+    const add = (j: Job | null): void => { if (j) this.jobs.push(j); };
+    const ir = (kind: IrKind, make: (c: BaseAudioContext) => Generator<undefined, AudioBuffer, unknown>): Job | null => {
+      const set = (b: AudioBuffer): void => {
+        if (kind === 'streetIR') this.streetIR = b;
+        else if (kind === 'roomIR') this.roomIR = b;
+        else if (kind === 'hallIR') this.hallIR = b;
+        else this.tunnelIR = b;
+      };
+      const c = shared.ir[kind];
+      if (c) { set(c); return null; }
+      return job(kind, make(ctx), (b) => { shared.ir[kind] = b; set(b); ready(kind); });
+    };
+    const bank = (name: BankName, make: () => Generator<undefined, AudioBuffer[], unknown>): Job | null => {
+      const c = shared.banks[name];
+      if (c) { this.banks[name] = c; return null; }
+      return job('bank', make(), (b) => { shared.banks[name] = b; this.banks[name] = b; ready('bank'); });
+    };
+    const gun = (name: GunBankName, seed: number): Job | null => bank(name, () => makeGunBank(ctx, name, seed));
+    const amb = (k: LoopKind, make: (c: BaseAudioContext) => Generator<undefined, AudioBuffer, unknown>): Job | null => {
+      const c = shared.loops[k];
+      if (c) { this.loops[k] = c; return null; }
+      return job(k, make(ctx), (b) => { shared.loops[k] = b; this.loops[k] = b; ready(k); });
+    };
+    const loopBuf = (n: LoopName): Job | null => {
+      const c = shared.loopBufs[n];
+      if (c) { this.loopBufs[n] = c; return null; }
+      return job('loopBuffer', makeLoopBuffer(ctx, n), (b) => { shared.loopBufs[n] = b; this.loopBufs[n] = b; ready('loopBuffer'); });
+    };
     // Ordre de priorité : la musique du menu démarre dès le déverrouillage (batterie, salle),
     // puis ce que le jeu demande le plus vite (pas, armes, véhicules), enfin les ambiances.
-    this.jobs = [
-      job('drums', makeDrumKit(ctx), (k) => { this.drums = k; ready('drums'); }),
-      job('hallIR', makeHallIR(ctx), (b) => { this.hallIR = b; ready('hallIR'); }),
-      ...STEPS.map(([s, n, seed]) => bank(`step_${s}`, makeFootsteps(ctx, s, n, seed))),
-      gun('pistol', 101), gun('smg', 102), gun('rail', 103), gun('shotgun', 104), gun('turret', 105),
-      job('streetIR', makeStreetIR(ctx), (b) => { this.streetIR = b; ready('streetIR'); }),
-      job('roomIR', makeRoomIR(ctx), (b) => { this.roomIR = b; ready('roomIR'); }),
-      ...LOOP_NAMES.map((n) => job('loopBuffer', makeLoopBuffer(ctx, n), (b) => { this.loopBufs[n] = b; ready('loopBuffer'); })),
-      gun('pistol_far', 201), gun('smg_far', 202), gun('rail_far', 203), gun('shotgun_far', 204), gun('turret_far', 205),
-      amb('traffic', makeTrafficLoop(ctx)),
-      amb('crowd', makeCrowdLoop(ctx)),
-      amb('rain', makeRainLoop(ctx)),
-      amb('drip', makeDripLoop(ctx)),
-      amb('hvac', makeHvacLoop(ctx)),
-      job('tunnelIR', makeTunnelIR(ctx), (b) => { this.tunnelIR = b; ready('tunnelIR'); }),
-      amb('subway', makeSubwayLoop(ctx)),
-      amb('water', makeWaterLoop(ctx)),
-    ];
+    if (shared.drums) this.drums = shared.drums;
+    else add(job('drums', makeDrumKit(ctx), (k) => { shared.drums = k; this.drums = k; ready('drums'); }));
+    add(ir('hallIR', makeHallIR));
+    for (const [surf, n, seed] of STEPS) add(bank(`step_${surf}`, () => makeFootsteps(ctx, surf, n, seed)));
+    add(gun('pistol', 101)); add(gun('smg', 102)); add(gun('rail', 103)); add(gun('shotgun', 104)); add(gun('turret', 105));
+    add(ir('streetIR', makeStreetIR));
+    add(ir('roomIR', makeRoomIR));
+    for (const n of LOOP_NAMES) add(loopBuf(n));
+    add(gun('pistol_far', 201)); add(gun('smg_far', 202)); add(gun('rail_far', 203)); add(gun('shotgun_far', 204)); add(gun('turret_far', 205));
+    add(amb('traffic', makeTrafficLoop));
+    add(amb('crowd', makeCrowdLoop));
+    add(amb('rain', makeRainLoop));
+    add(amb('drip', makeDripLoop));
+    add(amb('hvac', makeHvacLoop));
+    add(ir('tunnelIR', makeTunnelIR));
+    add(amb('subway', makeSubwayLoop));
+    add(amb('water', makeWaterLoop));
   }
 
   noise(kind: NoiseKind): AudioBuffer {

@@ -188,7 +188,7 @@ class MenuTheme implements Track {
       for (let i = 0; i < 8; i++) {
         const m = ch.root + MENU_BASS[i];
         const acc = i % 2 === 0 ? 1 : 0.8;
-        synthBass(e, out, t + i * b * 0.5 + humanize(0.003), hz(m), b * 0.38, 0.17 * acc, { cutoff: 360, env: 4, q: 3 });
+        synthBass(e, out, t + i * b * 0.5 + humanize(0.003), hz(m), b * 0.38, 0.16 * acc, { cutoff: 360, env: 4, q: 3, sub: 0.32 });
       }
     }
     // Arpège en doubles croches, filtre qui s'ouvre au fil du cycle, à travers l'écho.
@@ -205,7 +205,7 @@ class MenuTheme implements Track {
     if (drums || kickOnly) {
       const kicks = idx % 4 === 3 ? [0, 2, 2.75] : [0, 2];
       for (const k of kicks) {
-        drum(e, out, t + k * b, 'kick', kickOnly ? 0.4 : 0.55);
+        drum(e, out, t + k * b, 'kick', kickOnly ? 0.36 : 0.48);
         duck(this.pump, t + k * b, 0.45);
       }
     }
@@ -427,7 +427,7 @@ class TensionDrive implements Track {
     }
     // Batterie.
     for (let k = 0; k < 4; k++) {
-      drum(e, out, t + k * 4 * s, 'kick', 0.5 + 0.2 * I);
+      drum(e, out, t + k * 4 * s, 'kick', 0.42 + 0.14 * I);
       duck(this.pump, t + k * 4 * s, 0.5);
     }
     if (I > 0.75) drum(e, out, t + 14 * s, 'kick', 0.4);
@@ -578,7 +578,7 @@ interface Playing { track: Track; out: GainNode; fadeEnd: number }
 
 /** Niveau de sortie relatif par morceau (la tension est dense et percussive). */
 const TRACK_LEVEL: Record<Exclude<MusicTrackName, 'none'>, number> = {
-  menu: 1, game: 1, tension: 0.8, victory: 0.85, defeat: 0.9,
+  menu: 0.8, game: 1, tension: 0.7, victory: 0.85, defeat: 0.75,
 };
 
 /** Possède le morceau en cours et fait les fondus enchaînés. */

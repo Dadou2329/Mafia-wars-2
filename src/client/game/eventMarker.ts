@@ -53,8 +53,8 @@ export class EventMarker {
   private stack = new THREE.Group();
   private material = createObjectMaterial({ key: 'event' });
 
-  constructor() {
-    this.group.name = 'événement';
+  constructor(color = new THREE.Color(1.0, 0.78, 0.32), name = 'événement') {
+    this.group.name = name;
     this.group.visible = false;
     const add = (m: VoxelModel, x: number, y: number, z: number, yaw = 0) => {
       const mesh = new THREE.Mesh(meshModel(m), this.material);
@@ -73,7 +73,7 @@ export class EventMarker {
     this.beamMat = new THREE.ShaderMaterial({
       vertexShader: BEAM_VERT,
       fragmentShader: BEAM_FRAG,
-      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(1.0, 0.78, 0.32) } },
+      uniforms: { uTime: { value: 0 }, uColor: { value: color } },
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,

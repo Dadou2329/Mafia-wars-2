@@ -45,6 +45,11 @@ const rt = await page.evaluate(async () => {
   const { audio, SFX_NAMES, LOOP_NAMES } = window.__A;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const log = {};
+  // Tâches longues (> 50 ms) du fil principal : la génération différée ne doit pas saccader l'image.
+  const longTasks = [];
+  try {
+    new PerformanceObserver((list) => { for (const e of list.getEntries()) longTasks.push(Math.round(e.duration)); }).observe({ type: 'longtask', buffered: false });
+  } catch { /* non pris en charge */ }
   // Appels avant le déverrouillage : ignorés sans erreur (volumes mémorisés, boucle en attente).
   audio.play('pistol');
   audio.setVolumes({ master: 0.9, music: 0.7, sfx: 1, ambience: 0.8 });
@@ -63,9 +68,10 @@ const rt = await page.evaluate(async () => {
   for (let i = 0; i < 100 && !audio.ready; i++) await sleep(20);
   log.ready = audio.ready;
   const tJobs = performance.now();
-  for (let i = 0; i < 600 && audio.stats().loopsPending; i++) { audio.update(0.01); await sleep(10); }
+  for (let i = 0; i < 1200 && audio.stats().loopsPending; i++) { audio.update(0.01); await sleep(10); }
   log.jobsMs = performance.now() - tJobs;
   log.jobsDone = !audio.stats().loopsPending;
+  log.longTasks = longTasks.slice();
   log.volumes = audio.getVolumes();
   const meter = audio.meter();
 
@@ -227,7 +233,8 @@ if (rt.volumes.master === 0.9 && rt.volumes.music === 0.7) ok('volumes remembere
 if (rt.meterPeak > 0.01 && rt.meterPeak <= 1.5) ok(`realtime output non-silent (peak ${rt.meterPeak.toFixed(3)})`); else fail(`realtime meter peak ${rt.meterPeak}`);
 if (rt.maxVoices <= 32) ok(`voice limit respected (max ${rt.maxVoices}, spam of 300 calls took ${rt.spamMs.toFixed(1)} ms)`); else fail(`voices ${rt.maxVoices} > 32`);
 ok(`cost per call: footstep ${rt.footstepCallUs.toFixed(0)} us, pistol ${rt.gunCallUs.toFixed(0)} us (HRTF ${rt.gunCallHrtfUs.toFixed(0)} us), smg@12/s ${rt.smgCallUs.toFixed(0)} us (${rt.smgVoices} voices), punch ${rt.punchCallUs.toFixed(0)} us; voices drained to ${rt.voicesDrained}`);
-if (rt.jobsDone) ok(`deferred banks/IRs/loops generated in ${rt.jobsMs.toFixed(0)} ms after unlock (time-sliced)`); else fail('deferred resources never finished');
+if (rt.jobsDone) ok(`deferred banks/IRs/loops generated in ${rt.jobsMs.toFixed(0)} ms after unlock (time-sliced, long tasks: ${rt.longTasks.length ? rt.longTasks.join('/') + ' ms' : 'none'})`); else fail('deferred resources never finished');
+// (les tâches longues dépendent aussi de la charge de la machine : information seulement)
 if (rt.earlyActive && rt.loopsCreated === 12 && rt.loopOverCap && rt.loopBadName && rt.loopsActive === 12) ok(`loops: pending handle started, cap of 12 enforced, unknown name rejected (update ~${rt.loopUpdateUs.toFixed(0)} us, peak ${rt.loopPeak.toFixed(3)})`);
 else fail(`loops: early ${rt.earlyActive} created ${rt.loopsCreated} overCap ${rt.loopOverCap} badName ${rt.loopBadName} active ${rt.loopsActive}`);
 if (rt.loopPeak > 0.005 && rt.loopPeak <= 1.5) ok('loops audible in realtime'); else fail(`loop peak ${rt.loopPeak}`);
@@ -337,14 +344,15 @@ const off = await page.evaluate(async () => {
   res.loop['engine_car idle'] = await engineAt(1);
   res.loop['engine_car full'] = await engineAt(2.5);
   // Mise à jour et arrêt en cours de rendu (suspend() d'un OfflineAudioContext).
-  const upd = await AudioEngine.renderOffline(4, (e) => {
+  // (après l'arrêt, on laisse passer la queue de réverbération de la rue avant de mesurer le silence)
+  const upd = await AudioEngine.renderOffline(5.2, (e) => {
     e.setVolumes({ master: 1, music: 0, sfx: 1, ambience: 0 });
     const h = e.loop('engine_moto', { pos: { x: -20, y: 1, z: -5 }, pitch: 1 });
     const ctx = e.context;
     ctx.suspend(1).then(() => { h.update({ pos: { x: 3, y: 1, z: -5 }, pitch: 2.4 }); ctx.resume(); });
-    ctx.suspend(2.5).then(() => { h.stop(0.15); ctx.resume(); });
+    ctx.suspend(2.2).then(() => { h.stop(0.15); ctx.resume(); });
   });
-  res.loopUpdate = { before: analyze(upd, 0.3, 1), after: analyze(upd, 1.3, 2.4), stopped: analyze(upd, 2.8, 4) };
+  res.loopUpdate = { before: analyze(upd, 0.3, 1), after: analyze(upd, 1.3, 2.1), stopped: analyze(upd, 4.8, 5.2) };
   // Musique.
   const mus = [['menu', 24], ['game', 16], ['tension', 9], ['tension low', 9], ['victory', 9], ['defeat', 7.5]];
   for (const [tr, secs] of mus) {

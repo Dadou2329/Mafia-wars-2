@@ -86,7 +86,7 @@ export interface PublicState {
   /** Braquages en cours : bâtiment, parrain, progression 0..1. */
   heists: { b: number; slot: Slot; p: number }[];
   /** Convois blindés en route (camion, propriétaire, position, butin) et butins à ramasser. */
-  convoys: { id: number; slot: Slot | null; x: number; z: number; reward: number }[];
+  convoys: { id: number; slot: Slot | null; x: number; z: number; reward: number; dest: string; p: number }[];
   loot: { x: number; z: number; reward: number }[];
 }
 
@@ -172,7 +172,8 @@ export type GameEvent =
   /** Quelqu'un monte dans un véhicule ou en descend (driver = −1). */
   | { t: 'ride'; id: number; driver: number }
   /** Explosion (véhicule détruit…). */
-  | { t: 'boom'; x: number; y: number; z: number; r: number };
+  | { t: 'boom'; x: number; y: number; z: number; r: number }
+  | { t: 'glass'; x: number; y: number; z: number; r: number };
 
 export interface MatchStats {
   kills: number;
@@ -215,7 +216,7 @@ export type ClientAction =
   | { a: 'interact'; what: string }
   | { a: 'rematch' }
   /** Outil de test : téléportation (serveur lancé avec MW_DEBUG=1 uniquement). */
-  | { a: 'debugTp'; x: number; z: number; yaw?: number; dayTime?: number }
+  | { a: 'debugTp'; x: number; z: number; y?: number; yaw?: number; dayTime?: number; rain?: number }
   /** Outil de test : termine la partie (serveur lancé avec MW_DEBUG=1 uniquement). */
   | { a: 'debugEnd' };
 

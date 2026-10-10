@@ -106,11 +106,11 @@ export function thermalKnife(s: SfxCtx): number {
   end = max(end, noiseBurst(s, s.out, t, { type: 'bandpass', freq: 600 * p, freqEnd: 2800 * p, sweep: dur * 0.45, q: 1.4, peak: 0.3, attack: dur * 0.4, tau: dur * 0.18 }));
   // Grésillement du plasma.
   const crack: Array<[number, number]> = [];
-  for (let i = 0; i < 22; i++) crack.push([rnd(0, dur + 0.1), rnd(0.05, 0.3)]);
-  end = max(end, grains(s, s.out, t, crack, { type: 'highpass', freq: 4500, tau: 0.0025 }));
+  for (let i = 0; i < 22; i++) crack.push([rnd(0, dur + 0.1), rnd(0.03, 0.16)]);
+  end = max(end, grains(s, s.out, t, crack, { type: 'highpass', freq: 3800, tau: 0.0025 }));
   // Brûlure au contact.
   const ts = t + dur * 0.5;
-  end = max(end, noiseBurst(s, s.out, ts, { type: 'highpass', freq: 3000, peak: 0.22, attack: 0.005, tau: 0.06 }));
+  end = max(end, noiseBurst(s, s.out, ts, { type: 'highpass', freq: 2600, peak: 0.14, attack: 0.005, tau: 0.06 }));
   end = max(end, tone(s, s.out, ts, { freq: 3200 * p, freqEnd: 1400 * p, sweep: 0.15, peak: 0.045, attack: 0.002, tau: 0.05 }));
   end = max(end, noiseBurst(s, s.out, ts, { kind: 'pink', type: 'lowpass', freq: 600 * p, peak: 0.5, attack: 0.002, tau: 0.035 }));
   return end;

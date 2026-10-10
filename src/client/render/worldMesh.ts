@@ -38,6 +38,35 @@ export interface RegionMesh {
   nrm: Int8Array;
   dat: Uint8Array;
   quads: number;
+  /** Région (2×2 tronçons) : colonne x et z. */
+  gx: number;
+  gz: number;
+}
+
+/** Taille d'une région en voxels (2 tronçons). */
+export const REGION_VOXELS = 64;
+
+/** Maille une seule région (après une modification du monde : verre brisé). */
+export function meshRegion(world: VoxelWorld, gx: number, gz: number): RegionMesh {
+  const REG = 2;
+  const buf = new MeshBuffers(16384);
+  for (let cy = 0; cy < world.cy; cy++)
+    for (let cz = gz * REG; cz < Math.min(world.cz, (gz + 1) * REG); cz++)
+      for (let cx = gx * REG; cx < Math.min(world.cx, (gx + 1) * REG); cx++) meshChunk(world, cx, cy, cz, buf);
+  const q = buf.quads;
+  return { pos: buf.pos.slice(0, q * 12), nrm: buf.nrm.slice(0, q * 12), dat: buf.dat.slice(0, q * 8), quads: q, gx, gz };
+}
+
+/** Géométrie Three.js d'une région. */
+export function regionGeometry(r: RegionMesh): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(r.pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(r.nrm, 3, true));
+  geo.setAttribute('aData', new THREE.BufferAttribute(r.dat, 2));
+  geo.computeBoundingSphere();
+  geo.setIndex(getIndex(r.quads));
+  geo.setDrawRange(0, r.quads * 6);
+  return geo;
 }
 
 /** Maille toutes les régions (2×2 tronçons) du monde. */
@@ -54,7 +83,7 @@ export function meshRegions(world: VoxelWorld, onProgress?: (f: number) => void)
           for (let cx = gx * REG; cx < Math.min(world.cx, (gx + 1) * REG); cx++) meshChunk(world, cx, cy, cz, buf);
       if (buf.quads === 0) continue;
       const q = buf.quads;
-      out.push({ pos: buf.pos.slice(0, q * 12), nrm: buf.nrm.slice(0, q * 12), dat: buf.dat.slice(0, q * 8), quads: q });
+      out.push({ pos: buf.pos.slice(0, q * 12), nrm: buf.nrm.slice(0, q * 12), dat: buf.dat.slice(0, q * 8), quads: q, gx, gz });
     }
     onProgress?.((gz + 1) / rz);
   }
@@ -68,15 +97,11 @@ export function buildWorldGroup(regions: RegionMesh[], material: THREE.Material)
   let maxQ = 0;
   for (const r of regions) maxQ = Math.max(maxQ, r.quads);
   const index = getIndex(maxQ);
+  void index;
   for (const r of regions) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(r.pos, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(r.nrm, 3, true));
-    geo.setAttribute('aData', new THREE.BufferAttribute(r.dat, 2));
-    geo.computeBoundingSphere();
-    geo.setIndex(index);
-    geo.setDrawRange(0, r.quads * 6);
+    const geo = regionGeometry(r);
     const mesh = new THREE.Mesh(geo, material);
+    mesh.userData.region = `${r.gx},${r.gz}`;
     mesh.scale.setScalar(VOXEL);
     mesh.position.set(0, -GROUND_VY * VOXEL, 0);
     mesh.castShadow = true;

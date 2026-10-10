@@ -93,6 +93,8 @@ function isRealtime(ctx: BaseAudioContext): ctx is AudioContext {
   return typeof AudioContext !== 'undefined' && ctx instanceof AudioContext;
 }
 
+type IdleScheduler = (cb: (deadline: IdleDeadline) => void, opts?: { timeout: number }) => number;
+
 function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
@@ -120,6 +122,8 @@ export class AudioEngine {
   private tunnelConv: ConvolverNode | null = null;
   private tunnelOn = false;
   private tunnelOffAt = Infinity;
+  /** Faux tant que le partage rue / tunnel n'a jamais été appliqué (première fois : immédiat). */
+  private undergroundApplied = false;
   private convolvers: ConvolverNode[] = [];
   private outNode: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -234,6 +238,7 @@ export class AudioEngine {
     this.voices = []; this.dying = [];
     this.convolvers = [];
     this.tunnelConv = null; this.tunnelVerb = null; this.outdoorVerb = null; this.tunnelOn = false;
+    this.undergroundApplied = false;
   }
 
   private build(ctx: BaseAudioContext): void {
@@ -294,6 +299,8 @@ export class AudioEngine {
       else if (kind === 'tunnelIR') setIR(tunnel, res.tunnelIR);
       else if (kind !== 'bank' && kind !== 'drums' && kind !== 'loopBuffer') this.ambience?.onLoopReady(kind);
     };
+    // Réponses déjà générées pour cette fréquence d'échantillonnage (cache partagé).
+    setIR(street, res.streetIR); setIR(room, res.roomIR); setIR(hall, res.hallIR); setIR(tunnel, res.tunnelIR);
     if (!isRealtime(ctx)) res.finishAll();
 
     const musicWet = gainNode(ctx, 0.35);
@@ -308,11 +315,18 @@ export class AudioEngine {
     if (this.desiredTrack !== 'none') this.music.play(this.desiredTrack, ctx.currentTime, 2.5, 1);
 
     if (isRealtime(ctx)) {
-      // Banques, réverbérations et boucles sont générées par tranches de ~6 ms après le
-      // déverrouillage : le gestionnaire du geste et les images restent rapides.
-      const pump = (): void => {
+      // Banques, réverbérations et boucles sont générées par petites tranches après le
+      // déverrouillage, de préférence pendant les temps morts du navigateur entre deux
+      // images (requestIdleCallback) : le gestionnaire du geste et les images restent fluides.
+      const ric = (globalThis as unknown as { requestIdleCallback?: IdleScheduler }).requestIdleCallback;
+      const pump = (deadline?: IdleDeadline): void => {
         if (this.res !== res) return;
-        if (res.work(6)) setTimeout(pump, 4);
+        const idle = deadline && !deadline.didTimeout ? deadline.timeRemaining() - 1 : 6;
+        if (res.work(clamp(idle, 3, 12))) next();
+      };
+      const next = (): void => {
+        if (ric) ric.call(globalThis, pump, { timeout: 80 });
+        else setTimeout(pump, 4);
       };
       setTimeout(pump, 0);
       this.timer = setInterval(() => this.tick(), TIMER_MS);
@@ -436,27 +450,33 @@ export class AudioEngine {
     const score = vol * att * (1 + def.priority);
 
     this.reap(now);
-    // Plafond par nom : on coupe l'instance la plus ancienne.
+    // Fraction restante d'une voix à l'instant de départ `t` du nouveau son (les sons
+    // programmés à l'avance avec `when` sont ainsi traités comme en temps réel).
+    const remAt = (v: Voice): number => clamp((v.end - t) / Math.max(0.01, v.end - v.start), 0, 1);
+    // Plafond par nom : on coupe l'instance la plus avancée (la plus ancienne en temps réel).
     let same = 0;
-    let oldest: Voice | null = null;
+    let victim: Voice | null = null;
+    let vr = Infinity;
     for (const v of this.voices) {
-      if (v.name !== name) continue;
+      if (v.name !== name || v.end <= t) continue;
       same++;
-      if (!oldest || v.start < oldest.start) oldest = v;
+      const r = remAt(v);
+      if (r < vr || (r === vr && victim && v.start < victim.start)) { vr = r; victim = v; }
     }
-    if (same >= def.maxInst && oldest) this.kill(oldest, now);
+    if (same >= def.maxInst && victim) {
+      if (victim.start > t) return; // toutes les instances sont programmées plus tard : on abandonne celui-ci
+      this.kill(victim, now, t);
+    }
     // Limite globale : on vole la plus faible (discrète / presque finie / peu prioritaire).
     if (this.voices.length >= this.maxVoices) {
       let weakest: Voice | null = null;
       let ws = Infinity;
       for (const v of this.voices) {
-        const span = Math.max(0.01, v.end - v.start);
-        const rem = clamp((v.end - now) / span, 0, 1);
-        const s = v.score * (0.2 + 0.8 * rem);
-        if (s < ws) { ws = s; weakest = v; }
+        const sc = v.score * (0.2 + 0.8 * remAt(v));
+        if (sc < ws) { ws = sc; weakest = v; }
       }
       if (!weakest || ws > score) return; // le nouveau son est le moins important : on l'abandonne
-      this.kill(weakest, now);
+      this.kill(weakest, now, t);
     }
 
     // Graphe de la voix : out -> [air] -> [étouffement intérieur] -> [panoramique] -> bus, + envoi de réverbération.
@@ -521,19 +541,20 @@ export class AudioEngine {
     this.voices.push({ name, out, nodes, sources, start: t, end: end + 0.05, score });
   }
 
-  private kill(v: Voice, now: number): void {
+  /** Coupe une voix (fondu très bref) à l'instant `at` (au plus tôt maintenant). */
+  private kill(v: Voice, now: number, at = now): void {
     const i = this.voices.indexOf(v);
     if (i >= 0) this.voices.splice(i, 1);
+    const when = Math.max(now, at);
     try {
       const g = v.out.gain;
-      g.cancelScheduledValues(now);
-      g.setValueAtTime(g.value, now);
-      g.linearRampToValueAtTime(0, now + 0.03);
+      g.cancelScheduledValues(when);
+      g.setTargetAtTime(0, when, 0.008);
     } catch { /* ignorer */ }
     for (const s of v.sources) {
-      try { s.stop(now + 0.04); } catch { /* déjà arrêtée */ }
+      try { s.stop(when + 0.06); } catch { /* déjà arrêtée */ }
     }
-    v.end = now + 0.1;
+    v.end = when + 0.1;
     this.dying.push(v);
   }
 
@@ -603,8 +624,10 @@ export class AudioEngine {
     const o = this.outdoorVerb, tv = this.tunnelVerb, tc = this.tunnelConv;
     if (!o || !tv || !tc) return;
     const u = this.underground;
-    o.gain.setTargetAtTime(1 - u, now, 0.3);
-    tv.gain.setTargetAtTime(u, now, 0.3);
+    const tau = this.undergroundApplied ? 0.3 : 0.01;
+    this.undergroundApplied = true;
+    o.gain.setTargetAtTime(1 - u, now, tau);
+    tv.gain.setTargetAtTime(u, now, tau);
     if (u > 0.001) {
       if (!this.tunnelOn) { tv.connect(tc); this.tunnelOn = true; }
       this.tunnelOffAt = Infinity;

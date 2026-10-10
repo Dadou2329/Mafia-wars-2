@@ -16,8 +16,12 @@ import { SLOT } from '../models/voxelModel';
 import { createObjectMaterial } from '../render/voxelObjectMaterial';
 import { settings } from '../settings';
 import type { WorldData } from '../world/worldLoader';
+import { rpm, type LoopSource } from './engineSounds';
 
 interface Car {
+  id: number;
+  /** Utilitaire (moteur lourd). */
+  heavy: boolean;
   mesh: THREE.Mesh;
   x: number;
   z: number;
@@ -58,6 +62,7 @@ export class Traffic {
   readonly group = new THREE.Group();
   private world: WorldData;
   private cars: Car[] = [];
+  private nextId = 0;
   private sky: SkyCar[] = [];
   private road: Uint8Array;
   private gw = Math.floor(WORLD_W / CELL);
@@ -160,6 +165,20 @@ export class Traffic {
     return q === 'basse' ? 4 : q === 'moyenne' ? 7 : q === 'haute' ? 11 : 15;
   }
 
+  /** Moteurs des voitures et des voitures volantes proches (boucles sonores). */
+  loopSources(px: number, py: number, pz: number, out: LoopSource[]): void {
+    for (const c of this.cars) {
+      if (Math.hypot(c.x - px, c.z - pz) > 32) continue;
+      out.push({ key: `t${c.id}`, loop: c.heavy ? 'engine_heavy' : 'engine_car', x: c.x, y: 0.6, z: c.z, pitch: rpm(c.speed, 12), volume: 0.4 });
+    }
+    this.sky.forEach((s, i) => {
+      const x = s.axis === 'x' ? s.pos : s.fixed;
+      const z = s.axis === 'z' ? s.pos : s.fixed;
+      if (Math.hypot(x - px, s.y - py, z - pz) > 48) return;
+      out.push({ key: `s${i}`, loop: 'vtol', x, y: s.y, z, pitch: 1.4 + s.speed / 40, volume: 0.3 });
+    });
+  }
+
   private spawn(px: number, pz: number): void {
     for (let tries = 0; tries < 30; tries++) {
       const i = this.rng.int(0, this.gw - 1);
@@ -177,7 +196,7 @@ export class Traffic {
       const mesh = this.mesh(m.geo);
       this.group.add(mesh);
       const [dx, dz] = DIRS[dir];
-      this.cars.push({ mesh, x, z, yaw: Math.atan2(dx, dz), speed: 0, cruise: this.rng.range(7, 11), hl: m.hl, hw: m.hw, ti: i + dx, tk: k + dz, dir, blockedFor: 0, honkAt: 0, passAt: 0 });
+      this.cars.push({ id: this.nextId++, heavy: m.key.startsWith('van'), mesh, x, z, yaw: Math.atan2(dx, dz), speed: 0, cruise: this.rng.range(7, 11), hl: m.hl, hw: m.hw, ti: i + dx, tk: k + dz, dir, blockedFor: 0, honkAt: 0, passAt: 0 });
       return;
     }
   }
@@ -272,7 +291,7 @@ export class Traffic {
       const near = Math.hypot(c.x - px, c.z - pz);
       if (c.blockedFor > 1.8 && now > c.honkAt && near < 40) {
         c.honkAt = now + this.rng.range(3, 7);
-        audio.play('neigh', { pos: { x: hx, y: 1, z: hz }, volume: 0.5 });
+        audio.play('car_horn', { pos: { x: hx, y: 1, z: hz }, volume: 0.5 });
       }
       if (c.blockedFor > 7) {
         // bloqué pour de bon : demi-tour
@@ -307,10 +326,7 @@ export class Traffic {
       const y = this.world.nav.heightAt(c.x, c.z);
       c.mesh.position.set(c.x, (Number.isFinite(y) ? y : 0) + Math.sin(now * 2 + n) * 0.02, c.z);
       c.mesh.rotation.y = c.yaw;
-      if (near < 18 && c.speed > 5 && now > c.passAt) {
-        c.passAt = now + 4;
-        audio.play('carriage_wheels', { pos: { x: c.x, y: 0.6, z: c.z }, volume: 0.45 });
-      }
+      void c.passAt;
     }
     // couloirs aériens
     for (const s of this.sky) {

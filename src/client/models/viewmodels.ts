@@ -1,16 +1,16 @@
-// Modèles détaillés de la vue subjective (1/64 m) : armes de 1888, mains et avant-bras des
+// Modèles détaillés de la vue subjective (1/64 m) : armes de 2085, mains et avant-bras des
 // deux parrains.
 //
 // Repère commun à tous les modèles : −Z vers l'avant (vers la cible), +Y en haut, +X à
 // droite ; l'origine est le point de prise de la main droite (le centre du poing autour de
 // la poignée). Les métadonnées exportées (bouche du canon, point d'appui de la main gauche,
-// ligne de mire, charnières) sont en mètres dans ce même repère.
+// ligne de mire, pièces mobiles) sont en mètres dans ce même repère.
 //
-// Les pièces mobiles (canon basculant du Webley, canons du fusil, levier du Martini-Henry)
-// sont des modèles séparés dont l'origine est le pivot ; la crosse du revolver et les mains
-// ont leur propre repère « main » (axe de la poignée selon +Y) incliné par `gripRot`.
+// Les pièces mobiles (culasse, chargeurs, pompe, cellule d'énergie, levier d'armement) sont des
+// modèles séparés que la vue subjective déplace en translation ; les poignées et les mains ont
+// leur propre repère « main » (axe de la poignée selon +Y) incliné par `gripRot`.
 
-import { VoxelModel, mix, shade } from './voxelModel';
+import { SLOT, VoxelModel, mix, shade } from './voxelModel';
 
 export const VM_RES = 1 / 64;
 const R = VM_RES;
@@ -19,41 +19,38 @@ export type Vec3 = [number, number, number];
 
 // ------------------------------------------------------------------ palette
 
-/** Acier bleui : base, faces éclairées, arêtes polies, ombres. */
-const BLUE = 0x2e333d;
-const BLUE_HI = 0x4d586b;
-const BLUE_EDGE = 0x8a99ae;
-const BLUE_DK = 0x1b1e25;
-/** Barillet (acier poli plus clair, reflets) et cannelures. */
-const CYL = 0x4b5466;
-const CYL_HI = 0x66728a;
-const CYL_DK = 0x232730;
+/** Polymère noir (carcasses, poignées). */
+const POLY = 0x1d1e22;
+const POLY_HI = 0x2e3036;
+const POLY_DK = 0x131417;
+/** Acier traité (culasses, canons) : base, faces éclairées, arêtes, ombres. */
+const STEEL = 0x353941;
+const STEEL_HI = 0x545a66;
+const STEEL_EDGE = 0x8a94a3;
+const STEEL_DK = 0x22252b;
+/** Culasse bicolore du Vektor (acier clair). */
+const SLIDE = 0x4b525d;
+const SLIDE_HI = 0x6a7381;
+const CHROME = 0xb6bfcc;
 const BORE = 0x0b0c0f;
-/** Acier jaspé (trempé en paquet) des platines du fusil. */
-const CASE = [0x4a4c55, 0x5d5446, 0x3a4152, 0x6e6450, 0x2f323a];
-/** Noyer. */
-const WALNUT = 0x5a3820;
-const WALNUT_LT = 0x6b4428;
-const WALNUT_DK = 0x4a2d19;
-const GRAIN = 0x3e2414;
-/** Laiton. */
+/** Rayures jaunes du Wasp, rouge du Hammer, cuivre des rails du Longbow. */
+const WASP_Y = 0xe2a91f;
+const HAMMER = 0xa8281f;
+const HAMMER_DK = 0x6e1a15;
+const COPPER = 0xc07a42;
+const COPPER_DK = 0x5e3820;
+const RUBBER = 0x18191c;
+const RUBBER_HI = 0x27282c;
+/** Laiton des douilles, cartouches rouges. */
 const BRASS = 0xc9a24a;
 const BRASS_DK = 0x9c7a32;
 const BRASS_HI = 0xe6c66e;
-/** Lame d'acier poli. */
-const BLADE = 0xa9afb8;
-const BLADE_HI = 0xd3d9e0;
-const BLADE_DK = 0x8c929b;
-const EDGE = 0xeef2f6;
-/** Palissandre (manche du couteau). */
-const ROSEWOOD = 0x5b3322;
-const ROSEWOOD_DK = 0x43241a;
-/** Bois laqué de la matraque, cuir. */
-const LACQUER = 0x3b2417;
-const LACQUER_HI = 0x5a3a25;
-const LEATHER = 0x2c1d14;
-const LEATHER_HI = 0x46301f;
-const BUTTPLATE = 0x24201c;
+const SHELL_RED = 0xb0362c;
+const SHELL_DK = 0x86271f;
+/** Lame thermique : acier sombre, zone chauffée au rouge. */
+const BLADE = 0x6a7079;
+const BLADE_DK = 0x41464e;
+const BLADE_HOT = 0x7e2a12;
 
 // ------------------------------------------------------------------ grille locale
 
@@ -81,12 +78,6 @@ class Grid {
   /** Coordonnée locale continue (centres de voxel aux entiers) → mètres. */
   p(x: number, y: number, z: number): Vec3 {
     return [(x + 0.5 - this.h[0]) * R, (y + 0.5 - this.h[1]) * R, (z + 0.5 - this.h[2]) * R];
-  }
-
-  /** Place l'origine du modèle (le pivot) en un point local continu. */
-  pivot(x: number, y: number, z: number): this {
-    this.m.setOrigin(this.bx + x + 0.5, this.by + y + 0.5, this.bz + z + 0.5);
-    return this;
   }
 
   set(x: number, y: number, z: number, c: number): this {
@@ -148,359 +139,366 @@ export function mirrorModelX(m: VoxelModel): VoxelModel {
 
 const mirrorV = (v: Vec3): Vec3 => [-v[0], v[1], v[2]];
 
-/** Hachage entier déterministe (motifs du jaspage, du grain). */
-function hash3(x: number, y: number, z: number): number {
-  let h = (x * 374761393 + y * 668265263 + z * 2147483647) >>> 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
-/** Veinage du noyer de crosse : bandes larges qui suivent la chute de la crosse. */
-function woodGrain(y: number, z: number, slope: number): number {
-  const v = y + Math.max(0, z - 6) * slope;
-  const k = ((Math.floor(v * 0.5 + 0.25) % 3) + 3) % 3;
-  const line = Math.abs(v - Math.round(v / 3) * 3) < 0.5 && z > 8;
-  return line ? WALNUT_DK : k === 0 ? WALNUT : k === 1 ? WALNUT_LT : WALNUT;
-}
-
 // ------------------------------------------------------------------ métadonnées
 
 export interface VmWeaponMeta {
-  /** Bouche du canon (m) ; pointe de la lame ou bout de la matraque pour les armes blanches. Fusil : canon droit (premier coup). */
+  /** Bouche du canon (m) ; pointe de la lame ou bout de la matraque pour les armes blanches. */
   muzzle: Vec3;
-  /** Bouche du second canon (fusil juxtaposé, canon gauche). */
-  muzzle2?: Vec3;
   /** Point d'appui de la main gauche (m), ou null pour une arme tenue à une main. */
   support: Vec3 | null;
   /** Orientation de la main gauche au point d'appui (Euler XYZ, rad). */
   supportRot: Vec3;
-  /** Orientation du repère « main droite » par rapport à l'arme (Euler XYZ, rad). */
+  /** Pose de la main gauche : sous un garde-main (support) ou sur une poignée verticale (pistol). */
+  supportPose?: 'support' | 'pistol';
+  /** Orientation du repère « main droite » (poignée) par rapport à l'arme (Euler XYZ, rad). */
   gripRot: Vec3;
   /** Hauteur de la ligne de mire au-dessus de l'origine (m) ; elle est parallèle à −Z en x = 0. */
   sightY: number;
-  /** Profondeur (z, m) du cran de mire et du guidon (ou de la bille). */
+  /** Profondeur (z, m) de l'arrière et de l'avant des organes de visée. */
   rearSightZ: number;
   frontSightZ: number;
-  /** Pivot de la pièce mobile (charnière de bascule, axe du levier), m. */
-  pivot?: Vec3;
   /** Longueur hors tout (m). */
   length: number;
 }
 
-// ================================================================== REVOLVER WEBLEY
-
-/** Pièces du revolver Webley à brisure (modèle Mk VI, canon de 6 pouces, ~0,28 m). */
-export interface RevolverModels {
-  /** Carcasse, chien, verrou à étrier, pontet et détente (repère de l'arme). */
-  frame: VoxelModel;
-  /** Canon, bande supérieure, guidon et barillet : bascule autour de `REVOLVER.pivot`. */
-  barrel: VoxelModel;
-  /** Culots de cartouches et étoile d'extraction (visibles une fois le revolver ouvert), même pivot. */
-  rims: VoxelModel;
-  /** Crosse « bec d'oiseau » en noyer avec anneau de dragonne (repère main, voir gripRot). */
-  grip: VoxelModel;
+/** Poignée de pistolet 2 × 3 voxels (x −1..0, z −1..1) dans le repère main, axe selon +Y. */
+function pistolGrip(top: number, bottom: number, c = POLY, strap = POLY_HI): Grid {
+  const g = new Grid(-1, 0, bottom - 1, top + 1, -1, 3, [0, 0.5, 0.5]);
+  g.fill(-1, 0, bottom, top, -1, 1, c);
+  // dos de poignée texturé, ergot sous le pouce (queue de castor)
+  for (let y = bottom; y < top; y += 2) g.paint(-1, 0, y, y, 1, 1, strap);
+  g.fill(-1, 0, top + 1, top + 1, 1, 2, c);
+  return g;
 }
 
-const REV_PIVOT: Vec3 = [0, 1.5 * R, -5 * R];
+/** Pontet et détente sous la carcasse (repère de l'arme). */
+function triggerGuard(g: Grid, c: number): void {
+  g.fill(0, 0, -1, 0, -5, -5, c);
+  g.fill(0, 0, -1, -1, -5, -1, c);
+  g.set(0, 0, -3, STEEL_EDGE);
+}
 
-export const REVOLVER: VmWeaponMeta = {
-  muzzle: [0, 4 * R, -14.5 * R],
+/**
+ * Réticule de viseur holographique : anneau et point central lumineux, à une résolution
+ * quatre fois plus fine que les armes (1/256 m) pour ne pas masquer la cible. Origine au centre.
+ */
+export function reticleModel(color: number): VoxelModel {
+  const m = new VoxelModel(9, 9, 1, VM_RES / 4);
+  for (let y = 0; y < 9; y++)
+    for (let x = 0; x < 9; x++) {
+      const d = Math.hypot(x - 4, y - 4);
+      if ((d > 3.2 && d < 4.3) || (x === 4 && y === 4)) m.set(x, y, 0, color);
+    }
+  m.setOrigin(4.5, 4.5, 0.5);
+  return m;
+}
+
+// ================================================================== PISTOLET VEKTOR
+
+/** Pistolet intelligent Vektor : carcasse polymère, culasse acier, visée et compteur lumineux. */
+export interface PistolModels {
+  /** Carcasse, rail, module de visée, pontet (repère de l'arme). */
+  frame: VoxelModel;
+  /** Culasse (recule selon +Z au tir et pendant le rechargement). */
+  slide: VoxelModel;
+  /** Poignée (repère main, voir gripRot). */
+  grip: VoxelModel;
+  /** Chargeur (repère main) : glisse selon −Y quand on le libère. */
+  mag: VoxelModel;
+}
+
+export const PISTOL: VmWeaponMeta = {
+  muzzle: [0, 4 * R, -11.5 * R],
   support: null,
   supportRot: [0, 0, 0],
-  gripRot: [-0.32, 0, 0],
-  sightY: 6.5 * R,
-  rearSightZ: -1 * R,
-  frontSightZ: -13 * R,
-  pivot: REV_PIVOT,
-  length: 18 * R,
+  gripRot: [-0.26, 0, 0],
+  sightY: 6 * R,
+  rearSightZ: 0,
+  frontSightZ: -10 * R,
+  length: 16 * R,
 };
 
-export function revolverModels(): RevolverModels {
+/** Course de la culasse au recul (m). */
+export const PISTOL_SLIDE_TRAVEL = 3.5 * R;
+
+export function pistolModels(): PistolModels {
   // --- carcasse
-  const f = new Grid(-2, 2, -2, 7, -6, 3);
-  // fond de carcasse sous le barillet jusqu'au tenon de charnière
-  f.fill(-1, 1, 1, 1, -5, 0, BLUE);
-  f.set(0, 1, -5, BLUE_HI);
-  // bouclier de culasse derrière le barillet
-  f.fill(-1, 1, 2, 4, -1, 0, BLUE);
-  f.paint(-1, 1, 4, 4, -1, 0, BLUE_HI);
-  // étrier du verrou au-dessus de la bande supérieure, oreilles du cran de mire
-  f.fill(-1, 1, 5, 6, -1, 0, BLUE);
-  f.paint(-1, 1, 6, 6, -1, 0, BLUE_HI);
-  f.set(-1, 7, -1, BLUE_HI).set(1, 7, -1, BLUE_HI);
-  // levier du verrou côté gauche (sous le pouce)
-  f.fill(-2, -2, 4, 5, -1, -1, BLUE_HI);
-  f.set(-2, 3, 0, BLUE_HI);
-  // talon de la carcasse sous le chien (attache de la crosse, caché par la palmure)
-  f.fill(-1, 1, 1, 2, 1, 1, BLUE);
-  // chien : corps, crête quadrillée
-  f.fill(0, 0, 3, 5, 1, 1, BLUE);
-  f.set(0, 6, 1, BLUE_HI).set(0, 6, 2, BLUE_HI);
-  // pontet et détente
-  f.fill(0, 0, -1, 0, -5, -5, BLUE);
-  f.fill(0, 0, -1, -1, -5, -1, BLUE);
-  f.set(0, -1, -5, BLUE_HI);
-  f.set(0, 0, -3, BLUE_EDGE);
-  // vis de platine (côté gauche visible)
-  f.set(-1, 2, 0, BLUE_EDGE);
-
-  // --- ensemble basculant : canon, bande supérieure, barillet
-  const b = new Grid(-1, 1, 2, 6, -14, -2);
-  b.fill(0, 0, 4, 4, -14, -5, BLUE); // canon
-  b.fill(0, 0, 5, 5, -14, -2, BLUE_HI); // bande ventilée / bande supérieure
-  b.set(0, 5, -14, BLUE_EDGE);
-  b.set(0, 4, -14, BLUE_DK); // bouche
-  b.set(0, 6, -13, BLUE_EDGE); // guidon
-  b.fill(0, 0, 3, 3, -7, -5, BLUE); // tenon d'éjecteur sous le canon
-  b.set(0, 2, -5, BLUE_DK); // crochet de charnière
-  // barillet (cannelé : les arêtes sombres suggèrent les cannelures)
-  b.fill(-1, 1, 2, 4, -4, -2, CYL);
-  // cannelures (arêtes du milieu, en creux) et reflets sur le haut du barillet
-  for (const [x, y] of [
-    [-1, 2],
-    [1, 2],
-    [-1, 4],
-    [1, 4],
-  ]) {
-    b.set(x, y, -3, CYL_DK);
-  }
-  b.set(-1, 4, -4, CYL_HI).set(-1, 4, -2, CYL_HI).set(1, 4, -4, CYL_HI).set(1, 4, -2, CYL_HI);
-  b.set(0, 2, -3, CYL_DK);
-  b.pivot(0, 1.5, -5);
-
-  // --- culots des cartouches + étoile d'extraction (derrière le barillet)
-  const r = new Grid(-1, 1, 2, 4, -1, -1);
-  r.fill(-1, 1, 2, 4, -1, -1, BRASS);
-  r.fill(0, 0, 2, 4, -1, -1, BLUE_EDGE);
-  r.set(-1, 3, -1, BRASS_HI).set(1, 3, -1, BRASS_DK);
-  r.pivot(0, 1.5, -5);
-
-  // --- crosse (repère main : axe de la poignée selon +Y, largeur paire centrée)
-  const g = new Grid(-1, 0, -6, 2, -1, 3, [0, 0.5, 0.5]);
-  g.fill(-1, 0, -3, 2, -1, 1, WALNUT);
-  g.paint(-1, 0, -3, 2, -1, -1, WALNUT_LT);
-  g.paint(-1, 0, -3, 2, 1, 1, WALNUT_DK);
-  // bec d'oiseau : la crosse se recourbe vers l'arrière sous l'auriculaire, calotte d'acier
-  g.fill(-1, 0, -4, -4, 0, 2, BLUE);
-  g.set(-1, -4, 0, BLUE_HI).set(0, -4, 0, BLUE_HI);
-  // anneau de dragonne (petit étrier pendant)
-  g.set(-1, -5, 1, BLUE_EDGE).set(-1, -5, 2, BLUE_EDGE).set(-1, -6, 2, BLUE_HI);
-  return { frame: f.m, barrel: b.m, rims: r.m, grip: g.m };
+  const f = new Grid(-1, 1, -2, 2, -11, 1);
+  f.fill(-1, 1, 1, 2, -9, 0, POLY);
+  f.paint(-1, 1, 2, 2, -9, 0, POLY_HI);
+  // rail d'accessoires et module de visée intelligente (lentille cyan)
+  f.fill(-1, 1, 0, 0, -9, -7, POLY);
+  f.set(-1, 0, -8, POLY_HI).set(1, 0, -8, POLY_HI);
+  f.fill(-1, 1, 0, 1, -10, -10, STEEL_DK);
+  f.set(0, 0, -11, SLOT.NEON_CYAN);
+  f.fill(-1, 1, 1, 2, 1, 1, POLY);
+  triggerGuard(f, POLY);
+  // --- culasse bicolore, nez chanfreiné
+  const s = new Grid(-1, 1, 3, 6, -11, 1);
+  s.fill(-1, 1, 3, 5, -11, 1, SLIDE);
+  s.paint(-1, 1, 5, 5, -11, 1, SLIDE_HI);
+  s.paint(-1, 1, 3, 5, -11, -11, STEEL_DK);
+  s.set(-1, 5, -11, -1).set(1, 5, -11, -1);
+  s.set(0, 5, -11, STEEL);
+  s.set(0, 4, -11, BORE);
+  // stries avant et arrière, liseré cyan sur les flancs
+  for (const z of [-1, 1, -9]) s.paint(-1, 1, 3, 4, z, z, STEEL_DK);
+  s.paint(-1, -1, 4, 4, -7, -4, SLOT.NEON_CYAN);
+  s.paint(1, 1, 4, 4, -7, -4, SLOT.NEON_CYAN);
+  // fenêtre d'éjection, visée à trois points lumineux, compteur de munitions à l'arrière
+  s.set(1, 5, -5, BORE).set(1, 5, -4, BORE);
+  s.set(0, 6, -10, SLOT.NEON_CYAN);
+  s.set(-1, 6, 0, STEEL_DK).set(1, 6, 0, STEEL_DK);
+  s.set(-1, 6, 1, SLOT.NEON_CYAN).set(1, 6, 1, SLOT.NEON_CYAN);
+  s.set(0, 4, 1, SLOT.NEON_CYAN);
+  // --- poignée et chargeur (repère main)
+  const g = pistolGrip(2, -3);
+  g.paint(-1, 0, -1, -1, -1, -1, STEEL_HI);
+  const mg = new Grid(-1, 0, -5, 1, -1, 2, [0, 0.5, 0.5]);
+  mg.fill(-1, 0, -3, 1, -1, 1, POLY_DK);
+  mg.fill(-1, 0, 1, 1, -1, -1, BRASS);
+  mg.fill(-1, 0, -4, -4, -1, 2, POLY);
+  mg.set(-1, -4, 2, SLOT.NEON_CYAN);
+  return { frame: f.m, slide: s.m, grip: g.m, mag: mg.m };
 }
 
-// ================================================================== FUSIL DE CHASSE
+// ================================================================== PISTOLET-MITRAILLEUR WASP
 
-/** Fusil juxtaposé à chiens extérieurs (~1,05 m). */
-export interface ShotgunModels {
-  /** Bascule, platines jaspées, chiens, détentes, crosse anglaise (repère de l'arme). */
+/** Pistolet-mitrailleur Wasp : chargeur translucide sur le dessus, viseur holographique. */
+export interface SmgModels {
+  /** Boîtier, canon, compensateur, viseur, pontet (repère de l'arme). */
   body: VoxelModel;
-  /** Canons juxtaposés, bande, bille de laiton et longuesse : basculent autour de `SHOTGUN.pivot`. */
-  barrels: VoxelModel;
-  /** Culots des deux cartouches (visibles canons ouverts), même pivot. */
-  shells: VoxelModel;
+  /** Poignée (repère main, gripRot). */
+  grip: VoxelModel;
+  /** Poignée avant verticale (repère main gauche, posée en `support`). */
+  foregrip: VoxelModel;
+  /** Chargeur supérieur : se retire vers le haut et l'arrière. */
+  mag: VoxelModel;
+  /** Levier d'armement (côté gauche) : recule selon +Z. */
+  handle: VoxelModel;
+}
+
+export const SMG: VmWeaponMeta = {
+  muzzle: [0, 2 * R, -23.5 * R],
+  support: [0, -3 * R, -11 * R],
+  supportRot: [0.15, 0, 0],
+  supportPose: 'pistol',
+  gripRot: [-0.2, 0, 0],
+  sightY: 9 * R,
+  rearSightZ: 0,
+  frontSightZ: -3 * R,
+  length: 30 * R,
+};
+
+/** Centre du réticule du Wasp (dans la fenêtre du viseur). */
+export const SMG_RETICLE: Vec3 = [0, 9 * R, -3.6 * R];
+
+export function smgModels(): SmgModels {
+  const b = new Grid(-2, 2, -2, 11, -23, 6);
+  // boîtier à rayures de guêpe
+  b.fill(-1, 1, 0, 3, -14, 5, POLY);
+  b.paint(-1, 1, 3, 3, -14, 5, STEEL_DK);
+  for (let z = -12; z <= 3; z++)
+    for (let y = 1; y <= 2; y++) if ((((z + y) % 4) + 4) % 4 < 2) b.paint(-1, 1, y, y, z, z, WASP_Y);
+  b.fill(-1, 1, 0, 3, 5, 6, POLY_DK);
+  // manchon ajouré, compensateur aux évents lumineux
+  b.fill(-1, 1, 1, 3, -20, -15, STEEL);
+  for (const z of [-19, -17]) b.paint(-1, 1, 2, 2, z, z, BORE);
+  b.fill(-1, 1, 1, 3, -23, -21, STEEL_DK);
+  b.set(-1, 3, -22, SLOT.NEON_AMBER).set(1, 3, -22, SLOT.NEON_AMBER);
+  b.set(0, 2, -23, BORE);
+  triggerGuard(b, POLY);
+  // viseur holographique sur le chargeur : embase, cadre fin à l'avant (réticule à part)
+  b.fill(-1, 1, 7, 7, -3, 0, POLY_DK);
+  b.fill(-2, -2, 7, 10, -3, -3, STEEL);
+  b.fill(2, 2, 7, 10, -3, -3, STEEL);
+  b.fill(-2, 2, 11, 11, -3, -3, STEEL);
+  b.set(-2, 7, -2, POLY_DK).set(2, 7, -2, POLY_DK);
+  // --- poignées
+  const g = pistolGrip(2, -3);
+  g.paint(-1, 0, -2, 0, 1, 1, WASP_Y);
+  const fg = pistolGrip(1, -3, POLY, POLY_HI);
+  fg.fill(-1, 0, 2, 2, -1, 1, STEEL_DK);
+  // --- chargeur translucide : cartouches ambrées visibles
+  const mg = new Grid(-1, 1, 4, 6, -13, 1);
+  mg.fill(-1, 1, 4, 6, -13, 1, SLOT.GLASS);
+  for (let z = -12; z <= 0; z += 2) mg.set(-1, 5, z, SLOT.NEON_AMBER).set(1, 5, z, SLOT.NEON_AMBER);
+  mg.paint(-1, 1, 4, 6, 1, 1, POLY_DK);
+  mg.paint(-1, 1, 4, 6, -13, -13, POLY_DK);
+  // --- levier d'armement
+  const h = new Grid(-3, -2, 3, 3, 2, 3);
+  h.fill(-2, -2, 3, 3, 2, 3, STEEL_EDGE);
+  h.set(-3, 3, 3, STEEL_HI);
+  return { body: b.m, grip: g.m, foregrip: fg.m, mag: mg.m, handle: h.m };
+}
+
+// ================================================================== FUSIL À POMPE HAMMER
+
+/** Fusil à pompe Hammer : boîte massive, canon à cache-chaleur sur tube-magasin, pompe crantée. */
+export interface ShotgunModels {
+  /** Boîte, canon, tube, porte-cartouches, crosse (repère de l'arme). */
+  body: VoxelModel;
+  /** Poignée (repère main, gripRot). */
+  grip: VoxelModel;
+  /** Pompe : coulisse selon +Z (la main gauche la suit). */
+  pump: VoxelModel;
 }
 
 export const SHOTGUN: VmWeaponMeta = {
-  muzzle: [1 * R, 3 * R, -46.5 * R],
-  muzzle2: [-1 * R, 3 * R, -46.5 * R],
-  support: [0, 1 * R, -16 * R],
+  muzzle: [0, 3.5 * R, -50.5 * R],
+  support: [0, 1 * R, -24.5 * R],
   supportRot: [0, 0, 0],
-  gripRot: [0, 0, 0],
-  sightY: 5.5 * R,
-  rearSightZ: -3 * R,
-  frontSightZ: -45 * R,
-  pivot: [0, 1.5 * R, -9 * R],
-  length: 68 * R,
+  gripRot: [-0.36, 0, 0],
+  sightY: 6 * R,
+  rearSightZ: -2 * R,
+  frontSightZ: -49 * R,
+  length: 74 * R,
 };
 
-/** Profil de la crosse anglaise : [bas, haut] (inclus) selon z. */
-function stockProfile(z: number, combDrop: number[], toe: number): [number, number] {
-  if (z <= 6) return [-1, 1];
-  const t = (z - 6) / 14;
-  const top = z < combDrop[0] ? 1 : z < combDrop[1] ? 0 : -1;
-  return [Math.round(-1 - t * (toe - 1)), top];
-}
+/** Course de la pompe (m). */
+export const SHOTGUN_PUMP_TRAVEL = 6 * R;
 
 export function shotgunModels(): ShotgunModels {
-  // --- carcasse + crosse
-  const s = new Grid(-1, 1, -8, 5, -10, 21);
-  const caseCol = (x: number, y: number, z: number) => CASE[hash3(x + 7, y >> 1, (z + 20) >> 1) % CASE.length];
-  // barre de bascule (sous les canons) et corps
-  s.fill(-1, 1, -1, 1, -9, -1, CASE[0]);
-  s.paint(-1, 1, -1, 1, -9, -1, (x, y, z) => (x === 0 ? CASE[3] : caseCol(x, y, z)));
-  // tenon (articulation) arrondi à l'avant
-  s.set(-1, -1, -9, -1).set(1, -1, -9, -1);
-  // bouclier et épaulements (fences) derrière les canons
-  s.fill(-1, 1, 2, 4, -2, -2, CASE[0]);
-  s.paint(-1, 1, 2, 4, -2, -2, (x, y, z) => caseCol(x, y, z));
-  s.set(-1, 4, -2, CASE[4]).set(1, 4, -2, CASE[4]);
-  s.fill(-1, 1, 2, 2, -1, 0, CASE[1]);
-  // platines (côtés) jaspées jusque dans la tête de crosse
-  s.fill(-1, 1, -1, 1, -1, 2, WALNUT);
-  s.paint(-1, -1, -1, 1, -1, 2, caseCol);
-  s.paint(1, 1, -1, 1, -1, 2, caseCol);
-  // queue de bascule sur le dessus du poignet
-  s.fill(0, 0, 2, 2, 1, 3, BLUE_HI);
-  // clé d'ouverture (top lever) entre les chiens
-  s.fill(0, 0, 3, 3, 0, 1, BLUE_EDGE);
-  // chiens extérieurs : nez sur la broche, corps, crête recourbée
-  for (const x of [-1, 1]) {
-    s.set(x, 3, -1, CASE[2]);
-    s.set(x, 3, 0, CASE[0]);
-    s.set(x, 4, 0, CASE[3]).set(x, 4, 1, BLUE_EDGE);
+  const s = new Grid(-2, 1, -7, 7, -50, 22);
+  // boîte de culasse, panneaux rouges, fenêtre de chargement dessous, éjection à droite
+  s.fill(-1, 1, 0, 5, -10, 1, STEEL);
+  s.paint(-1, 1, 5, 5, -10, 1, STEEL_HI);
+  s.paint(-1, 1, 0, 1, -10, 1, STEEL_DK);
+  s.paint(-1, -1, 2, 3, -9, -1, HAMMER);
+  s.paint(1, 1, 2, 3, -9, -1, HAMMER);
+  s.paint(-1, 1, 0, 0, -8, -3, BORE);
+  s.paint(1, 1, 4, 4, -7, -4, BORE);
+  // porte-cartouches sur le flanc gauche
+  s.fill(-2, -2, 1, 4, -9, -2, POLY);
+  for (const z of [-8, -6, -4]) {
+    s.fill(-2, -2, 2, 4, z, z, SHELL_RED);
+    s.set(-2, 1, z, BRASS);
   }
-  // pontet et deux détentes
-  s.set(0, -2, -7, BLUE);
-  s.fill(0, 0, -3, -3, -7, -2, BLUE);
-  s.set(0, -3, -7, BLUE_HI).set(0, -3, -2, BLUE_HI);
-  s.set(0, -2, -5, BLUE_EDGE); // détente avant (canon droit)
-  s.set(0, -2, -3, BLUE_EDGE); // détente arrière (canon gauche)
-  // crosse anglaise (poignet droit), busc, talon, plaque de couche en corne
-  for (let z = 3; z <= 20; z++) {
-    const [lo, hi] = stockProfile(z, [12, 18], 7);
-    s.fill(-1, 1, lo, hi, z, z, WALNUT);
+  // canon sous cache-chaleur, tube-magasin, guidon lumineux, œilleton
+  s.fill(-1, 1, 3, 4, -50, -11, STEEL);
+  s.paint(-1, 1, 4, 4, -50, -11, STEEL_HI);
+  for (let z = -46; z <= -14; z += 4) s.paint(-1, 1, 3, 3, z, z, BORE);
+  s.fill(-1, 1, 3, 4, -50, -50, STEEL_DK);
+  s.set(0, 3, -50, BORE).set(0, 4, -50, BORE);
+  s.fill(-1, 1, 0, 2, -44, -11, STEEL_DK);
+  s.fill(-1, 1, 0, 2, -45, -45, STEEL_EDGE);
+  s.set(0, 5, -49, STEEL_DK).set(0, 6, -49, SLOT.NEON_RED);
+  s.set(-1, 6, -2, STEEL_DK).set(1, 6, -2, STEEL_DK).fill(-1, 1, 7, 7, -2, -2, STEEL_DK);
+  triggerGuard(s, STEEL_DK);
+  // crosse droite en polymère, filet rouge, plaque de couche
+  for (let z = 2; z <= 20; z++) {
+    const top = z < 12 ? 4 : 3;
+    const bottom = -Math.floor((z - 2) * 0.32);
+    s.fill(-1, 1, bottom, top, z, z, POLY);
   }
-  s.fill(-1, 1, -1, 1, 0, 3, WALNUT);
-  // fil du noyer : veines obliques qui suivent la chute de la crosse
-  s.paint(-1, 1, -8, 1, 0, 20, (x, y, z, old) => (old === WALNUT ? woodGrain(y, z, 0.3) : old));
-  {
-    const [lo, hi] = stockProfile(20, [12, 18], 7);
-    s.fill(-1, 1, lo, hi, 21, 21, BUTTPLATE);
+  s.paint(-1, 1, 3, 4, 2, 20, POLY_HI);
+  s.paint(-1, -1, 1, 1, 4, 18, HAMMER);
+  s.paint(1, 1, 1, 1, 4, 18, HAMMER);
+  s.fill(-1, 1, -6, 3, 21, 22, RUBBER);
+  // --- poignée
+  const g = pistolGrip(2, -3);
+  g.paint(-1, 0, -3, -3, -1, 1, HAMMER_DK);
+  // --- pompe crantée (autour du tube)
+  const p = new Grid(-2, 2, -1, 3, -31, -18);
+  p.fill(-2, 2, -1, 3, -31, -18, POLY);
+  for (let z = -30; z <= -19; z += 2) {
+    p.paint(-2, -2, 0, 2, z, z, POLY_HI);
+    p.paint(2, 2, 0, 2, z, z, POLY_HI);
+    p.paint(-1, 1, -1, -1, z, z, POLY_HI);
   }
-
-  // --- canons + longuesse (pivot sur la broche de charnière)
-  const b = new Grid(-1, 1, 0, 5, -47, -3);
-  // canons juxtaposés : damas discret (torsades) le long des tubes
-  for (let z = -46; z <= -3; z++) {
-    for (const x of [-1, 1]) {
-      const tw = ((z + (x > 0 ? 1 : 0)) >> 1) & 1;
-      b.set(x, 3, z, tw ? BLUE : 0x353b47);
-    }
-  }
-  b.fill(0, 0, 3, 3, -46, -3, BLUE_DK); // gouttière entre les tubes
-  b.fill(0, 0, 4, 4, -46, -3, BLUE_HI); // bande supérieure
-  b.paint(0, 0, 4, 4, -46, -3, (x, y, z) => (z % 6 === 0 ? BLUE_EDGE : BLUE_HI));
-  b.fill(0, 0, 2, 2, -46, -10, BLUE_DK); // bande inférieure
-  b.set(0, 5, -45, BRASS); // bille de laiton
-  b.set(-1, 3, -46, BLUE_EDGE).set(1, 3, -46, BLUE_EDGE);
-  b.set(0, 3, -46, BORE);
-  // crochets (lumps) sous la culasse
-  b.fill(-1, 1, 2, 2, -9, -3, BLUE);
-  b.fill(0, 0, 1, 1, -9, -6, BLUE_DK);
-  // longuesse (splinter) en noyer clair, ferrure à l'avant
-  b.fill(-1, 1, 0, 2, -21, -10, WALNUT_LT);
-  b.fill(-1, 1, 0, 0, -21, -19, -1);
-  b.fill(-1, -1, 1, 1, -21, -21, -1).fill(1, 1, 1, 1, -21, -21, -1);
-  b.paint(-1, 1, 0, 2, -21, -10, (x, y, z) => (y === 0 ? WALNUT : (z + 40) % 7 === 3 && y === 1 ? WALNUT : WALNUT_LT));
-  b.fill(0, 0, 0, 0, -12, -10, BLUE_HI); // ferrure de verrouillage
-  b.set(0, 1, -22, BLUE_EDGE); // poussoir Anson
-  b.pivot(0, 1.5, -9);
-
-  // --- culots des deux cartouches (canons ouverts)
-  const sh = new Grid(-1, 1, 3, 3, -2, -2);
-  sh.set(-1, 3, -2, BRASS).set(1, 3, -2, BRASS_HI);
-  sh.set(0, 3, -2, BLUE_DK);
-  sh.pivot(0, 1.5, -9);
-  return { body: s.m, barrels: b.m, shells: sh.m };
+  p.paint(-2, 2, -1, 3, -31, -31, POLY_DK);
+  p.paint(-2, 2, -1, 3, -18, -18, POLY_DK);
+  return { body: s.m, grip: g.m, pump: p.m };
 }
 
-// ================================================================== MARTINI-HENRY
+// ================================================================== FUSIL À RAIL LONGBOW
 
-/** Carabine Martini-Henry à bloc tombant (~1,28 m). */
+/** Fusil à rail Longbow : deux rails de cuivre, bobines lumineuses, cellule d'énergie. */
 export interface RifleModels {
-  /** Boîte de culasse, canon, hausse à échelle, guidon, bois, grenadières, baguette (repère de l'arme). */
+  /** Boîte, rails, frein de bouche, viseur, crosse squelette (repère de l'arme). */
   body: VoxelModel;
-  /** Levier-sous-garde (pontet + queue sous le poignet) : pivote autour de `RIFLE.pivot`. */
-  lever: VoxelModel;
+  /** Poignée (repère main, gripRot). */
+  grip: VoxelModel;
+  /** Cellule d'énergie (glisse selon −Y quand on l'éjecte). */
+  cell: VoxelModel;
+  /** Bobines éteintes et allumées (une par anneau, de l'arrière vers l'avant). */
+  rings: VoxelModel[];
+  ringsLit: VoxelModel[];
 }
 
 export const RIFLE: VmWeaponMeta = {
-  muzzle: [0, 2 * R, -63.5 * R],
-  support: [0, 1 * R, -26 * R],
+  muzzle: [0, 3 * R, -64.5 * R],
+  support: [0, -1 * R, -25 * R],
   supportRot: [0, 0, 0],
-  gripRot: [0, 0, 0],
-  sightY: 4.5 * R,
-  rearSightZ: -19 * R,
-  frontSightZ: -62 * R,
-  pivot: [0, -1.5 * R, -9 * R],
-  length: 82 * R,
+  gripRot: [-0.3, 0, 0],
+  sightY: 11 * R,
+  rearSightZ: -3 * R,
+  frontSightZ: -8 * R,
+  length: 86 * R,
 };
 
-export function rifleModels(): RifleModels {
-  const s = new Grid(-2, 2, -8, 5, -64, 18);
-  // --- boîte de culasse
-  s.fill(-1, 1, -1, 3, -11, -1, BLUE);
-  s.set(-1, -1, -11, -1).set(1, -1, -11, -1).set(0, -1, -11, BLUE_DK);
-  s.paint(-1, 1, 3, 3, -11, -1, BLUE_HI);
-  // auge de chargement : le dessus du bloc apparaît entre les flasques
-  s.fill(0, 0, 3, 3, -9, -3, -1);
-  s.fill(0, 0, 2, 2, -9, -3, BLUE_DK);
-  s.set(0, 2, -3, BLUE_EDGE); // poussoir du bloc
-  // indicateur d'armement (côté droit)
-  s.set(2, 1, -6, BLUE_EDGE).set(2, 2, -6, BLUE_EDGE);
-  // détente
-  s.set(0, -2, -5, BLUE_EDGE);
-  // --- canon et renfort
-  s.fill(0, 0, 2, 2, -63, -12, BLUE);
-  s.fill(0, 0, 3, 3, -16, -12, BLUE_HI);
-  s.set(0, 2, -63, BLUE_DK);
-  // --- longuesse : le canon repose dans le bois
-  s.fill(-1, 1, 0, 1, -51, -12, WALNUT_LT);
-  s.fill(-1, -1, 2, 2, -51, -12, WALNUT_LT).fill(1, 1, 2, 2, -51, -12, WALNUT_LT);
-  s.paint(-1, 1, 0, 2, -51, -12, (x, y, z) => (y === 0 ? WALNUT : (z + 80) % 9 === 4 && y === 1 ? WALNUT : WALNUT_LT));
-  s.fill(-1, 1, 0, 0, -51, -48, -1);
-  s.fill(0, 0, 0, 0, -51, -48, WALNUT_LT);
-  // grenadières (deux anneaux de fer) et embouchoir
-  for (const z of [-31, -44]) {
-    s.fill(-1, 1, 0, 3, z, z, BLUE);
-    s.set(0, 2, z, BLUE);
-    s.paint(-1, 1, 3, 3, z, z, BLUE_HI);
-  }
-  s.fill(-1, 1, 1, 2, -53, -52, BLUE);
-  s.set(0, 0, -52, BLUE);
-  s.paint(-1, 1, 2, 2, -53, -52, BLUE_HI);
-  s.set(0, 2, -52, BLUE).set(0, 2, -53, BLUE);
-  // baguette sous le canon, au-delà de l'embouchoir
-  s.fill(0, 0, 0, 0, -62, -53, BLUE_EDGE);
-  s.set(0, 0, -62, BLUE_HI);
-  // guidon (embase + lame), tenon de baïonnette
-  s.fill(0, 0, 3, 3, -62, -60, BLUE);
-  s.set(0, 4, -62, BLUE_EDGE);
-  s.set(1, 2, -59, BLUE_HI);
-  // hausse à échelle repliée : embase, charnière avec cran de combat, planche ajourée
-  s.fill(-1, 1, 3, 3, -23, -19, BLUE);
-  s.fill(-1, 1, 4, 4, -19, -19, BLUE_HI);
-  s.set(-1, 5, -19, BLUE_EDGE).set(1, 5, -19, BLUE_EDGE);
-  s.fill(-1, 1, 4, 4, -25, -20, BLUE_HI);
-  s.fill(0, 0, 4, 4, -24, -21, -1);
-  s.set(0, 4, -25, BLUE_EDGE);
-  // --- crosse (poignet droit, busc, plaque de couche en acier)
-  for (let z = 0; z <= 17; z++) {
-    const [lo, hi] = z <= 5 ? [-1, 1] : stockProfile(z + 3, [12, 30], 7);
-    s.fill(-1, 1, lo, hi, z, z, WALNUT);
-  }
-  s.paint(-1, 1, -8, 1, 0, 17, (x, y, z, old) => (old === WALNUT ? woodGrain(y, z + 3, 0.3) : old));
-  {
-    const [lo, hi] = stockProfile(20, [12, 30], 7);
-    s.fill(-1, 1, lo, hi, 18, 18, BLUE);
-    s.paint(-1, 1, hi, hi, 18, 18, BLUE_HI);
-  }
-  // queue de culasse sur le poignet
-  s.fill(0, 0, 2, 2, 0, 1, BLUE_HI);
+/** Centre du réticule du Longbow. */
+export const RIFLE_RETICLE: Vec3 = [0, 11 * R, -8.6 * R];
 
-  // --- levier-sous-garde (pivot à l'avant de la boîte)
-  const l = new Grid(0, 0, -3, -1, -10, 6);
-  l.set(0, -2, -9, BLUE);
-  l.fill(0, 0, -3, -3, -8, -4, BLUE);
-  l.set(0, -3, -8, BLUE_HI);
-  l.fill(0, 0, -2, -2, -3, 5, BLUE);
-  l.paint(0, 0, -2, -2, -3, 5, (x, y, z) => (z === 5 ? BLUE_EDGE : BLUE));
-  l.set(0, -1, 6, BLUE_EDGE);
-  l.pivot(0, -1.5, -9);
-  return { body: s.m, lever: l.m };
+/** Profondeur (voxels) du centre des bobines du Longbow. */
+const RING_Z = [-23, -33, -43, -53];
+
+export function rifleModels(): RifleModels {
+  const s = new Grid(-2, 2, -6, 13, -64, 20);
+  // boîte de culasse, flancs d'acier, voyants cyan
+  s.fill(-1, 1, -1, 5, -14, 2, POLY);
+  s.paint(-1, -1, 1, 3, -12, -2, STEEL);
+  s.paint(1, 1, 1, 3, -12, -2, STEEL);
+  s.paint(-1, -1, 4, 4, -12, -4, SLOT.NEON_CYAN);
+  s.paint(1, 1, 4, 4, -12, -4, SLOT.NEON_CYAN);
+  // rails supérieur et inférieur (faces intérieures en cuivre), fente entre les deux
+  s.fill(-1, 1, 5, 6, -62, -15, STEEL);
+  s.paint(-1, 1, 5, 5, -62, -15, COPPER);
+  s.fill(-1, 1, 0, 1, -62, -15, STEEL);
+  s.paint(-1, 1, 1, 1, -62, -15, COPPER);
+  s.paint(-1, 1, 6, 6, -62, -15, STEEL_HI);
+  // frein de bouche ajouré, bords lumineux autour de la fente
+  s.fill(-2, 2, -1, 7, -64, -63, STEEL_DK);
+  s.fill(-1, 1, 2, 4, -64, -63, -1);
+  s.paint(-2, -2, 2, 4, -64, -64, SLOT.NEON_CYAN);
+  s.paint(2, 2, 2, 4, -64, -64, SLOT.NEON_CYAN);
+  // garde-main sous le rail inférieur
+  s.fill(-1, 1, -2, -1, -32, -16, POLY);
+  for (let z = -31; z <= -17; z += 3) s.paint(-1, 1, -2, -2, z, z, POLY_HI);
+  // viseur holographique sur rehausse (au-dessus des bobines) : cadre fin à l'avant
+  s.fill(-1, 1, 6, 8, -8, -2, POLY_DK);
+  s.paint(-1, 1, 8, 8, -8, -2, POLY);
+  s.fill(-2, 2, 9, 9, -8, -8, STEEL);
+  s.fill(-2, -2, 10, 12, -8, -8, STEEL);
+  s.fill(2, 2, 10, 12, -8, -8, STEEL);
+  s.fill(-2, 2, 13, 13, -8, -8, STEEL);
+  triggerGuard(s, POLY);
+  // crosse squelette : barres supérieure et inférieure, entretoise, plaque de couche
+  s.fill(-1, 1, 2, 3, 3, 18, POLY);
+  s.fill(-1, 1, -5, -4, 8, 18, POLY);
+  for (let i = 0; i <= 5; i++) s.fill(-1, 1, -4 + i, -4 + i, 8 - i, 8 - i, POLY);
+  s.fill(-1, 1, -5, 3, 19, 20, RUBBER);
+  s.paint(-1, 1, 3, 3, 3, 18, POLY_HI);
+  // --- poignée
+  const g = pistolGrip(2, -3);
+  // --- cellule d'énergie (devant le pontet), fenêtre lumineuse
+  const c = new Grid(-1, 1, -7, -2, -12, -8);
+  c.fill(-1, 1, -6, -2, -12, -8, POLY_DK);
+  c.paint(-1, -1, -5, -3, -11, -9, SLOT.NEON_CYAN);
+  c.paint(1, 1, -5, -3, -11, -9, SLOT.NEON_CYAN);
+  c.fill(-1, 1, -7, -7, -12, -8, STEEL_DK);
+  // --- bobines (cadres autour des rails)
+  const ring = (z: number, lit: boolean): VoxelModel => {
+    const r = new Grid(-2, 2, -1, 7, z - 1, z);
+    r.fill(-2, 2, -1, 7, z - 1, z, lit ? SLOT.NEON_CYAN : COPPER_DK);
+    r.fill(-1, 1, 0, 6, z - 1, z, -1);
+    if (!lit) r.paint(-2, 2, 7, 7, z - 1, z, COPPER);
+    return r.m;
+  };
+  return { body: s.m, grip: g.m, cell: c.m, rings: RING_Z.map((z) => ring(z, false)), ringsLit: RING_Z.map((z) => ring(z, true)) };
 }
 
-// ================================================================== COUTEAU BOWIE
+// ================================================================== LAME THERMIQUE
 
 export const KNIFE: VmWeaponMeta = {
   muzzle: [0, 0, -16.5 * R],
@@ -510,94 +508,69 @@ export const KNIFE: VmWeaponMeta = {
   sightY: 0,
   rearSightZ: 0,
   frontSightZ: 0,
-  length: 21 * R,
+  length: 22 * R,
 };
 
-/** Couteau Bowie de Sheffield : lame à contre-tranchant et gorge, garde de laiton, manche de palissandre riveté. */
+/** Lame thermique : manche caoutchouté, garde, lame tantō au tranchant chauffé à blanc. */
 export function knifeModel(): VoxelModel {
   // largeur 1, hauteur paire autour de l'origine (centre du manche entre les rangées -1 et 0)
   const g = new Grid(0, 0, -3, 2, -17, 5, [0.5, 0, 0.5]);
-  // manche de palissandre veiné, rivets de laiton
-  g.fill(0, 0, -1, 0, -3, 3, ROSEWOOD);
-  g.paint(0, 0, -1, -1, -3, 3, ROSEWOOD_DK);
-  g.set(0, 0, 2, BRASS).set(0, 0, -1, BRASS_DK);
-  // pommeau et mitre de laiton
-  g.fill(0, 0, -1, 0, 4, 4, BRASS);
-  g.set(0, 0, 4, BRASS_HI);
-  g.fill(0, 0, -1, 0, -3, -3, BRASS_DK);
-  // garde en S
-  g.fill(0, 0, -2, 1, -4, -4, BRASS);
-  g.set(0, 1, -4, BRASS_HI).set(0, 2, -5, BRASS_HI).set(0, -2, -4, BRASS).set(0, -3, -3, BRASS_DK);
-  // lame : talon non affûté, gorge (fuller), tranchant, contre-tranchant
-  const prof: Record<number, [number, number]> = {};
-  for (let z = -5; z >= -12; z--) prof[z] = [-1, 1];
-  prof[-13] = [-1, 1];
-  prof[-14] = [-1, 0];
-  prof[-15] = [-1, 0];
-  prof[-16] = [0, 0];
-  for (const zs of Object.keys(prof)) {
-    const z = Number(zs);
-    const [lo, hi] = prof[z];
-    for (let y = lo; y <= hi; y++) {
-      let c = BLADE;
-      if (y === 1) c = z <= -12 ? EDGE : BLADE_HI; // dos (contre-tranchant poli au bout)
-      if (y === 0) c = z <= -7 && z >= -11 ? BLADE_DK : BLADE; // gorge
-      if (y === -1) c = z <= -7 ? EDGE : BLADE; // tranchant (le talon reste brut)
-      if (z >= -6) c = y === 1 ? BLADE : BLADE_DK; // talon
-      g.set(0, y, z, c);
-    }
-  }
-  g.set(0, 0, -16, EDGE);
+  g.fill(0, 0, -1, 0, -2, 4, RUBBER);
+  for (const z of [-1, 1, 3]) g.paint(0, 0, -1, 0, z, z, RUBBER_HI);
+  g.fill(0, 0, -1, 0, 5, 5, STEEL);
+  g.set(0, 0, 5, SLOT.NEON_AMBER);
+  g.fill(0, 0, -2, 1, -3, -3, STEEL_DK);
+  // lame : dos sombre, corps chauffé, tranchant incandescent, pointe tantō
+  g.fill(0, 0, 1, 1, -13, -4, BLADE_DK);
+  g.fill(0, 0, 0, 0, -15, -4, BLADE);
+  g.fill(0, 0, 0, 0, -14, -8, BLADE_HOT);
+  g.fill(0, 0, -1, -1, -15, -5, SLOT.NEON_AMBER);
+  g.set(0, -1, -4, BLADE);
+  g.set(0, 1, -14, BLADE_DK);
+  g.set(0, 0, -16, SLOT.NEON_AMBER);
+  g.set(0, -1, -15, SLOT.FIRE);
   return g.m;
 }
 
-// ================================================================== MATRAQUE
+// ================================================================== MATRAQUE ÉLECTRIQUE
 
 export const CLUB: VmWeaponMeta = {
-  muzzle: [0, 0, -22.5 * R],
+  muzzle: [0, 0, -31.5 * R],
   support: null,
   supportRot: [0, 0, 0],
   gripRot: [0, 0, 0],
   sightY: 0,
   rearSightZ: 0,
   frontSightZ: 0,
-  length: 28 * R,
+  length: 37 * R,
 };
 
-/** Matraque de constable en bois tourné laqué, couronne peinte, dragonne de cuir. */
+/** Matraque électrique télescopique : poignée caoutchoutée, anneau lumineux, électrodes bleues. */
 export function clubModel(): VoxelModel {
-  const g = new Grid(-1, 1, -5, 1, -23, 6);
+  const g = new Grid(-1, 1, -5, 1, -31, 6);
   const round = (z: number, c: number) => {
     g.fill(-1, 1, 0, 0, z, z, c);
     g.fill(0, 0, -1, 1, z, z, c);
   };
-  // poignée gainée de cuir (fine là où le poing la serre) et pommeau tourné
-  for (let z = -3; z <= 3; z++) {
-    if (z >= -2 && z <= 1) g.set(0, 0, z, LEATHER);
-    else round(z, (z & 1) === 0 ? LEATHER : LEATHER_HI);
-  }
-  g.fill(-1, 1, -1, 1, 4, 5, LACQUER);
-  g.paint(-1, 1, 1, 1, 4, 5, LACQUER_HI);
-  g.set(0, 0, 6, LACQUER_HI);
-  // fût : section ronde, renflé vers le bout, bout arrondi
-  for (let z = -22; z <= -4; z++) round(z, LACQUER);
-  for (let z = -20; z <= -15; z++) {
-    g.set(-1, 1, z, LACQUER).set(1, 1, z, LACQUER).set(-1, -1, z, LACQUER).set(1, -1, z, LACQUER);
-  }
-  g.paint(-1, 1, 1, 1, -22, -4, LACQUER_HI);
-  g.set(0, 0, -23, LACQUER_HI);
-  // gorge tournée au-dessus de la poignée
-  round(-4, 0x2a190f);
-  // bande peinte : fond bleu nuit, filets dorés, couronne sur le flanc
-  for (let z = -11; z <= -8; z++) round(z, 0x1a2238);
-  round(-12, BRASS_DK);
-  round(-7, BRASS_DK);
-  g.set(-1, 0, -10, BRASS).set(-1, 0, -9, BRASS_HI).set(1, 0, -10, BRASS).set(1, 0, -9, BRASS_HI);
-  // dragonne de cuir pendant du pommeau
-  g.fill(0, 0, -3, -2, 5, 5, LEATHER);
-  g.fill(0, 0, -4, -4, 4, 5, LEATHER_HI);
-  g.set(0, -3, 3, LEATHER).set(0, -2, 3, LEATHER);
-  g.set(0, -5, 4, LEATHER_HI);
+  // poignée (fine là où le poing la serre), pommeau, dragonne
+  for (let z = -2; z <= 1; z++) g.set(0, 0, z, RUBBER);
+  for (const z of [2, 3]) round(z, z & 1 ? RUBBER_HI : RUBBER);
+  for (const z of [4, 5]) round(z, STEEL_DK);
+  g.fill(0, 0, -3, -2, 5, 5, RUBBER);
+  g.fill(0, 0, -4, -4, 4, 6, RUBBER_HI);
+  // garde et anneau lumineux
+  round(-3, STEEL);
+  round(-4, SLOT.NEON_BLUE);
+  // fût télescopique : trois segments de plus en plus fins
+  for (let z = -13; z <= -5; z++) round(z, POLY);
+  g.paint(0, 0, 1, 1, -11, -7, SLOT.NEON_BLUE);
+  round(-14, STEEL_HI);
+  for (let z = -21; z <= -15; z++) g.set(0, 0, z, STEEL);
+  for (let z = -27; z <= -22; z++) g.set(0, 0, z, CHROME);
+  // tête à électrodes
+  for (const z of [-28, -29]) round(z, STEEL_DK);
+  g.set(-1, 0, -30, SLOT.NEON_BLUE).set(1, 0, -30, SLOT.NEON_BLUE).set(0, 1, -30, SLOT.NEON_BLUE).set(0, -1, -30, SLOT.NEON_BLUE);
+  g.set(0, 0, -31, SLOT.NEON_BLUE);
   return g.m;
 }
 
@@ -675,7 +648,7 @@ function pistolHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
   L(2, ['n....', 's....', 's....', 'sss..', 'ssss.', '.hhs.', '.....']); // pouce le long de la carcasse, palmure
   L(1, ['.....', '..sh.', 'n..s.', 's..sh', 's..ss', '.hssa', '.....']); // index sur la détente
   L(0, ['.....', 'nssh.', 'n..sh', '...ss', 'h..ss', '.hssa', '.sss.']); // majeur
-  L(-1, ['.....', 'naah.', 'n..ah', '...ak', 's..as', '.ssaa', '.sss.']); // annulaire
+  L(-1, ['.....', 'naah.', 'n..gh', '...ak', 's..as', '.ssaa', '.sss.']); // annulaire (bague)
   L(-2, ['.....', '.nsh.', '.n.gh', '...ss', 's..sk', '.ssaa', '.ss..']); // auriculaire (chevalière)
   L(-3, ['.....', '.....', '.....', '...s.', '...sa', '..sa.', '.....']); // tranche de la main
   return { m: g.m, wrist: g.p(0, -1, 3.5) };
@@ -724,7 +697,7 @@ function fistHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
   const g = new Grid(-2, 2, -2, 2, -4, 3);
   const L = (y: number, rows: string[]) => g.layer(y, -2, -4, rows, pal);
   // colonnes x : -2 (pouce), -1 index, 0 majeur, 1 annulaire, 2 auriculaire ; rangées z : -4 … 3
-  L(1, ['.....', '.hhhg', '.ssss', '.skss', '.ssss', '..ss.', '..ss.', '.....']);
+  L(1, ['.....', '.ghhg', '.ssss', '.skss', '.ssss', '..ss.', '..ss.', '.....']);
   L(0, ['.....', '.sasa', 'sssss', 'sssss', '.ssss', '.sss.', '.sss.', '.....']);
   L(-1, ['.....', '.sn..', 'sdada', '.dddd', '.dddd', '..ss.', '..ss.', '.....']);
   return { m: g.m, wrist: g.p(0.5, 0, 2.5) };
@@ -761,12 +734,12 @@ function forearmModel(look: ArmLook): VoxelModel {
   };
   // poignet (sous la manchette)
   g.fill(-1, 0, -1, 0, -1, 0, pal.w);
-  // manchette de chemise empesée (Even : manchette gris perle sous le bleu marine)
+  // manchette de chemise, bouton de manchette (or pour Dadou, argent pour Even)
   const cuff = look.cuff;
   ring(1, 2, cuff);
   g.paint(-2, 1, -2, -2, 1, 1, shade(cuff, 0.86));
-  // bouton de manchette (or pour Dadou, argent pour Even)
   g.set(1, 0, 1, look.accent);
+  g.set(1, -1, 1, look.accent);
   // manche : section octogonale, lustre du drap dessus, ombre dessous
   const sl = look.sleeve;
   const slHi = mix(sl, 0xa4a4b0, look.boss === 'dadou' ? 0.16 : 0.1);
@@ -780,13 +753,15 @@ function forearmModel(look: ArmLook): VoxelModel {
     g.paint(-2, 1, -3, -3, z, z, shade(sl, 0.6));
     g.set(-3, 1, z + 1, slHi);
   }
-  // parement : bord de la manche (passepoil cramoisi de Dadou, revers bleu clair d'Even)
   const trim = look.trim;
-  g.paint(-3, 2, -3, 2, 2, 2, trim);
-  if (look.boss === 'even') {
-    g.paint(-3, 2, -3, 2, 3, 4, trim);
-    // trois boutons d'argent sur le côté extérieur
-    for (const z of [5, 7, 9]) g.set(2, 0, z, look.accent);
+  if (look.boss === 'dadou') {
+    // revers cramoisi liseré d'un fil de néon rouge
+    g.paint(-3, 2, -3, 2, 2, 3, trim);
+    g.paint(-3, 2, -3, 2, 4, 4, SLOT.NEON_RED);
+  } else {
+    // revers bleu, trois boutons d'argent sur le côté extérieur
+    g.paint(-3, 2, -3, 2, 2, 4, trim);
+    for (const z of [6, 8, 10]) g.set(2, 0, z, look.accent);
   }
   return g.m;
 }
@@ -859,17 +834,54 @@ export function armLookFor(boss: 'dadou' | 'even', outfit: { skin: number; coat:
   };
 }
 
-// ================================================================== DOUILLES
+// ================================================================== DOUILLES, CHARGEURS, CELLULES
 
-/** Douille éjectée : laiton (revolver, carabine) ou cartouche de papier rouge à culot de laiton (fusil). */
-export function casingModel(kind: 'pistol' | 'rifle' | 'shell'): VoxelModel {
-  if (kind === 'shell') {
-    const g = new Grid(0, 0, 0, 0, -2, 0);
-    g.set(0, 0, 0, BRASS).set(0, 0, -1, 0x9a2a22).set(0, 0, -2, 0xb0362c);
-    return g.m;
+/** Objets éjectés ou tenus par la main d'appoint pendant les rechargements. */
+export type CasingKind = 'pistol' | 'shell' | 'mag' | 'smgMag' | 'cell' | 'cellSpent';
+
+/**
+ * Douille de pistolet (laiton), cartouche de fusil (rouge à culot de laiton), chargeur de
+ * pistolet, chargeur translucide du Wasp, cellule d'énergie du Longbow (pleine ou vide). Les
+ * chargeurs et cellules sont dans le même repère que sur l'arme (centrés sur leur origine).
+ */
+export function casingModel(kind: CasingKind): VoxelModel {
+  switch (kind) {
+    case 'shell': {
+      const g = new Grid(0, 0, 0, 0, -2, 0);
+      g.set(0, 0, 0, BRASS).set(0, 0, -1, SHELL_DK).set(0, 0, -2, SHELL_RED);
+      return g.m;
+    }
+    case 'mag': {
+      const g = new Grid(-1, 0, -3, 2, -1, 2, [0, 0.5, 0.5]);
+      g.fill(-1, 0, -2, 2, -1, 1, POLY_DK);
+      g.fill(-1, 0, 2, 2, -1, -1, BRASS);
+      g.fill(-1, 0, -3, -3, -1, 2, POLY);
+      g.set(-1, -3, 2, SLOT.NEON_CYAN);
+      return g.m;
+    }
+    case 'smgMag': {
+      const g = new Grid(-1, 1, -1, 1, -7, 7);
+      g.fill(-1, 1, -1, 1, -7, 7, SLOT.GLASS);
+      for (let z = -6; z <= 6; z += 2) g.set(-1, 0, z, SLOT.NEON_AMBER).set(1, 0, z, SLOT.NEON_AMBER);
+      g.paint(-1, 1, -1, 1, 7, 7, POLY_DK);
+      g.paint(-1, 1, -1, 1, -7, -7, POLY_DK);
+      return g.m;
+    }
+    case 'cell':
+    case 'cellSpent': {
+      const g = new Grid(-1, 1, -3, 2, -2, 2);
+      g.fill(-1, 1, -2, 2, -2, 2, POLY_DK);
+      g.paint(-1, -1, -1, 1, -1, 1, kind === 'cell' ? SLOT.NEON_CYAN : COPPER_DK);
+      g.paint(1, 1, -1, 1, -1, 1, kind === 'cell' ? SLOT.NEON_CYAN : COPPER_DK);
+      g.fill(-1, 1, -3, -3, -2, 2, STEEL_DK);
+      g.fill(-1, 1, 2, 2, -1, 1, kind === 'cell' ? COPPER : COPPER_DK);
+      return g.m;
+    }
+    case 'pistol':
+    default: {
+      const g = new Grid(0, 0, 0, 0, -1, 0);
+      g.set(0, 0, 0, BRASS_DK).set(0, 0, -1, BRASS_HI);
+      return g.m;
+    }
   }
-  const g = new Grid(0, 0, 0, 0, kind === 'rifle' ? -2 : -1, 0);
-  g.set(0, 0, 0, BRASS_HI).set(0, 0, -1, BRASS);
-  if (kind === 'rifle') g.set(0, 0, -2, BRASS_DK);
-  return g.m;
 }

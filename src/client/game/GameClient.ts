@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { Anim, CharKind, FLAG, RECRUITER_NAME, WEAPONS, Weapon } from '../../shared/characters';
-import { BOSS_NAME, DE_BOSS, MAFIA_NAME, VEHICLES, tierDef } from '../../shared/constants';
+import { BOSS_NAME, DE_BOSS, MAFIA_NAME, VEHICLES, tierDef, type VehicleClass } from '../../shared/constants';
 import { BUILDINGS, DISTRICTS, Faction, RIVER_X0, RIVER_X1, districtAt, isWater } from '../../shared/city/plan';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import {
@@ -19,9 +19,15 @@ import { formatMoney, formatTime } from '../../shared/util';
 import type { App } from '../app';
 import type { WorldData } from '../world/worldLoader';
 import { audio } from '../audio/AudioEngine';
-import type { SfxName } from '../audio/types';
+import type { LoopName, SfxName } from '../audio/types';
 import { CharacterRenderer, type CharView } from '../characters/characterRenderer';
 import { Atmosphere } from '../render/atmosphere';
+import { Rain } from '../render/rain';
+import { createSkyline, type Skyline } from '../render/skyline';
+import { Holograms } from '../render/holograms';
+import { BigScreens } from './bigScreens';
+import { GlassBreaker } from './glassBreaker';
+import { EngineSounds, rpm, type LoopSource } from './engineSounds';
 import { createLightTexture, createMaterialTexture, createTintTexture, envUniforms } from '../render/env';
 import { createOuterGround } from '../render/outer';
 import { PropRenderer } from '../render/propRenderer';
@@ -67,6 +73,8 @@ export interface GameInit {
   pub: PublicState;
   priv: PrivateState;
   over: { winner: Slot | null; reason: string } | null;
+  /** Verre déjà brisé dans la partie : [x, y, z, rayon]. */
+  glass?: [number, number, number, number][];
 }
 
 const FACTION_CSS: Record<number, string> = { 0: '#c8b890', 1: '#e05a5a', 2: '#6f95e0', 3: '#9ab0d0' };
@@ -82,6 +90,13 @@ export class GameClient {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly atmo: Atmosphere;
+  readonly rain: Rain;
+  readonly skyline: Skyline;
+  readonly glass: GlassBreaker;
+  private engines = new EngineSounds();
+  private loopAcc = 0;
+  readonly screens: BigScreens;
+  readonly holos: Holograms;
   readonly props: PropRenderer;
   readonly chars: CharacterRenderer;
   readonly effects = new Effects();
@@ -102,6 +117,8 @@ export class GameClient {
   readonly vehicles = new VehicleRenderer();
   readonly post: PostFX;
   readonly marker = new EventMarker();
+  /** Butin d'un convoi détruit (le plus proche du joueur). */
+  readonly lootMarker = new EventMarker(new THREE.Color(0.3, 1.0, 0.62), 'butin');
   /** Événement aléatoire en cours (annoncé par le serveur). */
   activeEvent: Extract<GameEvent, { t: 'event' }> | null = null;
   private fogBoost = 1;
@@ -164,6 +181,11 @@ export class GameClient {
     createTintTexture(world.tint);
     const worldGroup = buildWorldGroup(world.regions, createWorldMaterial());
     this.scene.add(worldGroup);
+    // verre destructible : les régions du monde sont remaillées quand une vitre se brise
+    const regionMeshes = new Map<string, THREE.Mesh>();
+    for (const m of worldGroup.children as THREE.Mesh[]) regionMeshes.set(m.userData.region as string, m);
+    this.glass = new GlassBreaker(world.world, regionMeshes);
+    for (const g of init.glass ?? []) this.glass.apply(g[0], g[1], g[2], g[3]);
     // centres des régions pour la distance d'affichage
     for (const m of worldGroup.children as THREE.Mesh[]) {
       const bs = m.geometry.boundingSphere;
@@ -174,7 +196,15 @@ export class GameClient {
     this.water = createWater();
     this.scene.add(this.water.mesh);
     this.scene.add(createOuterGround());
+    this.skyline = createSkyline();
+    this.scene.add(this.skyline.group);
+    this.screens = new BigScreens(world.screens);
+    this.scene.add(this.screens.group);
+    this.holos = new Holograms(world.holos);
+    this.scene.add(this.holos.group);
     this.atmo = new Atmosphere(this.scene, q.shadow);
+    this.rain = new Rain(settings.quality === 'basse' ? 2200 : settings.quality === 'moyenne' ? 4000 : settings.quality === 'haute' ? 6500 : 9000);
+    this.scene.add(this.rain.mesh);
     this.props = new PropRenderer(world.props, world.buildings);
     this.props.setDistances(q.propDist, Math.min(150, q.drawDist));
     this.scene.add(this.props.group);
@@ -183,6 +213,7 @@ export class GameClient {
     this.scene.add(this.chars.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.marker.group);
+    this.scene.add(this.lootMarker.group);
     this.effects.setEmitters(world.smokes);
     this.doors = new DoorSystem(world.props, world.buildings, world.world);
     this.scene.add(this.doors.group);
@@ -213,9 +244,7 @@ export class GameClient {
       audio.play('reload', { pos: this.player.pos });
     };
     this.player.onStep = (m) => {
-      const d = MATERIALS[m];
-      const name: SfxName = !d ? 'footstep_stone' : d.pattern === Pattern.CARPET ? 'footstep_carpet' : d.pattern === Pattern.PLANK || d.pattern === Pattern.PARQUET ? 'footstep_wood' : 'footstep_stone';
-      audio.play(name, { pos: { x: this.player.pos.x, y: this.player.pos.y, z: this.player.pos.z }, volume: this.player.sprint ? 1 : 0.7 });
+      audio.play(stepSfx(m), { pos: { x: this.player.pos.x, y: this.player.pos.y, z: this.player.pos.z }, volume: this.player.sprint ? 1 : 0.7 });
     };
     this.map = new CityMap(world);
     this.hud = new Hud(this.you);
@@ -317,6 +346,9 @@ export class GameClient {
     }
     for (const id of [...this.store.ents.keys()]) this.store.remove(id);
     for (const i of init.infos) this.store.addInfo(i);
+    // verre : on remet tout en place puis on applique l'état de la partie
+    this.glass.restore();
+    for (const g of init.glass ?? []) this.glass.apply(g[0], g[1], g[2], g[3]);
     this.placed = false;
     // nouvelle partie : on repart d'un parrain vivant, sans événement en cours
     this.player.dead = false;
@@ -411,7 +443,7 @@ export class GameClient {
         } else if (e.by === this.selfId) {
           this.hud.hitMarker(!!e.head);
           const w = this.weapons.current;
-          audio.play(w === Weapon.FISTS ? 'punch' : w === Weapon.CLUB ? 'club' : w === Weapon.KNIFE ? 'knife' : 'hit_flesh', { volume: 0.5 });
+          audio.play(w === Weapon.FISTS ? 'punch' : w === Weapon.CLUB ? 'stun_baton' : w === Weapon.KNIFE ? 'thermal_knife' : 'hit_flesh', { volume: 0.5 });
         }
         break;
       }
@@ -510,6 +542,15 @@ export class GameClient {
         }
         break;
       }
+      case 'glass': {
+        const n = this.glass.apply(e.x, e.y, e.z, e.r);
+        if (n > 0) {
+          const p = new THREE.Vector3(e.x, e.y, e.z);
+          this.effects.burst(p, 0xcfeeff, Math.min(60, 10 + n));
+          if (p.distanceTo(this.player.pos) < 70) audio.play('glass_break', { pos: p, volume: Math.min(1, 0.5 + n / 60) });
+        }
+        break;
+      }
       case 'boom': {
         const p = new THREE.Vector3(e.x, e.y, e.z);
         this.effects.burst(p, 0xff8a30, 70);
@@ -572,6 +613,7 @@ export class GameClient {
   private applyPub(p: PublicState, initial: boolean): void {
     const prev = this.pub;
     this.pub = p;
+    this.screens.observe(p);
     for (const b of p.buildings) {
       this.props.setOwner(b.id, b.owner);
       this.signs.setOwner(b.id, b.owner);
@@ -589,6 +631,15 @@ export class GameClient {
       this.marker.hide();
       this.hud.setEvent(null);
     }
+    // butin d'un convoi détruit : balise verte sur le plus proche
+    const loot = p.loot ?? [];
+    if (loot.length > 0) {
+      const me = this.player.pos;
+      let best = loot[0];
+      for (const l of loot) if (Math.hypot(l.x - me.x, l.z - me.z) < Math.hypot(best.x - me.x, best.z - me.z)) best = l;
+      const y = this.world.nav.heightAt(best.x, best.z);
+      this.lootMarker.show(best.x, Number.isFinite(y) ? y : 0, best.z);
+    } else this.lootMarker.hide();
     this.strategic.dirty = true;
   }
 
@@ -853,6 +904,44 @@ export class GameClient {
       } else dv.hidden = true;
     }
     this.vehicles.update(vehViews, dt, drive ? { id: drive.id, x: drive.pos.x, y: drive.pos.y, z: drive.pos.z, yaw: drive.yaw, speed: drive.speed } : null);
+    // sons continus (10 fois par seconde) : moteurs, sirènes de police, alarmes des braquages
+    this.loopAcc += dt;
+    if (this.loopAcc > 0.1) {
+      this.loopAcc = 0;
+      const lp = this.camera.position;
+      const src: LoopSource[] = [];
+      if (drive) src.push({ key: 'moi', loop: engineLoop(drive.def.cls), x: drive.pos.x, y: drive.pos.y + 0.6, z: drive.pos.z, pitch: rpm(drive.speed, drive.def.speed), volume: 0.75 });
+      const riding = new Set((this.pub.rides ?? []).map((r) => r[0]));
+      const trucks = new Set((this.pub.convoys ?? []).map((c) => c.id));
+      for (const v of vehViews) {
+        if (drive && v.id === drive.id) continue;
+        const def = VEHICLES[v.gang];
+        if (!def || v.anim === Anim.DEAD) continue;
+        const sp = Math.hypot(v.vx, v.vz);
+        if (!riding.has(v.id) && !trucks.has(v.id) && def.cls !== 'drone' && sp < 0.5) continue;
+        if (Math.hypot(v.x - lp.x, v.z - lp.z) > 60) continue;
+        src.push({ key: `v${v.id}`, loop: engineLoop(def.cls), x: v.x, y: v.y + 0.6, z: v.z, pitch: rpm(sp, def.speed), volume: 0.7 });
+      }
+      this.traffic.loopSources(lp.x, lp.y, lp.z, src);
+      if (this.priv.wanted > 0) {
+        let cop: ClientEnt | null = null;
+        let bd = 90;
+        for (const e of this.store.alive()) {
+          if (e.info.faction !== Faction.POLICE) continue;
+          const d = Math.hypot(e.x - lp.x, e.z - lp.z);
+          if (d < bd) {
+            bd = d;
+            cop = e;
+          }
+        }
+        if (cop) src.push({ key: 'sirène', loop: 'siren', x: cop.x, y: cop.y + 2, z: cop.z, pitch: 1, volume: 0.55 });
+      }
+      for (const hz of this.pub.heists ?? []) {
+        const b = this.world.buildings[hz.b];
+        if (b && Math.hypot(b.center.x - lp.x, b.center.z - lp.z) < 90) src.push({ key: `alarme${hz.b}`, loop: 'alarm', x: b.center.x, y: b.floorY + 4, z: b.center.z, pitch: 1, volume: 0.7 });
+      }
+      this.engines.update(src, lp.x, lp.y, lp.z);
+    }
     if (this.placed) list.push(mv);
     // passants renversés par le véhicule du joueur
     if (drive && Math.abs(drive.speed) > 7 && drive.def.cls !== 'vtol') {
@@ -887,12 +976,28 @@ export class GameClient {
     if (diff < -0.5) diff += 1;
     this.dayTimeSmooth = (this.dayTimeSmooth + diff * Math.min(1, dt * 0.5) + 1) % 1;
     this.atmo.time = this.dayTimeSmooth;
+    // pluie : traits de pluie, chaussée mouillée (qui sèche lentement), ciel bas et éclairs
+    const rainTarget = this.pub.rain ?? 0;
+    const sheltered = camPos.y < -1.2 || this.buildingAt(camPos.x, camPos.z, camPos.y) >= 0;
+    this.rain.update(dt, this.camera, rainTarget, sheltered);
+    const wetTarget = Math.min(1, rainTarget * 1.4);
+    envUniforms.uWet.value += (wetTarget - envUniforms.uWet.value) * Math.min(1, dt * (wetTarget > envUniforms.uWet.value ? 0.12 : 0.012));
+    this.atmo.rain = this.rain.intensity;
+    this.atmo.storm = this.activeEvent?.kind === 'storm' ? 1 : 0;
     this.atmo.update(dt, now, this.player.pos, this.camera);
+    if (this.atmo.thunderAt > 0 && now >= this.atmo.thunderAt) {
+      this.atmo.thunderAt = 0;
+      audio.play('explosion', { volume: sheltered ? 0.18 : 0.35, pitch: 0.45 });
+    }
     const fq = qualityProfile(settings.quality).fogScale;
     const fogTarget = this.activeEvent?.kind === 'storm' ? 2.2 : 1;
     this.fogBoost += (fogTarget - this.fogBoost) * Math.min(1, dt * 0.25);
     envUniforms.uFogDensity.value *= fq * this.fogBoost;
     this.marker.update(now);
+    this.lootMarker.update(now);
+    this.skyline.update(now);
+    this.screens.update(now, camPos);
+    this.holos.update(now, dt, camPos);
     const wu = this.water.mat.uniforms;
     wu.uSkyTop.value.copy(this.atmo.skyMat.uniforms.uZenith.value);
     wu.uSkyHorizon.value.copy(this.atmo.skyMat.uniforms.uHorizon.value);
@@ -1041,7 +1146,7 @@ export class GameClient {
       let acc = (this.stepAcc.get(v.id) ?? Math.random()) + dt * sp / 0.75;
       if (acc >= 1) {
         acc -= 1;
-        audio.play('footstep_stone', { pos: { x: v.x, y: v.y, z: v.z }, volume: 0.45 });
+        audio.play(this.buildingAt(v.x, v.z, v.y) >= 0 ? 'footstep_stone' : 'footstep_concrete', { pos: { x: v.x, y: v.y, z: v.z }, volume: 0.45 });
       }
       this.stepAcc.set(v.id, acc);
     }
@@ -1151,6 +1256,8 @@ export class GameClient {
       combat,
       crowd: Math.min(1, this.civilians.countNear(p.x, p.z, 20) / 8),
       rain: this.pub.rain ?? 0,
+      underground: Math.max(0, Math.min(1, (-p.y - 1) / 3)),
+      altitude: bid >= 0 ? 0 : Math.max(0, p.y),
     });
   }
 
@@ -1303,6 +1410,8 @@ export class GameClient {
   }
 
   dispose(): void {
+    this.glass.restore();
+    this.engines.stopAll();
     cancelAnimationFrame(this.raf);
     for (const o of this.offs) o();
     window.removeEventListener('resize', this.onResize);
@@ -1328,8 +1437,57 @@ function shotSfx(w: Weapon): SfxName {
     case Weapon.SHOTGUN:
       return 'shotgun';
     case Weapon.RIFLE:
-      return 'rifle';
+      return 'railgun';
+    case Weapon.SMG:
+      return 'smg';
     default:
-      return 'revolver';
+      return 'pistol';
+  }
+}
+
+/** Boucle moteur selon la catégorie de véhicule. */
+function engineLoop(cls: VehicleClass): LoopName {
+  switch (cls) {
+    case 'moto':
+      return 'engine_moto';
+    case 'van':
+    case 'truck':
+      return 'engine_heavy';
+    case 'vtol':
+      return 'vtol';
+    case 'drone':
+      return 'drone';
+    default:
+      return 'engine_car';
+  }
+}
+
+/** Bruit de pas selon le revêtement. */
+function stepSfx(m: number): SfxName {
+  const d = MATERIALS[m];
+  if (!d) return 'footstep_concrete';
+  switch (d.pattern) {
+    case Pattern.CARPET:
+    case Pattern.CLOTH:
+      return 'footstep_carpet';
+    case Pattern.PLANK:
+    case Pattern.PARQUET:
+    case Pattern.SLATS:
+      return 'footstep_wood';
+    case Pattern.METAL:
+    case Pattern.METAL_PANEL:
+    case Pattern.GRATE:
+    case Pattern.HEX:
+    case Pattern.CORRUGATED:
+    case Pattern.SOLAR:
+      return 'footstep_metal';
+    case Pattern.MARBLE:
+    case Pattern.ASHLAR:
+    case Pattern.FLAGSTONE:
+    case Pattern.COBBLE:
+    case Pattern.CHECKER:
+      return 'footstep_stone';
+    default:
+      return 'footstep_concrete';
   }
 }

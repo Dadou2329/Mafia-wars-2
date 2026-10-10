@@ -80,7 +80,7 @@ const SHOTS: Record<GunBank, ShotSpec> = {
     peak: 0.9,
   },
   rail: {
-    dur: 1.6,
+    dur: 1.4,
     crackHp: 3000, crackTau: 0.003, crackGain: 3.2,
     bodyLp0: 6000, bodyLp1: 1200, bodySweep: 0.06, bodyQ: 1.4, bodyTau: 0.024, bodyGain: 2.4,
     boomF: 200, boomTau: 0.07, boomGain: 2.0,
@@ -272,6 +272,7 @@ function* renderShot(fs: number, rng: Rng, S: ShotSpec): Generator<undefined, Fl
       out[i0 + i] += y * e * (i < aN ? i / aN : 1);
       e *= k;
     }
+    yield;
   }
   const bp = new Biquad();
   for (const c of S.clicks ?? []) {
@@ -299,6 +300,7 @@ function* renderShot(fs: number, rng: Rng, S: ShotSpec): Generator<undefined, Fl
       for (const m of bank) y += m.r.process(exc) * m.a;
       out[i0 + i] += y * rg.gain * 3;
     }
+    yield;
   }
   for (const wh of S.whines ?? []) {
     const i0 = Math.floor(wh.at * fs);
@@ -317,6 +319,7 @@ function* renderShot(fs: number, rng: Rng, S: ShotSpec): Generator<undefined, Fl
       const r = 1 - (u - 0.15) / 0.85;
       const env = u < 0.15 ? u / 0.15 : r * Math.sqrt(r);
       out[i0 + i] += Math.sin(TWO_PI * ph) * wh.gain * env;
+      if ((i & YIELD_MASK) === YIELD_MASK) yield;
     }
   }
   dcBlock(out, fs, 20);

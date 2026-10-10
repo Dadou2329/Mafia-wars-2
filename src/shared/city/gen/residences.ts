@@ -139,10 +139,10 @@ function buildHideout(ctx: GenContext, def: BuildingDef): BuildingInfo {
   const tx = apt.x0 + 8;
   const tz = apt.z1 - 6;
   fu.p('LAPTOP_TABLE', tx, tz, Math.PI, 0, true);
-  fu.p('CHAIR_PLASTIC', tx, tz + 3, Math.PI, 0, true);
+  fu.p('CHAIR_PLASTIC', tx, tz - 3, 0, 0, true);
   fu.mark('desk', tx, tz, 0);
   fu.mark('deskSeat', tx, tz - 3.5);
-  fu.wall(apt, 'PORTRAIT_BOSS', 'left', apt.z0 + 10, 7);
+  fu.wall(apt, 'PORTRAIT_BOSS', 'left', apt.z0 + 10, 7, boss === 'dadou' ? 1 : 2);
   fu.wall(apt, 'NEON_ART', 'back', acx + 6, 8, pal.neonVariant);
   fu.p('TRASH_PILE', apt.x1 - 4, apt.z1 - 3, 0, 0, true);
   fu.lights(apt, 'BARE_BULB', 12);
@@ -220,7 +220,7 @@ function buildGarage(ctx: GenContext, def: BuildingDef): BuildingInfo {
   rooms.push(bay);
   fu.floor(bay.x0, bay.z0, bay.x1, bay.z1, M.CONCRETE_DARK);
   fu.p('CAR_LIFT', bay.x0 + 12, bay.z1 - 12, 0, 0, true);
-  fu.p('CAR_PARKED', bay.x0 + 12, bay.z1 - 12, 0.05, boss === 'dadou' ? 1 : 2, true, g0.floorTop + 2);
+  fu.p('CAR_PARKED', bay.x0 + 12, bay.z1 - 12, 0.05, boss === 'dadou' ? 1 : 2, true, g0.floorTop + 1.2);
   fu.lineWall(bay, 'TIRE_STACK', 'left', 3, 4);
   fu.againstWall(bay, 'WORKBENCH', 'back', bay.x0 + 26);
   fu.wall(bay, 'TOOL_WALL', 'back', bay.x0 + 34, 4);
@@ -236,7 +236,7 @@ function buildGarage(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.mark('desk', ocx, (off.z0 + off.z1) / 2, 0);
   fu.mark('deskSeat', ocx, off.z0 + 3);
   fu.wall(off, 'SCREEN_WALL', 'right', (off.z0 + off.z1) / 2, 3);
-  fu.wall(off, 'PORTRAIT_BOSS', 'back', ocx - 3, 7);
+  fu.wall(off, 'PORTRAIT_BOSS', 'back', ocx - 3, 7, boss === 'dadou' ? 1 : 2);
   fu.lights(off, 'PENDANT_LIGHT', 10);
   // ÉTAGE : salle commune (canapés, télé, cuisine, couchettes) et armurerie
   const l1 = floors[1];
@@ -246,7 +246,7 @@ function buildGarage(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.reserve(6, partZ - 6, 15, partZ + 6);
   fu.floor(lounge.x0 + 4, lounge.z0 + 4, lounge.x0 + 24, lounge.z0 + 16, pal.carpet);
   fu.p('SOFA', lounge.x0 + 14, lounge.z0 + 13, Math.PI, pal.sofa);
-  fu.p('COFFEE_TABLE', lounge.x0 + 14, lounge.z0 + 9, 0);
+  fu.p('COFFEE_TABLE', lounge.x0 + 14, lounge.z0 + 9, 0, 2);
   fu.wall(lounge, 'TV_WALL', 'front', lounge.x0 + 14, 6);
   fu.lineWall(lounge, 'BUNK_BED', 'right', 6, 3);
   fu.againstWall(lounge, 'KITCHEN_COUNTER', 'back', lounge.x0 + 30);
@@ -359,7 +359,7 @@ function buildLoft(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.p('BOSS_CHAIR', dx, dz + 3.5, Math.PI, 0, true);
   fu.mark('desk', dx, dz, Math.PI);
   fu.mark('deskSeat', dx, dz + 4);
-  fu.wall(loft, 'PORTRAIT_BOSS', 'right', loft.z0 + 16, 7);
+  fu.wall(loft, 'PORTRAIT_BOSS', 'right', loft.z0 + 16, 7, boss === 'dadou' ? 1 : 2);
   fu.p('BED', loft.x1 - 8, loft.z1 - 5, Math.PI, pal.sofa);
   fu.f.fill(loft.x1 - 18, l1.floorTop, loft.z1 - 12, loft.x1 - 17, l1.floorTop + 9, loft.z1, M.GLASS_CLEAR);
   fu.p('AQUARIUM', loft.x0 + 30, loft.z1 - 2, Math.PI);
@@ -369,7 +369,7 @@ function buildLoft(ctx: GenContext, def: BuildingDef): BuildingInfo {
   rooms.push(dress);
   fu.floor(dress.x0, dress.z0, dress.x1, dress.z1, M.MARBLE_BLACK);
   fu.againstWall(dress, 'BATHTUB', 'back', dress.x0 + 6);
-  fu.againstWall(dress, 'SINK', 'left', dress.z0 + 4);
+  fu.againstWall(dress, 'SINK', 'left', dress.z0 + 4, 1);
   fu.againstWall(dress, 'WARDROBE', 'right', dress.z0 + 6);
   fu.lights(dress, 'CEILING_LIGHT', 10);
   for (const r of rooms) finishWalls(f, floors[r.floor], r.x0, r.z0, r.x1, r.z1, r.kind === 'armory' ? M.CONCRETE_DARK : M.BRICK_RED, 0);
@@ -626,7 +626,7 @@ function penthouseRooms(
   fu.floor(ix0 + 6, iz0 + 4, ix0 + 30, cmdZ - 3, pal.carpet);
   fu.p('SOFA_LUXE', ix0 + 18, iz0 + 6, 0, pal.sofa);
   fu.p('SOFA_LUXE', ix0 + 8, iz0 + 12, HALF_PI, pal.sofa);
-  fu.p('COFFEE_TABLE', ix0 + 18, iz0 + 11, 0);
+  fu.p('COFFEE_TABLE', ix0 + 18, iz0 + 11, 0, 1);
   fu.p('GRAND_PIANO', ix1 - 8, iz0 + 7, -0.5);
   fu.p('BAR_COUNTER', ix1 - 4, cmdZ - 4, -HALF_PI, pal.neonVariant);
   fu.p('BAR_STOOL', ix1 - 8, cmdZ - 6, HALF_PI);
@@ -645,7 +645,7 @@ function penthouseRooms(
   fu.mark('desk', hx, hz, 0);
   fu.mark('deskSeat', hx, hz - 6);
   fu.wall(cmd, 'SCREEN_WALL', 'back', hx, 3);
-  fu.wall(cmd, 'PORTRAIT_BOSS', 'left', hz, 7);
+  fu.wall(cmd, 'PORTRAIT_BOSS', 'left', hz, 7, pal.sofa);
   fu.p('WEAPON_RACK', cmd.x1 - 2, hz, -HALF_PI, 0, true);
   fu.mark('armory', cmd.x1 - 5, hz);
   fu.lights(cmd, 'CEILING_LIGHT', 12);
@@ -734,7 +734,7 @@ function towerRooms(
   fu.floor(ix0 + 2, iz0 + 2, ix1 - 2, iz0 + 18, pal.carpet);
   fu.p('DESK_BOSS', hx, iz0 + 8, 0);
   fu.p('BOSS_CHAIR', hx, iz0 + 4.5, 0);
-  f.prop('PORTRAIT_BOSS', hx, p2.floorTop + 6, iz1 - 0.4, Math.PI, 0);
+  f.prop('PORTRAIT_BOSS', hx, p2.floorTop + 6, iz1 - 0.4, Math.PI, pal.sofa);
   fu.p('SOFA_LUXE', ix0 + 6, iz0 + 14, HALF_PI, pal.sofa);
   fu.p('SOFA_LUXE', ix1 - 6, iz0 + 14, -HALF_PI, pal.sofa);
   fu.p('TROPHY_CASE', ix0 + 3, iz1 - 4, HALF_PI);

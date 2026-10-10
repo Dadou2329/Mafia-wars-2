@@ -1,5 +1,5 @@
 // Chargement du monde : génération dans un worker (repli sur le fil principal si besoin).
-import type { BuildingInfo, LightSource, PropPlacement } from '../../shared/city/gen/context';
+import type { BuildingInfo, HoloInfo, LightSource, PropPlacement, ScreenInfo } from '../../shared/city/gen/context';
 import { generateCity } from '../../shared/city/gen/city';
 import { buildCityNav } from '../../shared/city/navBuild';
 import { NavGrid } from '../../shared/nav';
@@ -17,6 +17,9 @@ export interface WorldData {
   lights: LightSource[];
   buildings: BuildingInfo[];
   smokes: { x: number; y: number; z: number; big: boolean }[];
+  /** Écrans géants et hologrammes (contenu animé par le client). */
+  screens: ScreenInfo[];
+  holos: HoloInfo[];
   groundMap: Uint8Array;
   gw: number;
   gd: number;
@@ -73,6 +76,8 @@ export function loadWorld(): Promise<WorldData> {
           lights: m.lights,
           buildings: (m.buildings as BuildingInfo[]).sort((a, b) => a.id - b.id),
           smokes: m.smokes,
+          screens: m.screens ?? [],
+          holos: m.holos ?? [],
           groundMap: m.groundMap,
           gw: m.gw,
           gd: m.gd,
@@ -108,6 +113,8 @@ function loadOnMainThread(): WorldData {
     lights: city.ctx.lights,
     buildings: [...city.buildings].sort((a, b) => a.id - b.id),
     smokes: city.ctx.smokes,
+    screens: city.ctx.screens,
+    holos: city.ctx.holos,
     groundMap: city.groundMap,
     gw: city.gw,
     gd: city.gd,

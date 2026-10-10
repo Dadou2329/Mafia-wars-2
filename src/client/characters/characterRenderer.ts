@@ -417,10 +417,10 @@ export class CharacterRenderer {
         t.shR.r = -0.25;
       } else if (v.kind === CharKind.BOSS_EVEN || v.kind === CharKind.BARMAN) {
         // mains croisées dans le dos
-        t.shL.p = t.shR.p = 0.32;
-        t.elL = t.elR = 0.75;
-        t.shL.r = 0.16;
-        t.shR.r = -0.16;
+        t.shL.p = t.shR.p = 0.42;
+        t.elL = t.elR = 1.05;
+        t.shL.r = -0.24;
+        t.shR.r = 0.24;
       }
     }
     // arme longue hors visée : posée sur l'épaule droite, canon vers le haut et l'arrière

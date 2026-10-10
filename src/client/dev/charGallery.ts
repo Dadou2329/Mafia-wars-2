@@ -1,7 +1,10 @@
 // Galerie des personnages (développement, route ?chars) : tenues, poses et armes de New York 2085.
 //
-// ?chars&scene=lineup|bosses|mafia|gangs|police|civ|weapons|turrets · &pose=walk|run|aim|dead|side|back|sit|drive
-// · &night (néons de nuit). API de capture : window.__viewer (scene, pose, look, render, labels).
+// ?chars&scene=lineup|bosses|mafia|gangs|police|civ|weapons|turrets · &row=N (une seule rangée)
+// · &only=N (un seul personnage) · &pose=walk|run|aim|fire|dead|side|back|sit|drive · &night (néons de
+// nuit) · &muzzle (repères rouges sur les bouches de canon, vérifie muzzleOf). Un personnage
+// précis : ?chars&scene=one&kind=4&faction=0&look=401&gang=6&weapon=1. API de capture :
+// window.__viewer (scene, pose, look, night, labels, render).
 
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
@@ -189,6 +192,26 @@ export function startCharGallery(root: HTMLElement): void {
         1.3,
       ),
     ],
+    one: () => {
+      const n = (k: string, d: number) => (params.has(k) ? Number(params.get(k)) : d);
+      const kinds = ['Dadou', 'Even', 'Gangster', 'Lieutenant', 'Voyou', 'NYPD', 'Civil', 'Civile', 'Rabatteur', 'Tourelle'];
+      const kind = n('kind', CharKind.CIVILIAN) as CharKind;
+      return [
+        row(
+          [-1, 0, 1].map(
+            (o) =>
+              [`${kinds[kind] ?? kind} n° ${n('look', 1) + o}`, kind, n('faction', 0), { look: n('look', 1) + o, gang: n('gang', 0), weapon: n('weapon', Weapon.FISTS) as Weapon }] as [
+                string,
+                CharKind,
+                number,
+                Partial<CharView>,
+              ],
+          ),
+          0,
+          1.1,
+        ),
+      ];
+    },
     turrets: () => [
       row(
         [
@@ -239,9 +262,28 @@ export function startCharGallery(root: HTMLElement): void {
     }
     const w = maxX - minX + 1.1;
     const depth = -minZ;
-    const dist = Math.max(onlySel >= 0 ? 2.3 : 3.2, (w / 2 / Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 1.02) + depth * 0.5;
-    camera.position.set((minX + maxX) / 2, 1.25 + depth * 0.3, dist);
-    camera.lookAt((minX + maxX) / 2, 0.95, -depth * 0.5);
+    const dist = Math.max(onlySel >= 0 ? 2.3 : 3.2, (w / 2 / Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 1.02) + depth * 0.35;
+    camera.position.set((minX + maxX) / 2, 1.25 + depth * 0.75, dist);
+    camera.lookAt((minX + maxX) / 2, 0.85, -depth * 0.42);
+    camera.updateMatrixWorld();
+  };
+
+  // repères des bouches de canon (origine des traçantes)
+  const markers: THREE.Mesh[] = [];
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0xff2020, depthTest: false });
+  const showMuzzles = params.has('muzzle');
+  const drawMuzzles = () => {
+    if (!showMuzzles) return;
+    entries.forEach((e, i) => {
+      if (!markers[i]) {
+        markers[i] = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), markerMat);
+        markers[i].renderOrder = 10;
+        scene.add(markers[i]);
+      }
+      const m = cr.muzzleOf(e.view.id);
+      markers[i].visible = !!m;
+      if (m) markers[i].position.copy(m);
+    });
   };
 
   const labelBox = document.createElement('div');
@@ -276,6 +318,7 @@ export function startCharGallery(root: HTMLElement): void {
     look(px: number, py: number, pz: number, tx: number, ty: number, tz: number) {
       camera.position.set(px, py, pz);
       camera.lookAt(tx, ty, tz);
+      camera.updateMatrixWorld();
     },
     pose(m: string) {
       mode = m;
@@ -291,6 +334,7 @@ export function startCharGallery(root: HTMLElement): void {
       // simule quelques images pour stabiliser l'animation
       const views = entries.map((e) => e.view);
       for (let i = 0; i < 40; i++) cr.update(views, camera, time + i * 0.016, 0.016);
+      drawMuzzles();
       renderer.render(scene, camera);
       drawLabels();
       return { ...renderer.info.render, instances: cr.stats.instances };
