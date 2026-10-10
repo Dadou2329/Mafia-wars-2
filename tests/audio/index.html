@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audio Test Bench</title>
+  <!--
+    Audition page for src/client/audio (procedural Web Audio engine).
+    Run `npm run dev:client` and open http://localhost:5173/tests/audio/index.html
+  -->
+  <style>
+    :root { --bg: #f4ecd8; --ink: #2b2118; --muted: #7a6a55; --line: #c9b896; --accent: #7b2d26; --btn: #fffaf0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #1d1915; --ink: #eadfc8; --muted: #a8977c; --line: #4a3f33; --accent: #d9826f; --btn: #2a241e; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink); font: 14px/1.4 Georgia, 'Times New Roman', serif; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+    p.note { margin: 0 0 12px; color: var(--muted); }
+    .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--btn); color: var(--ink); cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    label { display: inline-flex; align-items: center; gap: 6px; margin: 2px 14px 2px 0; }
+    input[type=range] { width: 140px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    #stats { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>MAFIA WARS — banc d'essai audio</h1>
+  <p class="note">Everything is synthesised live with the Web Audio API. Click anywhere to unlock audio.</p>
+  <div class="row"><button id="unlock">Unlock audio</button><span id="stats">locked</span></div>
+
+  <h2>Volumes</h2>
+  <div class="row" id="volumes"></div>
+
+  <h2>Position (listener at origin, facing −Z)</h2>
+  <div class="row">
+    <label><input type="checkbox" id="positional" checked /> positional</label>
+    <label>distance <input type="range" id="dist" min="0" max="200" value="8" /> <span id="distV">8 m</span></label>
+    <label>azimuth <input type="range" id="azi" min="-180" max="180" value="30" /> <span id="aziV">30°</span></label>
+    <label><input type="checkbox" id="sfxIndoor" /> sound indoors</label>
+  </div>
+
+  <h2>Sound effects</h2>
+  <div class="grid" id="sfx"></div>
+
+  <h2>Music</h2>
+  <div class="grid" id="music"></div>
+
+  <h2>Ambience</h2>
+  <div class="row" id="amb"></div>
+
+  <h2>Big Ben</h2>
+  <div class="row">
+    <label>hour <input type="number" id="hour" min="1" max="12" value="3" style="width:56px" /></label>
+    <label>quarter <select id="quarter"><option value="4">full hour</option><option value="1">quarter past</option><option value="2">half past</option><option value="3">quarter to</option></select></label>
+    <button id="chime">Ring</button>
+    <button id="chimeStop">Stop</button>
+  </div>
+
+  <script type="module">
+    import { audio, SFX_NAMES } from '/src/client/audio/index.ts';
+    const $ = (id) => document.getElementById(id);
+    const unlock = () => audio.unlock();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    $('unlock').onclick = unlock;
+
+    const vols = { master: 0.9, music: 0.7, sfx: 1, ambience: 0.8 };
+    for (const k of Object.keys(vols)) {
+      const l = document.createElement('label');
+      l.innerHTML = `${k} <input type="range" min="0" max="1" step="0.01" value="${vols[k]}" />`;
+      l.querySelector('input').oninput = (e) => { vols[k] = +e.target.value; audio.setVolumes(vols); };
+      $('volumes').append(l);
+    }
+    audio.setVolumes(vols);
+
+    const pos = () => {
+      const d = +$('dist').value, a = (+$('azi').value * Math.PI) / 180;
+      return { x: Math.sin(a) * d, y: 1.5, z: -Math.cos(a) * d };
+    };
+    $('dist').oninput = () => { $('distV').textContent = `${$('dist').value} m`; };
+    $('azi').oninput = () => { $('aziV').textContent = `${$('azi').value}°`; };
+
+    for (const name of SFX_NAMES) {
+      const b = document.createElement('button');
+      b.textContent = name;
+      b.onclick = () => audio.play(name, $('positional').checked ? { pos: pos(), indoor: $('sfxIndoor').checked } : {});
+      $('sfx').append(b);
+    }
+
+    const tracks = ['menu', 'game', 'tension', 'victory', 'defeat', 'none'];
+    for (const t of tracks) {
+      const b = document.createElement('button');
+      b.textContent = t;
+      b.onclick = () => audio.playMusic(t);
+      $('music').append(b);
+    }
+
+    const amb = { night: 0.7, nearWater: 0.3, combat: 0, crowd: 0.4, rain: 0, indoor: false };
+    for (const k of ['night', 'nearWater', 'combat', 'crowd', 'rain']) {
+      const l = document.createElement('label');
+      l.innerHTML = `${k} <input type="range" min="0" max="1" step="0.01" value="${amb[k]}" />`;
+      l.querySelector('input').oninput = (e) => { amb[k] = +e.target.value; };
+      $('amb').append(l);
+    }
+    const ind = document.createElement('label');
+    ind.innerHTML = '<input type="checkbox" /> listener indoors';
+    ind.querySelector('input').onchange = (e) => { amb.indoor = e.target.checked; };
+    $('amb').append(ind);
+    setInterval(() => audio.setAmbience(amb), 250);
+
+    $('chime').onclick = () => audio.bellChime(+$('hour').value, undefined, +$('quarter').value);
+    $('chimeStop').onclick = () => audio.stopChime();
+
+    let last = performance.now();
+    const frame = (now) => {
+      const dt = (now - last) / 1000; last = now;
+      audio.setListener({ x: 0, y: 1.6, z: 0 }, { x: 0, y: 0, z: -1 }, { x: 0, y: 1, z: 0 });
+      audio.update(dt);
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    setInterval(() => {
+      const s = audio.stats();
+      $('stats').textContent = `${s.state} · t=${s.time.toFixed(1)}s · voices ${s.voices} · music ${s.music} · events ${s.pendingEvents}${s.loopsPending ? ' · generating…' : ''}`;
+      for (const b of $('music').children) b.classList.toggle('on', b.textContent === s.music);
+    }, 250);
+  </script>
+</body>
+</html>

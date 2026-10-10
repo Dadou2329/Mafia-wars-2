@@ -1,0 +1,454 @@
+/* Thème victorien de MAFIA WARS : Dadou vs Even.
+   Laiton, cuir sombre, parchemin et encre ; rouge pour Dadou, bleu marine pour Even. */
+
+:root {
+  --ink: #1e1712;
+  --ink-soft: #3a2e24;
+  --night: #0d0a09;
+  --leather: #1d1512;
+  --leather-2: #2a1f19;
+  --leather-3: #3a2b22;
+  --parchment: #e8dbbb;
+  --parchment-2: #d6c49b;
+  --parchment-dark: #b9a272;
+  --brass: #c9a24a;
+  --brass-hi: #f0d488;
+  --brass-lo: #7a5f24;
+  --gold: #d4a640;
+  --dadou: #9e1b22;
+  --dadou-hi: #c8323a;
+  --dadou-lo: #5c0d12;
+  --even: #1d3461;
+  --even-hi: #3a62a8;
+  --even-lo: #0f1c38;
+  --silver: #c9d1dc;
+  --good: #6fae5b;
+  --bad: #d4544a;
+  --alert: #e8a23a;
+  --text: #efe4cc;
+  --text-dim: #b7a888;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  --font-title: 'Cinzel', 'Times New Roman', serif;
+  --font-deco: 'Cinzel Decorative', 'Cinzel', serif;
+  --font-body: 'EB Garamond', Georgia, 'Times New Roman', serif;
+  --font-news: 'UnifrakturMaguntia', 'Cinzel', serif;
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--night);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+canvas.game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.layer > * {
+  pointer-events: auto;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------------ titres */
+
+.title-xl,
+.title-l,
+.title-m,
+.title-s {
+  font-family: var(--font-title);
+  letter-spacing: 0.06em;
+  margin: 0;
+  color: var(--brass-hi);
+  text-shadow: 0 2px 0 #000, 0 0 18px rgba(212, 166, 64, 0.25);
+}
+
+.title-xl {
+  font-size: 46px;
+  font-weight: 900;
+}
+.title-l {
+  font-size: 32px;
+  font-weight: 800;
+}
+.title-m {
+  font-size: 22px;
+  font-weight: 700;
+}
+.title-s {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.divider {
+  height: 14px;
+  margin: 10px auto;
+  width: 70%;
+  background:
+    radial-gradient(circle at center, var(--brass) 0 3px, transparent 4px) center / 14px 14px no-repeat,
+    linear-gradient(90deg, transparent, var(--brass-lo) 20%, var(--brass) 50%, var(--brass-lo) 80%, transparent) center / 100% 1px no-repeat;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------------ panneaux */
+
+.panel {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.18)),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.012) 0 3px, rgba(0, 0, 0, 0.02) 3px 7px),
+    var(--leather);
+  border: 2px solid var(--brass-lo);
+  outline: 1px solid rgba(240, 212, 136, 0.25);
+  outline-offset: -6px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), inset 0 0 40px rgba(0, 0, 0, 0.6);
+  padding: 22px 26px;
+}
+
+.panel::before,
+.panel::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--brass);
+  pointer-events: none;
+}
+.panel::before {
+  top: -4px;
+  left: -4px;
+  border-right: none;
+  border-bottom: none;
+}
+.panel::after {
+  bottom: -4px;
+  right: -4px;
+  border-left: none;
+  border-top: none;
+}
+
+.parchment {
+  position: relative;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 20% 15%, rgba(255, 255, 255, 0.35), transparent 55%),
+    radial-gradient(ellipse at 85% 90%, rgba(120, 85, 40, 0.25), transparent 60%),
+    linear-gradient(180deg, var(--parchment), var(--parchment-2));
+  border-radius: 4px;
+  box-shadow: var(--shadow), inset 0 0 50px rgba(110, 75, 30, 0.35);
+  border: 1px solid #8a6f42;
+}
+
+.parchment h1,
+.parchment h2,
+.parchment h3 {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+/* ------------------------------------------------------------------ boutons */
+
+.btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.08em;
+  color: #2a1d0c;
+  padding: 11px 26px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f6dd94 0%, #d8b05a 45%, #a9822f 55%, #c9a24a 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 0 0 1px #4a3610,
+    0 4px 10px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.6);
+  transition: transform 0.08s ease, filter 0.12s ease, box-shadow 0.12s ease;
+  white-space: nowrap;
+}
+.btn:hover {
+  filter: brightness(1.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 0 0 1px #4a3610,
+    0 0 18px rgba(240, 200, 100, 0.45),
+    0 4px 10px rgba(0, 0, 0, 0.5);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled,
+.btn.disabled {
+  filter: grayscale(0.9) brightness(0.6);
+  cursor: not-allowed;
+}
+.btn.big {
+  font-size: 21px;
+  padding: 14px 34px;
+}
+.btn.small {
+  font-size: 13px;
+  padding: 6px 12px;
+}
+.btn.ghost {
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--brass-hi);
+  text-shadow: none;
+  box-shadow: inset 0 0 0 1px var(--brass-lo);
+}
+.btn.ghost:hover {
+  box-shadow: inset 0 0 0 1px var(--brass), 0 0 12px rgba(240, 200, 100, 0.25);
+}
+.btn.dadou {
+  color: #fff3dc;
+  text-shadow: 0 1px 0 #000;
+  background: linear-gradient(180deg, #d8424a 0%, #9e1b22 50%, #6e1016 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 200, 200, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--gold), 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+.btn.even {
+  color: #eef3fb;
+  text-shadow: 0 1px 0 #000;
+  background: linear-gradient(180deg, #4a72b8 0%, #1d3461 55%, #12224a 100%);
+  box-shadow: inset 0 1px 0 rgba(200, 220, 255, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--silver), 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+.btn.danger {
+  color: #fff;
+  background: linear-gradient(180deg, #c0443a, #7e1f18);
+  text-shadow: 0 1px 0 #000;
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+  min-width: 300px;
+}
+
+/* ------------------------------------------------------------------ formulaires */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+.field label,
+.label {
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+input[type='text'],
+input[type='number'],
+select {
+  font-family: var(--font-body);
+  font-size: 18px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  border: 1px solid var(--brass-lo);
+  border-radius: 3px;
+  outline: none;
+}
+input[type='text']:focus,
+select:focus {
+  border-color: var(--brass);
+  box-shadow: 0 0 10px rgba(240, 200, 100, 0.3);
+}
+input.code-input {
+  font-family: var(--font-title);
+  font-size: 34px;
+  letter-spacing: 0.4em;
+  text-align: center;
+  text-transform: uppercase;
+  width: 240px;
+}
+input[type='range'] {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(90deg, var(--brass-lo), var(--brass));
+  border-radius: 3px;
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff2c4, var(--brass) 55%, var(--brass-lo));
+  box-shadow: 0 0 0 2px #2a1d0c;
+  cursor: pointer;
+}
+input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--brass);
+  border: 2px solid #2a1d0c;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.toggle input {
+  display: none;
+}
+.toggle .knob {
+  width: 46px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--brass-lo);
+  position: relative;
+  transition: background 0.15s;
+}
+.toggle .knob::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s, background 0.15s;
+}
+.toggle input:checked + .knob {
+  background: rgba(201, 162, 74, 0.35);
+}
+.toggle input:checked + .knob::after {
+  transform: translateX(22px);
+  background: var(--brass-hi);
+}
+
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 13px;
+  color: #2a1d0c;
+  background: linear-gradient(180deg, #f3e6c4, #cdb98c);
+  border-radius: 4px;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 0 1px #6a5530, 0 2px 4px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ défilement */
+
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--brass-lo) transparent;
+}
+.scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--brass-lo);
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------------ écrans plein cadre */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--night);
+}
+.screen.backdrop {
+  background:
+    linear-gradient(180deg, rgba(5, 4, 4, 0.15), rgba(5, 4, 4, 0.55)),
+    url('/brand/menu-backdrop.jpg') center / cover no-repeat,
+    var(--night);
+}
+.screen.dim-bg {
+  background: rgba(6, 4, 3, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.fade-in {
+  animation: fadeIn 0.35s ease both;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* couleurs de faction utilitaires */
+.c-dadou {
+  color: var(--dadou-hi);
+}
+.c-even {
+  color: var(--even-hi);
+}
+.c-good {
+  color: var(--good);
+}
+.c-bad {
+  color: var(--bad);
+}
+.c-gold {
+  color: var(--brass-hi);
+}

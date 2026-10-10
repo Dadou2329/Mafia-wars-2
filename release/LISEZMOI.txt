@@ -1,0 +1,24 @@
+MAFIA WARS : Dadou vs Even — version Windows
+=============================================
+
+LANCER LE JEU
+1. Décompressez l'archive (clic droit > « Extraire tout… »).
+2. Double-cliquez sur MafiaWars.exe.
+   - Windows peut afficher « Windows a protégé votre ordinateur » : le programme n'est pas
+     signé. Cliquez sur « Informations complémentaires » puis « Exécuter quand même ».
+   - Le pare-feu peut demander l'autorisation : acceptez pour les « réseaux privés »
+     (nécessaire pour jouer à deux sur le même réseau).
+3. Une fenêtre noire (le serveur du jeu) s'ouvre, puis le jeu s'ouvre dans votre navigateur.
+   Gardez la fenêtre noire ouverte pendant toute la partie : la fermer arrête le jeu.
+
+JOUER À DEUX
+- Sur le même réseau (même box, Wi-Fi ou câble) : un seul joueur lance MafiaWars.exe,
+  clique sur « Créer une partie », puis « Copier le lien d'invitation » et envoie ce lien
+  à son adversaire, qui l'ouvre simplement dans son navigateur (rien à installer).
+- Par Internet : voir le README du projet (redirection du port 3000 ou hébergement).
+
+BON À SAVOIR
+- Navigateur conseillé : Chrome, Edge ou Firefox récent. Une carte graphique est
+  recommandée ; sur un petit ordinateur, choisissez la qualité « Basse » dans les paramètres.
+- Si le port 3000 est déjà pris, lancez le jeu avec un autre port depuis une invite de
+  commandes :  set PORT=3001 && MafiaWars.exe
