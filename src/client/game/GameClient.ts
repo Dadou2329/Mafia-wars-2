@@ -920,7 +920,9 @@ export class GameClient {
         const sp = Math.hypot(v.vx, v.vz);
         if (!riding.has(v.id) && !trucks.has(v.id) && def.cls !== 'drone' && sp < 0.5) continue;
         if (Math.hypot(v.x - lp.x, v.z - lp.z) > 60) continue;
-        src.push({ key: `v${v.id}`, loop: engineLoop(def.cls), x: v.x, y: v.y + 0.6, z: v.z, pitch: rpm(sp, def.speed), volume: 0.7 });
+        // croiseur du NYPD en intervention : la sirène plutôt que le moteur
+        const siren = def.key === 'police' && sp > 1 && !riding.has(v.id);
+        src.push({ key: `v${v.id}`, loop: siren ? 'siren' : engineLoop(def.cls), x: v.x, y: v.y + (siren ? 1.6 : 0.6), z: v.z, pitch: siren ? 1 : rpm(sp, def.speed), volume: siren ? 0.75 : 0.7 });
       }
       this.traffic.loopSources(lp.x, lp.y, lp.z, src);
       if (this.priv.wanted > 0) {

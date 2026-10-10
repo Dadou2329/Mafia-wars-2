@@ -40,8 +40,8 @@ void main() {
   vA = on * open * near * (0.35 + 0.35 * fract(aSeed * 3.1));
   vT = position.y;
   // les gouttes accrochent la lumière : ciel le jour, néons et lampadaires la nuit
-  vec3 base = mix(vec3(0.62, 0.66, 0.72), vec3(0.32, 0.36, 0.46), uNight);
-  vCol = base + lampColorAt(head) * clamp(L.y * 1.8, 0.0, 1.0) * 0.8 * uNight;
+  vec3 dropCol = mix(vec3(0.62, 0.66, 0.72), vec3(0.32, 0.36, 0.46), uNight);
+  vCol = dropCol + lampColorAt(head) * clamp(L.y * 1.8, 0.0, 1.0) * 0.8 * uNight;
   gl_Position = projectionMatrix * viewMatrix * vec4(pt, 1.0);
   if (vA < 0.002) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }

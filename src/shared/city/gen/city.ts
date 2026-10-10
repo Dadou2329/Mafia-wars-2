@@ -438,7 +438,10 @@ function fountain(ctx: GenContext, xm: number, zm: number): void {
       const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
       if (d > 13) continue;
       if (d > 11.5) w.fill(x, GROUND_VY + 1, z, x + 1, GROUND_VY + 3, z + 1, M.LIMESTONE);
-      else w.set(x, GROUND_VY, z, M.SIDEWALK_DARK);
+      else {
+        w.set(x, GROUND_VY, z, M.SIDEWALK_DARK);
+        if (d > 3) w.set(x, GROUND_VY + 1, z, M.FOUNTAIN_WATER);
+      }
     }
   ctx.prop('FOUNTAIN_ANGEL', xm, 0.25, zm, Math.PI, 0);
   ctx.light(xm, 1.5, zm, 0.6, 7, 0xa8e0ff);
@@ -605,7 +608,9 @@ function streetFurniture(ctx: GenContext, gm: Uint8Array, sx: number, sz: number
     let k: (typeof kinds)[number] = rng.pick(kinds);
     if (k === 'DUMPSTER' && d !== 'brooklyn' && d !== 'queens' && d !== 'chinatown') k = 'TRASH_CAN';
     if (k === 'FOOD_CART' && d !== 'midtown' && d !== 'wallstreet' && d !== 'chinatown') k = 'HYDRANT';
-    const yaw = Math.atan2(nx, nz);
+    // +Z du modèle vers la chaussée ; les objets qu'on utilise à pied regardent le trottoir
+    const faceWalk = k === 'VENDING_MACHINE' || k === 'NEWS_STAND' || k === 'MAILBOX' || k === 'HOLO_KIOSK' || k === 'HOLO_BOOTH' || k === 'CHARGING_POST';
+    const yaw = Math.atan2(nx, nz) + (faceWalk ? Math.PI : 0);
     ctx.prop(k, x, 0.25, z, yaw, rng.int(0, 7));
     placed.push([x, z]);
   }
@@ -616,8 +621,29 @@ function streetFurniture(ctx: GenContext, gm: Uint8Array, sx: number, sz: number
     const x = rng.range(r.rect[0] + 1.5, r.rect[2] - 1.5);
     const z = rng.range(r.rect[1] + 1.5, r.rect[3] - 1.5);
     if (g(x, z) !== GM.ROAD || isWater(x, z)) continue;
-    ctx.prop('STEAM_VENT', x, 0, z, 0, 0);
+    ctx.prop('STEAM_VENT', x, 0, z, 0, 1);
     ctx.smokes.push({ x, y: 0.1, z, big: rng.chance(0.25) });
+  }
+  // cheminées de vapeur rayées orange et blanc (Midtown, Wall Street), au bord du trottoir
+  for (let i = 0, n = 0; i < 400 && n < 12; i++) {
+    const x = rng.range(4, WORLD_W - 6);
+    const z = rng.range(8, WORLD_D - 2);
+    const d = districtAt(x, z).id;
+    if (d !== 'midtown' && d !== 'wallstreet' && d !== 'chinatown') continue;
+    if (g(x, z) !== GM.SIDEWALK || !free(x, z, 1) || !far(x, z, 4)) continue;
+    let curb = false;
+    for (const [ox, oz] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ])
+      if (g(x + ox, z + oz) === GM.CURB) curb = true;
+    if (!curb) continue;
+    ctx.prop('STEAM_VENT', x, 0.25, z, rng.range(0, 6), 0);
+    ctx.smokes.push({ x, y: 1.95, z, big: rng.chance(0.4) });
+    placed.push([x, z]);
+    n++;
   }
   // ---------------------------------------------- arbres d'alignement (Harlem, Brooklyn, Queens, Chinatown)
   for (let i = 0; i < 160; i++) {
@@ -651,9 +677,9 @@ function streetFurniture(ctx: GenContext, gm: Uint8Array, sx: number, sz: number
     const ox = door.out.x - door.x;
     const oz = door.out.z - door.z;
     const l = Math.hypot(ox, oz) || 1;
-    const px = door.x + (ox / l) * 0.6 + (oz / l) * 5;
-    const pz = door.z + (oz / l) * 0.6 - (ox / l) * 5;
-    ctx.prop('NEON_SIGN', px, 4.2, pz, Math.atan2(oz, ox), rng.int(0, 7), -1);
+    const px = door.x + (ox / l) * 0.75 + (oz / l) * 5;
+    const pz = door.z + (oz / l) * 0.75 - (ox / l) * 5;
+    ctx.prop('NEON_SIGN', px, 4.2, pz, Math.atan2(ox, oz), rng.int(0, 7), -1);
   }
 }
 

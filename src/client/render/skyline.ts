@@ -142,9 +142,11 @@ void main() {
   vec3 lightC = mix(vec3(1.0, 0.97, 0.92), uSkyAmb * 1.3 + vec3(0.03), uNight);
   vec3 c = uColor * lightC * shade;
   // projecteurs au pied : la statue est éclairée par en dessous la nuit
-  c += uColor * vec3(0.55, 0.9, 0.85) * uNight * (0.35 + 0.65 * exp(-max(0.0, vW.y - 20.0) * 0.03)) * 0.55 * uUp;
-  c += uGlow * vec3(1.0, 0.75, 0.3) * 2.2;
-  c = farFog(c, vW, 0.5);
+  c += uColor * vec3(0.55, 0.95, 0.9) * uNight * (0.45 + 0.55 * exp(-max(0.0, vW.y - 20.0) * 0.025)) * 1.3 * uUp;
+  c += uGlow * vec3(1.0, 0.75, 0.3) * 3.0;
+  c = farFog(c, vW, uUp > 0.5 ? 0.3 : 0.5);
+  // la flamme perce le brouillard
+  c += uGlow * vec3(1.0, 0.7, 0.25) * 0.8;
   gl_FragColor = vec4(c, 1.0);
 }
 `;
@@ -355,7 +357,26 @@ function buildStatue(): { group: THREE.Group; flame: THREE.ShaderMaterial } {
   // bras droit levé, flambeau
   add(new THREE.CylinderGeometry(0.7, 0.9, 10, 8), copper, 1.6, 61.5, 0, 0, -0.18);
   add(new THREE.CylinderGeometry(0.75, 0.45, 2.2, 8), mk(0xb89a50), 2.55, 67.4, 0);
-  add(new THREE.SphereGeometry(0.95, 10, 8), flame, 2.6, 69.1, 0);
+  add(new THREE.SphereGeometry(1.3, 10, 8), flame, 2.6, 69.3, 0);
+  // halo de la flamme, visible de loin
+  const haloMat = new THREE.ShaderMaterial({
+    vertexShader: STATUE_VERT,
+    fragmentShader: /* glsl */ `
+varying vec3 vW;
+varying vec3 vN;
+void main() {
+  float f = pow(max(0.0, dot(normalize(vN), normalize(cameraPosition - vW))), 2.0);
+  gl_FragColor = vec4(vec3(1.0, 0.62, 0.22) * f * 0.55, 1.0);
+}`,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  haloMat.toneMapped = false;
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 10), haloMat);
+  halo.position.set(2.6, 69.3, 0);
+  halo.frustumCulled = false;
+  g.add(halo);
   // bras gauche et tablette
   add(new THREE.BoxGeometry(1.2, 4.2, 2.6), copper, -2.7, 49.5, 0.6, 0.2, 0.1);
   return { group: g, flame };

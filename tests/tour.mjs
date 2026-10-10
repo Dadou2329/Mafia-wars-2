@@ -11,7 +11,7 @@ const URL = process.env.URL ?? 'http://localhost:3000/';
 const SERVER = process.env.SERVER ?? new globalThis.URL(URL).origin;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// x, z, (y), yaw (vers où regarder), pitch, heure (0..1), pluie, vue (1re ou 3e personne)
+// x, z, (y), yaw (vers où regarder), pitch, heure (0..1), pluie, vue (fp : 1re personne), tirs (fire)
 const SHOTS = (process.env.SHOTS ? JSON.parse(process.env.SHOTS) : null) ?? [
   { name: 'one-times-square', x: 98, z: 110, yaw: 0.25, pitch: 0.38, t: 0.95, rain: 0 },
   { name: 'times-square-pluie', x: 92, z: 139, yaw: Math.PI, pitch: 0.3, t: 0.93, rain: 1 },
@@ -65,6 +65,21 @@ for (const s of SHOTS) {
     p.pitch = s.pitch ?? 0;
   }, s);
   await sleep(1500);
+  // tirs (verre destructible…)
+  for (let i = 0; i < (s.fire ?? 0); i++) {
+    await A.mouse.click(640, 360);
+    await sleep(900);
+  }
+  if (s.fire) await sleep(3000);
+  // on vise de nouveau (le recul des tirs relève l'arme) ; la pluie s'installe sans attendre
+  // (à une image par seconde, le fondu de la pluie prendrait trop longtemps)
+  await A.evaluate((s) => {
+    const gc = window.__app.game;
+    gc.player.yaw = s.yaw;
+    gc.player.pitch = s.pitch ?? 0;
+    if (typeof s.rain === 'number' && gc.rain) gc.rain.intensity = s.rain;
+  }, s);
+  await sleep(2500);
   await A.screenshot({ path: `${OUT}-${s.name}.png`, timeout: 120000 });
   console.log('capture', s.name);
 }

@@ -13,6 +13,7 @@ import type { Game } from './Game';
 import { otherSlot, slotFaction } from './Game';
 import type { Ent, Vec2 } from './types';
 import { spawnVehicle, vdef } from './vehicles';
+import { drive } from './autopilot';
 
 /** Bâtiments logistiques d'où partent les convois d'un parrain. */
 export const LOGISTICS: BuildingType[] = ['depot', 'factory', 'junkyard', 'brewery', 'nightmarket', 'garage'];
@@ -113,10 +114,7 @@ export function updateConvoys(g: Game, dt: number): void {
       continue;
     }
     const def = vdef(e);
-    // points trop proches (carrefours décalés sur la voie de droite) : on les saute
-    while (c.pts[c.i] && c.pts[c.i + 1] && Math.hypot(c.pts[c.i].x - e.x, c.pts[c.i].z - e.z) < 1.5) c.i++;
-    const target = c.pts[c.i];
-    if (!target || (!c.pts[c.i + 1] && Math.hypot(target.x - e.x, target.z - e.z) < 1.5)) {
+    if (drive(g, e, c, def.speed, dt)) {
       // arrivée
       s.convoys.delete(id);
       e.removeAt = g.time + 2;
@@ -127,56 +125,7 @@ export function updateConvoys(g: Game, dt: number): void {
         g.notify(c.owner, `Convoi arrivé à bon port : +${formatMoney(c.reward)} !`, 'money');
         g.notify(otherSlot(c.owner), `Le convoi ${c.owner === 'dadou' ? 'de Dadou' : 'd’Even'} est arrivé à destination.`, 'info');
       } else g.notify('all', `Le convoi blindé est arrivé ${aNom(c.dest)}.`, 'info');
-      continue;
     }
-    // ralentir avant les virages serrés (seulement à l'approche du carrefour)
-    const d0 = Math.hypot(target.x - e.x, target.z - e.z);
-    const nxt = c.pts[c.i + 1];
-    let speed = def.speed;
-    if (nxt && d0 < 8) {
-      const a1 = Math.atan2(target.x - e.x, target.z - e.z);
-      const a2 = Math.atan2(nxt.x - target.x, nxt.z - target.z);
-      let turn = Math.abs(a2 - a1);
-      if (turn > Math.PI) turn = Math.PI * 2 - turn;
-      speed *= 1 - Math.min(0.45, turn * 0.3);
-    }
-    // avance : la distance restante du pas se reporte sur les points suivants (pas d'arrêt à chaque nœud)
-    let left = speed * dt;
-    let hx = 0;
-    let hz = 0;
-    for (let guard = 0; left > 1e-3 && guard < 8; guard++) {
-      const t = c.pts[c.i];
-      if (!t) break;
-      const dx = t.x - e.x;
-      const dz = t.z - e.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 1e-3) {
-        if (!c.pts[c.i + 1]) break;
-        c.i++;
-        continue;
-      }
-      const step = Math.min(d, left);
-      e.x += (dx / d) * step;
-      e.z += (dz / d) * step;
-      hx = dx / d;
-      hz = dz / d;
-      left -= step;
-      if (step >= d - 1e-6) {
-        if (!c.pts[c.i + 1]) break;
-        c.i++;
-      }
-    }
-    if (hx !== 0 || hz !== 0) {
-      const want = Math.atan2(hx, hz);
-      let diff = want - e.yaw;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      e.yaw += diff * Math.min(1, dt * 4);
-      e.vx = hx * speed;
-      e.vz = hz * speed;
-    }
-    const y = g.w.nav.heightAt(e.x, e.z, e.y);
-    if (Number.isFinite(y)) e.y += (y - e.y) * Math.min(1, dt * 5);
   }
   // butins : le premier parrain sur place les empoche
   for (let i = s.loot.length - 1; i >= 0; i--) {

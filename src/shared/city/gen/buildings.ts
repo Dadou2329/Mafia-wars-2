@@ -576,7 +576,7 @@ function decorateFamily(
       // avant-toit de tuiles vertes
       const ry = roofTop + 4;
       for (let k = 0; k < 3; k++) f.fill(-1 - k, ry - k, -1 - k, f.W + 1 + k, ry - k + 1, 1, M.COPPER_GREEN);
-      if (spec.neon) f.prop('NEON_SIGN', f.W - 3, g0.ceil + 2, -1.6, Math.PI / 2, NEONS.indexOf(spec.neon) >= 0 ? NEONS.indexOf(spec.neon) : 2);
+      if (spec.neon) f.prop('NEON_SIGN', f.W - 3, g0.ceil + 2, -2.8, Math.PI, NEONS.indexOf(spec.neon) >= 0 ? NEONS.indexOf(spec.neon) : 2);
       break;
     }
     case 'theatre': {
@@ -587,7 +587,7 @@ function decorateFamily(
       f.fill(mx0, my, -7, mx0 + 28, my + 1, -6, M.LED_WARM);
       f.fill(mx0, my + 3, -7, mx0 + 28, my + 4, -6, M.LED_WARM);
       f.fill(mx0 + 1, my + 1, -7, mx0 + 27, my + 3, -6, M.SCREEN_TICKER);
-      f.prop('NEON_SIGN', f.W - 4, g0.ceil + 4, -1.6, Math.PI / 2, NEONS.indexOf(spec.neon ?? M.NEON_YELLOW));
+      f.prop('NEON_SIGN', f.W - 4, g0.ceil + 4, -2.8, Math.PI, NEONS.indexOf(spec.neon ?? M.NEON_YELLOW));
       band(f, walls, g0.ceil, st.trim);
       break;
     }

@@ -12,6 +12,7 @@ import { aNom, deNom, leNom } from '../../shared/french';
 import type { Game } from './Game';
 import { factionSlot, otherSlot, slotFaction } from './Game';
 import type { Ent, Vec2 } from './types';
+import { dispatchCruiser } from './police';
 
 export interface SecState {
   level: number;
@@ -100,6 +101,28 @@ export function setupSecurity(g: Game): void {
   }
 }
 
+/** Tour du parrain (palier 5) : des tourelles défendent le hall et l'étage du QG. */
+export function installHqTurrets(g: Game, bid: number): number {
+  const s = S(g);
+  let st = s.sec.get(bid);
+  if (!st) {
+    st = { level: 2, hackedUntil: 0, turrets: [], turretPts: [], respawnAt: 0, heistReadyAt: 0 };
+    s.sec.set(bid, st);
+  }
+  if (st.turretPts.length === 0) st.turretPts = turretPoints(g, bid);
+  let n = 0;
+  for (const p of st.turretPts) {
+    if (st.turrets.some((id) => {
+      const t = g.ents.get(id);
+      return !!t && t.alive && Math.hypot(t.x - p.x, t.z - p.z) < 0.5;
+    }))
+      continue;
+    st.turrets.push(spawnTurret(g, bid, p).id);
+    n++;
+  }
+  return n;
+}
+
 /** Le bâtiment change de propriétaire : ses tourelles aussi, et la sécurité est réinitialisée. */
 export function securityOnCapture(g: Game, bid: number, owner: number): void {
   const st = S(g).sec.get(bid);
@@ -180,7 +203,9 @@ export function heistAction(g: Game, slot: Slot, bid: number, by?: Ent): void {
 function dispatchPolice(g: Game, bid: number, target: Ent): void {
   const info = g.building(bid);
   const yard = g.precinctNear(info.center.x, info.center.z);
-  for (let i = 0; i < 4; i++) {
+  // un croiseur arrive par la rue, deux agents accourent à pied du commissariat
+  dispatchCruiser(g, info.doors[0].out.x, info.doors[0].out.z, target, 2);
+  for (let i = 0; i < 2; i++) {
     const p = yard.doors[0].out;
     const e = g.addEnt({ kind: CharKind.POLICE, role: 'police', faction: Faction.POLICE, x: p.x + g.rng.range(-2, 2), z: p.z + g.rng.range(-2, 2), hp: HP.police, weapon: Weapon.PISTOL, mode: 'patrol' });
     e.ai!.patrol = [info.doors[0].out, info.doors[0].in];
@@ -242,6 +267,28 @@ export function updateSecurity(g: Game, dt: number): void {
       g.notify(otherSlot(h.slot), `${MAFIA_NAME[h.slot]} a braqué ${leNom(def.name)} (${formatMoney(reward)}).`, 'bad');
       g.emitAll({ t: 'sound', s: 'heist_success', x: v.x, y: (v.y ?? 0) + 1, z: v.z });
       g.news(`BRAQUAGE SPECTACULAIRE ${aNom(def.name).toUpperCase()}`, `${formatMoney(reward)} se sont envolés en quelques minutes. Les enquêteurs du NYPD soupçonnent ${MAFIA_NAME[h.slot].toLowerCase()}.`);
+    }
+  }
+  // caméras (sauf sécurité piratée) : elles filment les parrains qui entrent sans y être chez eux
+  if (g.tick % 20 === 5) {
+    for (const [bid, st] of s.sec) {
+      if (g.time < st.hackedUntil) continue;
+      const owner = g.bstate.get(bid)!.owner;
+      const info = g.building(bid);
+      for (const slot of ['dadou', 'even'] as Slot[]) {
+        const f = g.factions[slot];
+        if (owner === f.faction) continue;
+        const boss = g.ents.get(f.bossId)!;
+        if (!boss.alive || !g.inBuildingArea(info, boss.x, boss.y, boss.z)) continue;
+        const name = BUILDINGS[bid].name;
+        const os = factionSlot(owner);
+        if (os) g.notify(os, `Caméras ${deNom(name)} : ${BOSS_NAME[slot]} est entré chez vous !`, 'alert', `cam-${bid}`, 45);
+        else {
+          // bâtiment protégé sans parrain : la société de sécurité prévient le NYPD
+          g.addHeat(slot, 0.1);
+          g.notify(slot, `Les caméras ${deNom(name)} vous filment : le NYPD est prévenu. Piratez le terminal pour les couper.`, 'alert', `cam-${bid}`, 40);
+        }
+      }
     }
   }
   // tourelles détruites : la société de sécurité les remplace au bout de 3 min

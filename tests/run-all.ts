@@ -201,6 +201,17 @@ section('Ascension : de la planque à la tour');
   check(`le loft exige ${needD} quartier contrôlé`, g.territories('dadou') >= needD ? D.tier === 3 : D.tier === 2, lastNotify('dadou')?.text);
 }
 
+// la tour (palier 5) : tourelles automatiques au QG (partie séparée, on force les paliers)
+{
+  const g5 = new Game(w, { timeLimit: 0, daytime: 'night', weather: 'clear', tips: false });
+  g5.takeOutbox();
+  const tower = RESIDENCES.even[4];
+  g5.factions.even.tier = 4;
+  g5.moveHq('even', tower.id);
+  const tur = [...g5.ents.values()].filter((e) => e.role === 'turret' && e.alive && e.ai?.home === tower.id);
+  check(`la ${tower.name} (palier 5) est défendue par des tourelles`, tur.length >= 2 && tur.every((t) => t.slot === 'even'), `${tur.length}`);
+}
+
 // ---------------------------------------------------------------------------- véhicules
 section('Véhicules');
 {
@@ -251,6 +262,29 @@ section('Sécurité, piratage, braquage, drone');
   const info = w.byId.get(bank.id)!;
   const turrets = [...g.ents.values()].filter((e) => e.role === 'turret' && e.ai?.home === bank.id && e.alive);
   check('des tourelles gardent la Banque Fédérale', turrets.length >= 2, `${turrets.length}`);
+  // caméras : un parrain qui entre dans un bâtiment protégé sans maître est filmé, le NYPD prévenu
+  {
+    const gal = BUILDING_BY_KEY['galerie_sterling'];
+    const gi = w.byId.get(gal.id)!;
+    const eb = g.ents.get(E.bossId)!;
+    const h0 = E.heat;
+    const p = gi.defend.find((d) => Math.abs((d.y ?? gi.floorY) - gi.floorY) < 0.6) ?? gi.center;
+    const saved = { x: eb.x, y: eb.y, z: eb.z };
+    eb.invulnerable = true;
+    for (let i = 0; i < 20 * 3; i++) {
+      eb.x = p.x;
+      eb.z = p.z;
+      eb.y = p.y ?? gi.floorY;
+      g.step();
+    }
+    drain();
+    check('les caméras filment un intrus : le NYPD est prévenu', E.heat > h0, `${h0.toFixed(2)} → ${E.heat.toFixed(2)}`);
+    eb.invulnerable = false;
+    eb.x = saved.x;
+    eb.y = saved.y;
+    eb.z = saved.z;
+    E.heat = 0;
+  }
   check('un terminal de sécurité et un coffre', !!info.terminal && !!info.vault);
   const boss = g.ents.get(D.bossId)!;
   boss.invulnerable = true;
@@ -325,6 +359,42 @@ section('Verre destructible');
     check('une vitre déjà brisée ne se brise pas deux fois', g.glassLog.length === n0 + 1);
     check('la balle suivante passe par le trou', !firstGlass(vw, pane.x, pane.y, pane.z - 3, 0, 0, 1, 3.2, (k) => g.brokenGlass.has(k)));
   }
+}
+
+section('NYPD 2085');
+{
+  const boss = g.ents.get(D.bossId)!;
+  const police = (): number => [...g.ents.values()].filter((e) => e.role === 'police' && e.alive).length;
+  const p0 = police();
+  D.heat = 2.5;
+  let cruiser = undefined as ReturnType<typeof g.ents.get>;
+  // (un croiseur a peut-être déjà été envoyé pendant le braquage : délai entre deux envois)
+  for (let i = 0; i < 20 * 90 && !cruiser; i++) {
+    D.heat = Math.max(D.heat, 2.5);
+    boss.hp = boss.maxHp;
+    g.step();
+    cruiser = [...g.ents.values()].find((e) => e.role === 'vehicle' && e.veh?.def === 5 && e.alive && !!e.veh.auto);
+  }
+  drain();
+  check('un parrain recherché : un croiseur du NYPD part du commissariat', !!cruiser, lastNotify('dadou')?.text);
+  if (cruiser) {
+    let moved = 0;
+    let px = cruiser.x;
+    let pz = cruiser.z;
+    for (let i = 0; i < 20 * 95 && cruiser.veh!.auto; i++) {
+      D.heat = Math.max(D.heat, 2.5);
+      boss.hp = boss.maxHp;
+      g.step();
+      moved += Math.hypot(cruiser.x - px, cruiser.z - pz);
+      px = cruiser.x;
+      pz = cruiser.z;
+    }
+    drain();
+    check('le croiseur roule dans les rues', moved > 15, `${moved.toFixed(0)} m`);
+    check('arrivé, il dépose ses agents', police() > p0 && !cruiser.veh!.auto, `${p0} → ${police()}`);
+  }
+  D.heat = 0;
+  for (const e of g.ents.values()) if (e.role === 'police') e.ai!.aggro.clear();
 }
 
 section('Convois blindés');

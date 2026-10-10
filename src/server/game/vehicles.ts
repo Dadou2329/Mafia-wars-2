@@ -155,6 +155,7 @@ export function vehicleAction(g: Game, slot: Slot, op: 'enter' | 'exit' | 'call'
       const e = id !== undefined ? g.ents.get(id) : undefined;
       if (!e || !e.alive || !e.veh) return;
       if (e.veh.driver >= 0) return g.notify(slot, 'Quelqu’un est déjà au volant.', 'bad');
+      if (e.veh.auto) return g.notify(slot, 'Impossible de monter : ce véhicule roule.', 'info', 'veh-auto', 3);
       if (Math.hypot(e.x - boss.x, e.z - boss.z) > 4.2 || Math.abs(e.y - boss.y) > 2.5) return;
       const def = vdef(e);
       if (def.cls === 'drone') return;

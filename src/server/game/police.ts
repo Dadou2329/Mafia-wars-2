@@ -1,13 +1,94 @@
 // NYPD 2085 : patrouilles, poursuites des parrains recherchés.
 
 import { CharKind, Weapon } from '../../shared/characters';
-import { HP } from '../../shared/constants';
+import { HP, VEHICLES } from '../../shared/constants';
 import { BUILDINGS, Faction } from '../../shared/city/plan';
+import { rightLane, roadRoute } from '../../shared/city/roadGraph';
+import type { Slot } from '../../shared/protocol';
 import type { Game } from './Game';
 import { SLOTS } from './Game';
-import type { Vec2 } from './types';
+import type { Ent, Vec2 } from './types';
+import { spawnVehicle } from './vehicles';
+import { drive, type Route } from './autopilot';
 
 const POLICE_COUNT = 6;
+/** Délai entre deux croiseurs envoyés après le même parrain (s). */
+const CRUISER_COOLDOWN = 75;
+
+interface Cruiser {
+  route: Route;
+  target: number;
+  officers: number;
+  arrived: boolean;
+  until: number;
+}
+
+const cruisers = new WeakMap<Game, Map<number, Cruiser>>();
+const cruiserAt = new WeakMap<Game, Record<Slot, number>>();
+function C(g: Game): Map<number, Cruiser> {
+  let m = cruisers.get(g);
+  if (!m) cruisers.set(g, (m = new Map()));
+  return m;
+}
+
+/**
+ * Un croiseur du NYPD part du commissariat le plus proche, toutes sirènes hurlantes, et suit les
+ * rues jusqu'au plus près de la cible ; arrivé, il dépose ses agents.
+ */
+export function dispatchCruiser(g: Game, x: number, z: number, target: Ent, officers = 2): Ent | null {
+  const yard = g.precinctNear(x, z);
+  const from = yard.doors[0].out;
+  const route = roadRoute(from.x, from.z, x, z);
+  // on s'arrête sur la chaussée, au carrefour le plus proche de la cible (pas dans un immeuble)
+  if (route.length > 2) route.pop();
+  const pts = rightLane(route, 1.6);
+  if (pts.length < 2) return null;
+  const p0 = pts[0];
+  const p1 = pts[1];
+  const e = spawnVehicle(g, VEHICLES[5], p0.x, 0, p0.z, Math.atan2(p1.x - p0.x, p1.z - p0.z), null);
+  e.veh!.auto = { phase: 'go', pts, i: 1, alt: 0, until: 0, home: from };
+  C(g).set(e.id, { route: { pts, i: 1 }, target: target.id, officers, arrived: false, until: g.time + 90 });
+  return e;
+}
+
+/** Croiseurs en route : pilote automatique, arrivée, dépôt des agents, départ. */
+export function updateCruisers(g: Game, dt: number): void {
+  for (const [id, c] of C(g)) {
+    const e = g.ents.get(id);
+    if (!e || !e.alive) {
+      C(g).delete(id);
+      continue;
+    }
+    if (c.arrived) {
+      // un parrain a volé le croiseur : il est à lui
+      if (e.veh!.driver >= 0) C(g).delete(id);
+      else if (g.time > c.until) {
+        e.removeAt = g.time + 1;
+        C(g).delete(id);
+      }
+      continue;
+    }
+    const tgt = g.ents.get(c.target);
+    if (drive(g, e, c.route, VEHICLES[5].speed * 0.85, dt, 2) || g.time > c.until) {
+      c.arrived = true;
+      c.until = g.time + 60;
+      e.vx = e.vz = 0;
+      e.veh!.auto = undefined;
+      for (let i = 0; i < c.officers; i++) {
+        const side = i % 2 ? 1 : -1;
+        const ox = Math.cos(e.yaw) * side * 1.8;
+        const oz = -Math.sin(e.yaw) * side * 1.8;
+        const p = g.addEnt({ kind: CharKind.POLICE, role: 'police', faction: Faction.POLICE, x: e.x + ox, z: e.z + oz, y: e.y, hp: HP.police, weapon: Weapon.PISTOL, mode: 'patrol' });
+        p.ammo = 12;
+        p.ai!.patrol = tgt ? [{ x: tgt.x, z: tgt.z }] : [{ x: e.x, z: e.z }];
+        p.ai!.run = true;
+        p.ai!.leash = 70;
+        if (tgt && tgt.alive) p.ai!.aggro.set(tgt.id, g.time + 60);
+        p.removeAt = g.time + 150;
+      }
+    }
+  }
+}
 /** Prochaine relève de police, par partie (plusieurs salons peuvent tourner en même temps). */
 const respawnAt = new WeakMap<Game, number>();
 
@@ -72,6 +153,19 @@ export function updatePolice(g: Game, dt: number): void {
       ai.run = true;
     }
     if (!tgt && ai.mode === 'patrol') ai.run = false;
+  }
+  // un parrain recherché (niveau 2 et plus) : un croiseur du NYPD est envoyé à sa poursuite
+  let cd = cruiserAt.get(g);
+  if (!cd) cruiserAt.set(g, (cd = { dadou: 0, even: 0 }));
+  for (const s of SLOTS) {
+    const f = g.factions[s];
+    if (f.heat < 2 || g.time < cd[s]) continue;
+    const boss = g.ents.get(f.bossId)!;
+    if (!boss.alive || [...C(g).values()].some((c) => c.target === boss.id && !c.arrived)) continue;
+    if (dispatchCruiser(g, boss.x, boss.z, boss, f.heat >= 4 ? 3 : 2)) {
+      cd[s] = g.time + CRUISER_COOLDOWN;
+      g.notify(s, 'Un croiseur du NYPD fonce vers vous, sirènes hurlantes !', 'alert', 'cruiser', 30);
+    }
   }
   // les parrains très recherchés attirent les patrouilles proches
   for (const s of SLOTS) {

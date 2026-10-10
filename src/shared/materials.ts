@@ -262,6 +262,9 @@ const DEFS = {
   CLOTH_RED: { name: 'drap cramoisi', color: 0x8e1b22, pattern: Pattern.CLOTH, noise: 0.08 },
   CLOTH_NAVY: { name: 'drap bleu marine', color: 0x1d3461, pattern: Pattern.CLOTH, noise: 0.08 },
 
+  // --- Eau des fontaines (peu profonde : on y marche) -----------------------------------
+  FOUNTAIN_WATER: { name: 'eau de fontaine', color: 0x16405a, color2: 0x2a6a8a, pattern: Pattern.NONE, spec: 0.95, emissive: 0x1e5a7a, emissiveMode: Emissive.PULSE, solid: false, lightPass: true, bulletPass: true },
+
   // --- Matériaux invisibles ------------------------------------------------------
   COVER: { name: 'couverture invisible', color: 0, pattern: Pattern.NONE, invisible: true, lightPass: true },
   COLLIDE: { name: 'collision invisible', color: 0, pattern: Pattern.NONE, invisible: true, lightPass: true, bulletPass: true },

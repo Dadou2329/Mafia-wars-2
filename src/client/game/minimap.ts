@@ -30,7 +30,8 @@ export function drawMinimap(
   const radiusM = 55; // mètres visibles du centre au bord
   const s = W / 2 / (radiusM * MAP_SCALE);
   c.save();
-  c.fillStyle = '#2a2018';
+  // au-delà de la carte : l'eau de l'Hudson et de la baie, la nuit
+  c.fillStyle = '#05101c';
   c.fillRect(0, 0, W, H);
   c.translate(W / 2, H / 2);
   c.scale(s, s);
@@ -221,7 +222,7 @@ export function drawMinimap(
   c.stroke();
   c.restore();
   // cerclage et nord
-  c.fillStyle = '#f2e2b0';
+  c.fillStyle = '#9fe8ff';
   c.font = `700 22px ${MAP_FONT_TITLE}`;
   c.textAlign = 'center';
   c.fillText('N', W / 2, 26);

@@ -35,9 +35,9 @@ export interface TierDef {
 export const TIERS: TierDef[] = [
   { tier: 1, name: 'Planque', maxMen: 40, maxLt: 2, incomeMul: 1, guards: 0, districts: 0, perks: ['40 hommes', '2 lieutenants'] },
   { tier: 2, name: 'Garage', maxMen: 70, maxLt: 3, incomeMul: 1.05, guards: 0, districts: 0, perks: ['70 hommes', '3 lieutenants', 'Véhicules au garage', 'Revenus +5 %'] },
-  { tier: 3, name: 'Loft', maxMen: 100, maxLt: 4, incomeMul: 1.1, guards: 2, districts: 1, perks: ['100 hommes', '4 lieutenants', 'Ordres depuis le téléphone', '2 gardes', 'Revenus +10 %'] },
-  { tier: 4, name: 'Penthouse', maxMen: 140, maxLt: 6, incomeMul: 1.2, guards: 4, districts: 2, perks: ['140 hommes', '6 lieutenants', 'Drones', 'Aéronef (ADAV)', '4 gardes d’élite', 'Revenus +20 %'] },
-  { tier: 5, name: 'Tour', maxMen: 180, maxLt: 8, incomeMul: 1.35, guards: 8, districts: 3, perks: ['180 hommes', '8 lieutenants', 'Tourelles', '8 gardes d’élite', 'Revenus +35 %'] },
+  { tier: 3, name: 'Loft', maxMen: 100, maxLt: 4, incomeMul: 1.1, guards: 2, districts: 1, perks: ['100 hommes', '4 lieutenants', 'Ordres depuis le téléphone', 'Drones', '2 gardes', 'Revenus +10 %'] },
+  { tier: 4, name: 'Penthouse', maxMen: 140, maxLt: 6, incomeMul: 1.2, guards: 4, districts: 2, perks: ['140 hommes', '6 lieutenants', 'Aéronef (ADAV)', '4 gardes d’élite', 'Revenus +20 %'] },
+  { tier: 5, name: 'Tour', maxMen: 180, maxLt: 8, incomeMul: 1.35, guards: 8, districts: 3, perks: ['180 hommes', '8 lieutenants', 'Tourelles automatiques', '8 gardes d’élite', 'Revenus +35 %'] },
 ];
 
 export function tierDef(t: number): TierDef {

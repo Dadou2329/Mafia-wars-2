@@ -63,9 +63,9 @@ import type { SharedWorld } from '../world';
 import type { AiState, BState, Ent, FactionState, Mode, Role, Squad, Vec2 } from './types';
 import { updateNpc } from './npc';
 import { createSquad, giveOrder, squadStatus, updateSquad, releaseMember } from './squads';
-import { updatePolice, spawnPolice } from './police';
+import { updatePolice, spawnPolice, updateCruisers } from './police';
 import { closed, driveInput, explodeVehicle, launchDrone, leaveVehicle, setupVehicles, updateVehicles, vdef, vehicleAction } from './vehicles';
-import { hackAction, hackedList, heistAction, heists, isHacked, securityOnCapture, setupSecurity, updateSecurity } from './security';
+import { hackAction, hackedList, heistAction, heists, installHqTurrets, isHacked, securityOnCapture, setupSecurity, updateSecurity } from './security';
 import { convoyHostile, convoyReadyIn, convoys, loots, neutralConvoy, sendConvoy, updateConvoys } from './convoys';
 import { aNom, cap, deNom, leNom, pluriel } from '../../shared/french';
 import { firstGlass, glassInSphere, voxelKey } from '../../shared/glass';
@@ -1177,6 +1177,8 @@ export class Game {
       e.ai!.home = hq.id;
     }
     f.guardRespawnAt = this.time + 5;
+    // la tour (palier 5) est équipée de tourelles automatiques
+    if (f.tier >= 5) installHqTurrets(this, bid);
     const td = this.tierOf(slot);
     this.emitAll({ t: 'hq', slot, b: bid, tier: f.tier });
     this.notify(slot, `Bienvenue chez vous : ${def.name} ! (${td.name} — ${td.perks.join(', ')})`, 'good');
@@ -1513,6 +1515,7 @@ export class Game {
     updateVehicles(this);
     updateSecurity(this, dt);
     updateConvoys(this, dt);
+    updateCruisers(this, dt);
     if (this.tick % 20 === 0) this.updateSpotted();
     this.updateEvents();
     this.updateWeather(dt);
