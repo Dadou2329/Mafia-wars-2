@@ -71,6 +71,12 @@ for (const s of SHOTS) {
     await sleep(900);
   }
   if (s.fire) await sleep(3000);
+  // grenade : on la lance et on photographie l'explosion
+  if (s.grenade) {
+    await A.keyboard.press('KeyG');
+    await sleep(s.grenadeWait ?? 1800);
+    await A.screenshot({ path: `${OUT}-${s.name}-boom.png`, timeout: 120000 });
+  }
   // on vise de nouveau (le recul des tirs relève l'arme) ; la pluie s'installe sans attendre
   // (à une image par seconde, le fondu de la pluie prendrait trop longtemps)
   await A.evaluate((s) => {

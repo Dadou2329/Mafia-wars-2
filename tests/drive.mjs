@@ -42,14 +42,13 @@ console.log('moto :', JSON.stringify(moto));
 if (moto) {
   await A.evaluate((m) => window.__app.net.act({ a: 'debugTp', x: m.x + 1.6, z: m.z, yaw: Math.PI / 2, dayTime: 0.92 }), moto);
   await sleep(2500);
-  await A.screenshot({ path: `${OUT}-1-moto.png` });
-  await A.mouse.click(640, 360);
+  await A.screenshot({ path: `${OUT}-1-moto.png`, timeout: 120000 });
   await A.keyboard.press('KeyE');
   await sleep(2500);
   console.log('au volant :', await A.evaluate(() => !!window.__app.game.player.drive));
   await A.keyboard.down('KeyW');
   await sleep(3500);
-  await A.screenshot({ path: `${OUT}-2-drive.png` });
+  await A.screenshot({ path: `${OUT}-2-drive.png`, timeout: 120000 });
   await A.keyboard.up('KeyW');
   const st = await A.evaluate(() => {
     const d = window.__app.game.player.drive;
@@ -63,9 +62,19 @@ if (moto) {
 }
 await A.keyboard.press('Tab');
 await sleep(1200);
-await A.screenshot({ path: `${OUT}-3-phone.png` });
+await A.screenshot({ path: `${OUT}-3-phone.png`, timeout: 120000 });
 await A.evaluate(() => document.querySelectorAll('.phone-app')[1]?.click());
 await sleep(800);
-await A.screenshot({ path: `${OUT}-4-garage.png` });
+await A.screenshot({ path: `${OUT}-4-garage.png`, timeout: 120000 });
+// application « Convois »
+await A.evaluate(() => {
+  const apps = [...document.querySelectorAll('.phone-app')];
+  document.querySelector('.phone-back')?.click();
+  return apps.length;
+});
+await sleep(600);
+await A.evaluate(() => [...document.querySelectorAll('.phone-app')].find((b) => /Convois/.test(b.textContent ?? ''))?.click());
+await sleep(800);
+await A.screenshot({ path: `${OUT}-5-convois.png`, timeout: 120000 });
 await browser.close();
 bot.kill('SIGTERM');

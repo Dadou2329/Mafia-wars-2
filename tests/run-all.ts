@@ -12,6 +12,7 @@ import { decodeSnapshot, encodeSnapshot, type GameEvent } from '../src/shared/pr
 import { DE_BOSS, HQ_CAPTURE_MIN_DISTRICTS, LIEUTENANT_PRICES, MAFIA_NAME, RECRUIT_BUNDLES, START_GANGSTERS, START_MONEY, TIERS } from '../src/shared/constants';
 import { formatMoney } from '../src/shared/util';
 import { MAT_BREAKABLE, firstGlass } from '../src/shared/glass';
+import { GRENADE_FUSE, stepGrenade, throwVelocity } from '../src/shared/grenade';
 import { GROUND_VY, VOXEL } from '../src/shared/voxel';
 
 let passed = 0;
@@ -403,6 +404,46 @@ section('NYPD 2085');
   }
   D.heat = 0;
   for (const e of g.ents.values()) if (e.role === 'police') e.ai!.aggro.clear();
+}
+
+section('Grenades');
+{
+  const boss = g.ents.get(D.bossId)!;
+  // un homme d'Even à 6 m devant Dadou, en pleine rue
+  const victim = [...g.ents.values()].find((e) => e.alive && e.slot === 'even' && e.role === 'gangster')!;
+  const spot = BUILDING_BY_KEY['diner'];
+  const out = g.building(spot.id).doors[0].out;
+  boss.x = out.x;
+  boss.z = out.z - 3;
+  boss.y = 0;
+  boss.invulnerable = true;
+  // où tombera-t-elle ? (même trajectoire que le serveur)
+  const dir: [number, number, number] = [0, -0.2, -1];
+  const body = { x: boss.x, y: 1.5, z: boss.z, ...throwVelocity(dir[0], dir[1], dir[2]) };
+  for (let t = 0; t < GRENADE_FUSE; t += 0.05) stepGrenade(w.city.world, body, 0.05);
+  const vx = body.x + 2;
+  const vz = body.z;
+  victim.x = vx;
+  victim.z = vz;
+  victim.y = 0;
+  victim.hp = victim.maxHp;
+  victim.ai!.path = null;
+  const n0 = D.grenades;
+  const hp0 = victim.hp;
+  g.action('dadou', { a: 'grenade', o: [boss.x, 1.5, boss.z], d: dir });
+  drain();
+  check('lancer une grenade (il en reste une de moins)', D.grenades === n0 - 1, `${n0} → ${D.grenades}`);
+  check('la grenade est annoncée aux clients', events.some((e) => e.t === 'grenade'));
+  for (let i = 0; i < 20 * 2.2; i++) {
+    victim.x = vx;
+    victim.z = vz;
+    g.step();
+  }
+  drain();
+  check('l’explosion blesse les ennemis proches', !victim.alive || victim.hp < hp0, `${hp0} → ${Math.round(victim.hp)}`);
+  check('et diffuse une explosion', events.some((e) => e.t === 'boom'));
+  boss.invulnerable = false;
+  D.heat = 0;
 }
 
 section('Convois blindés');

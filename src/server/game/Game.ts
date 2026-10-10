@@ -69,6 +69,7 @@ import { hackAction, hackedList, heistAction, heists, installHqTurrets, isHacked
 import { convoyHostile, convoyReadyIn, convoys, loots, neutralConvoy, sendConvoy, updateConvoys } from './convoys';
 import { aNom, cap, deNom, leNom, pluriel } from '../../shared/french';
 import { firstGlass, glassInSphere, voxelKey } from '../../shared/glass';
+import { GRENADE_DAMAGE, GRENADE_FUSE, GRENADE_MAX, GRENADE_PRICE, GRENADE_RADIUS, GRENADE_START, stepGrenade, throwVelocity, type GrenadeBody } from '../../shared/grenade';
 
 export const SLOTS: Slot[] = ['dadou', 'even'];
 export const otherSlot = (s: Slot): Slot => (s === 'dadou' ? 'even' : 'dadou');
@@ -181,6 +182,8 @@ export class Game {
       vehicles: new Map(),
       vehicle: -1,
       callAt: 0,
+      grenades: GRENADE_START,
+      grenadeAt: 0,
       droneAt: 0,
       droneReveal: null,
       hack: null,
@@ -843,6 +846,65 @@ export class Game {
     this.emitTo(slot, { t: 'tp', x, y, z, yaw });
   }
 
+  /** Grenades en vol. */
+  private grenadesInFlight: (GrenadeBody & { id: number; slot: Slot; fuse: number })[] = [];
+  private nextGrenadeId = 1;
+
+  throwGrenade(slot: Slot, o: number[], d: number[]): void {
+    const f = this.factions[slot];
+    const boss = this.ents.get(f.bossId);
+    if (!boss || !boss.alive || this.over || f.vehicle >= 0) return;
+    if (f.grenades <= 0) return this.notify(slot, 'Plus de grenades : l’armurerie du QG en vend.', 'info', 'gren-none', 3);
+    if (this.time < f.grenadeAt) return;
+    if (!Array.isArray(o) || !Array.isArray(d) || ![...o, ...d].every(Number.isFinite)) return;
+    if (Math.hypot(o[0] - boss.x, o[2] - boss.z) > 3 || Math.abs(o[1] - boss.y) > 3) return;
+    f.grenades--;
+    f.grenadeAt = this.time + 0.9;
+    const v = throwVelocity(d[0], d[1], d[2]);
+    const gr = { id: this.nextGrenadeId++, slot, fuse: GRENADE_FUSE, x: o[0], y: o[1], z: o[2], ...v };
+    this.grenadesInFlight.push(gr);
+    this.emitAll({ t: 'grenade', id: gr.id, x: gr.x, y: gr.y, z: gr.z, vx: gr.vx, vy: gr.vy, vz: gr.vz });
+    this.emitAll({ t: 'melee', id: boss.id, w: Weapon.FISTS, target: -1 });
+  }
+
+  private updateGrenades(dt: number): void {
+    for (let i = this.grenadesInFlight.length - 1; i >= 0; i--) {
+      const gr = this.grenadesInFlight[i];
+      stepGrenade(this.w.city.world, gr, dt);
+      gr.fuse -= dt;
+      if (gr.fuse > 0) continue;
+      this.grenadesInFlight.splice(i, 1);
+      this.explodeGrenade(gr);
+    }
+  }
+
+  private explodeGrenade(gr: GrenadeBody & { slot: Slot }): void {
+    const { x, y, z } = gr;
+    const f = this.factions[gr.slot];
+    const thrower = this.ents.get(f.bossId)!;
+    this.emitAll({ t: 'boom', x, y: y + 0.3, z, r: 4 });
+    this.emitAll({ t: 'sound', s: 'explosion', x, y: y + 0.3, z });
+    const world = this.w.city.world;
+    // le souffle : dégâts décroissants, à couvert on est protégé (ligne de vue)
+    const hits: Ent[] = [];
+    this.near(x, z, GRENADE_RADIUS + 2, (e) => {
+      if (!e.alive || e.flags & FLAG.HIDDEN) return;
+      if (e.faction === f.faction) return; // pas de tir allié
+      const d = Math.hypot(e.x - x, e.y + 0.9 - y, e.z - z);
+      if (d > GRENADE_RADIUS + (e.role === 'vehicle' ? 1.5 : 0)) return;
+      if (!world.lineOfSight(x, y + 0.3, z, e.x, e.y + 0.9, e.z) && d > 1.2) return;
+      hits.push(e);
+    });
+    for (const e of hits) {
+      const d = Math.hypot(e.x - x, e.y + 0.9 - y, e.z - z);
+      this.damage(e, GRENADE_DAMAGE * Math.max(0.15, 1 - d / GRENADE_RADIUS), thrower, false, x, y, z);
+    }
+    // les vitres alentour volent en éclats ; tout le quartier l'a entendue
+    this.shatter(x, y + 0.5, z, 3);
+    this.recordShot(x, z);
+    this.addHeat(gr.slot, 0.7);
+  }
+
   /** Verre brisé pendant la partie (indices de voxels) et journal des bris (clients qui arrivent). */
   readonly brokenGlass = new Set<number>();
   readonly glassLog: [number, number, number, number][] = [];
@@ -1030,6 +1092,18 @@ export class Game {
         this.notify(slot, `Nouvelle arme : ${def.name}.`, 'good');
         break;
       }
+      case 'buyGrenade': {
+        if (!f.upgrades.has('armory')) return this.notify(slot, 'Il vous faut une armurerie au QG.', 'bad');
+        if (f.grenades >= GRENADE_MAX) return this.notify(slot, `Vous avez déjà ${GRENADE_MAX} grenades.`, 'info', 'gren-max', 3);
+        if (f.money < GRENADE_PRICE) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(GRENADE_PRICE)}.`, 'bad');
+        f.money -= GRENADE_PRICE;
+        f.grenades++;
+        this.notify(slot, `Grenade achetée (${f.grenades}/${GRENADE_MAX}).`, 'money');
+        break;
+      }
+      case 'grenade':
+        this.throwGrenade(slot, act.o, act.d);
+        break;
       case 'buyAmmo': {
         if (f.money < AMMO_PRICE) return this.notify(slot, `Pas assez d’argent : il faut ${formatMoney(AMMO_PRICE)}.`, 'bad');
         f.money -= AMMO_PRICE;
@@ -1525,6 +1599,7 @@ export class Game {
     updateSecurity(this, dt);
     updateConvoys(this, dt);
     updateCruisers(this, dt);
+    this.updateGrenades(dt);
     if (this.tick % 20 === 0) this.updateSpotted();
     this.updateEvents();
     this.updateWeather(dt);
@@ -1978,6 +2053,7 @@ export class Game {
       vehicle: f.vehicle,
       callIn: Math.max(0, Math.ceil(f.callAt - this.time)),
       droneIn: Math.max(0, Math.ceil(f.droneAt - this.time)),
+      grenades: f.grenades,
       droneOver: f.droneReveal && this.time < f.droneReveal.until ? (f.droneReveal.district as DistrictId) : null,
       hack: f.hack ? { b: f.hack.b, p: Math.min(1, (this.time - f.hack.start) / Math.max(0.1, f.hack.done - f.hack.start)) } : null,
       convoyIn: convoyReadyIn(this, slot),

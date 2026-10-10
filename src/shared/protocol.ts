@@ -135,6 +135,7 @@ export interface PrivateState {
   callIn: number;
   /** Drone : délai avant le prochain lancement (s), quartier survolé. */
   droneIn: number;
+  grenades: number;
   droneOver: DistrictId | null;
   /** Piratage en cours (bâtiment, progression 0..1). */
   hack: { b: number; p: number } | null;
@@ -173,7 +174,8 @@ export type GameEvent =
   | { t: 'ride'; id: number; driver: number }
   /** Explosion (véhicule détruit…). */
   | { t: 'boom'; x: number; y: number; z: number; r: number }
-  | { t: 'glass'; x: number; y: number; z: number; r: number };
+  | { t: 'glass'; x: number; y: number; z: number; r: number }
+  | { t: 'grenade'; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
 
 export interface MatchStats {
   kills: number;
@@ -197,6 +199,8 @@ export type ClientAction =
   | { a: 'upgrade'; id: string }
   | { a: 'buyWeapon'; w: Weapon }
   | { a: 'buyAmmo' }
+  | { a: 'buyGrenade' }
+  | { a: 'grenade'; o: number[]; d: number[] }
   | { a: 'buyBuilding'; b: number }
   /** Emménager dans le logement suivant de l'échelle (le QG s'y installe). */
   | { a: 'moveIn'; b: number }

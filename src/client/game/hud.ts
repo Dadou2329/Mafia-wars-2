@@ -46,6 +46,7 @@ export class Hud {
   private stars!: HTMLElement;
   private wname!: HTMLElement;
   private ammo!: HTMLElement;
+  private gren!: HTMLElement;
   private slots!: HTMLElement;
   private reload!: HTMLElement;
   private cross!: HTMLElement;
@@ -132,7 +133,8 @@ export class Hud {
     this.ammo = h('div', { class: 'ammo' });
     this.reload = h('div', { class: 'reload' });
     this.slots = h('div', { class: 'slots' });
-    this.el.appendChild(h('div', { class: 'hud-weapon' }, this.wname, this.ammo, this.reload, this.slots));
+    this.gren = h('div', { class: 'grenades' });
+    this.el.appendChild(h('div', { class: 'hud-weapon' }, this.wname, this.ammo, this.reload, this.slots, this.gren));
     // réticule, marqueur de touche, invite
     this.cross = h('div', { class: `hud-cross ${settings.crosshair}` }, h('i'), h('i'), h('i'), h('i'));
     this.hitmark = h('div', { class: 'hud-hitmark' });
@@ -253,6 +255,12 @@ export class Hud {
       clear(this.slots);
       for (const ow of owned) this.slots.appendChild(h('span', { class: `slot${ow === w ? ' on' : ''}` }, WEAPON_SHORT[ow]));
     }
+  }
+
+  /** Grenades en poche (touche indiquée). */
+  setGrenades(n: number, key: string): void {
+    const t = n > 0 ? `Grenades : ${n} (${key})` : '';
+    if (this.gren.textContent !== t) this.gren.textContent = t;
   }
 
   /** Style du réticule (point, croix, cercle) choisi dans les paramètres. */

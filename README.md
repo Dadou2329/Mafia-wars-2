@@ -86,6 +86,7 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
 | Tirer / frapper | clic gauche | clic gauche |
 | Viser (au volant d’une moto ou d’une voiture : tirer par la portière) | clic droit | clic droit |
 | Recharger | R | R |
+| Lancer une grenade | G | G |
 | Armes (mains/lame/matraque, pistolet, pistolet-mitrailleur, fusil à pompe, fusil à rail) | 1 à 5, molette | & é " ' ( , molette |
 | Interagir (bureau, rabatteur, armurerie, véhicule, terminal, coffre) | E | E |
 | Vue 1re / 3e personne | V | V |
@@ -112,6 +113,10 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
   bâtiment ou un quartier (y compris **par le métro**), défendre, patrouiller, suivre le patron,
   renforcer, tenir une position, **tenir le toit**, se replier, **braquer un coffre**,
   **escorter** ou **intercepter un convoi**. Ils envoient des rapports d’avancement.
+- **Combat** : pistolet, pistolet-mitrailleur, fusil à pompe, fusil à rail, lame thermique,
+  matraque électrique et poings ; **grenades** (touche G, en vente à l’armurerie du QG) dont le
+  souffle blesse vos ennemis et brise les vitres. On se bat dans la rue, à l’intérieur, dans
+  les étages, sur les toits et dans le métro.
 - **Capturer un bâtiment** : éliminez ses défenseurs et restez à l’intérieur avec vos hommes.
   Les bâtiments neutres sans défenseurs peuvent aussi être achetés.
 - **Ordres rapides** : maintenez **Q** près de vos hommes : « Suivez-moi », « Attaquez »,
@@ -192,9 +197,10 @@ tests/                 tests automatiques
 
 ```bash
 npm run typecheck      # vérification TypeScript stricte
-npm test               # 114 contrôles sans navigateur : génération, navigation, simulation
+npm test               # 128 contrôles sans navigateur : génération, navigation, simulation
                        # (ordres → combats → captures), ascension, véhicules, sécurité,
-                       # braquages, drones, convois, verre, événements, victoire, textes
+                       # braquages, drones, convois, verre, NYPD, grenades, événements,
+                       # victoire, textes
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
 node tests/rematch.mjs # réseau : salon, reconnexion, pause, fin de partie, revanche
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
@@ -211,7 +217,7 @@ adresses et options (`URL`, `SERVER`, `BOT=1`, `LOWGFX=1`…).
 Ce qui fonctionne : salon en ligne à deux joueurs (choix exclusif des parrains, reconnexion,
 revanche), New York 2085 générée et visitable (intérieurs meublés, immeubles à plusieurs étages,
 toits, métro), 1re et 3e personne, combats (pistolet, pistolet-mitrailleur, fusil à pompe, fusil à
-rail, lame thermique, matraque électrique, poings), IA des gangsters, gangs locaux, policiers,
+rail, lame thermique, matraque électrique, poings), grenades, IA des gangsters, gangs locaux, policiers,
 tourelles et lieutenants, ordres exécutés physiquement, captures, territoires, économie,
 améliorations, ascension sur cinq paliers avec déménagement du QG, véhicules terrestres et
 aéronef, téléphone, piratage, braquages, convois, drones, police, événements, météo, verre

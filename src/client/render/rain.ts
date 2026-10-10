@@ -34,10 +34,11 @@ void main() {
   vec3 toCam = normalize(cameraPosition - head);
   vec3 side = normalize(cross(dir, toCam));
   float dist = distance(cameraPosition, head);
-  pt += side * position.x * (0.011 + dist * 0.0009);
+  // au moins un pixel et demi de large (un trait plus fin ne se dessine pas)
+  pt += side * position.x * max(0.022, dist * 0.0042);
   // les gouttes trop proches de l'objectif gênent : on les estompe
   float near = smoothstep(0.6, 2.2, dist);
-  vA = on * open * near * (0.35 + 0.35 * fract(aSeed * 3.1));
+  vA = on * open * near * (0.4 + 0.35 * fract(aSeed * 3.1));
   vT = position.y;
   // les gouttes accrochent la lumière : ciel le jour, néons et lampadaires la nuit
   vec3 dropCol = mix(vec3(0.62, 0.66, 0.72), vec3(0.32, 0.36, 0.46), uNight);

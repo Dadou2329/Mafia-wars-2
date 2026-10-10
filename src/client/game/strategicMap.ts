@@ -43,6 +43,7 @@ import { h, clear } from '../ui/dom';
 import { MAP_FONT, MAP_FONT_TITLE, MAP_SCALE } from './cityMap';
 import type { GameClient } from './GameClient';
 import { leNom } from '../../shared/french';
+import { GRENADE_MAX, GRENADE_PRICE } from '../../shared/grenade';
 
 export type Tab = 'orders' | 'recruit' | 'lieutenants' | 'upgrades' | 'armory' | 'view';
 
@@ -1462,6 +1463,13 @@ export class StrategicMap {
         'Munitions',
         h('p', { class: 'dim' }, ammo || 'Aucune arme à feu.'),
         this.actionBtn(`Faire le plein — ${formatMoney(AMMO_PRICE)}`, '', () => this.act({ a: 'buyAmmo' }, 'purchase'), p.money < AMMO_PRICE),
+      ),
+    );
+    b.appendChild(
+      this.section(
+        'Grenades',
+        h('p', { class: 'dim' }, `Touche ${actionKey(settings.bindings, 'grenade')} pour lancer. Le souffle blesse vos ennemis (pas vos hommes), brise les vitres… et attire le NYPD. En poche : ${p.grenades}/${GRENADE_MAX}.`),
+        this.actionBtn(`Acheter une grenade — ${formatMoney(GRENADE_PRICE)}`, '', () => this.act({ a: 'buyGrenade' }, 'purchase'), p.money < GRENADE_PRICE || p.grenades >= GRENADE_MAX),
       ),
     );
   }

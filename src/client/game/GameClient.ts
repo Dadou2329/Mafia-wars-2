@@ -27,6 +27,7 @@ import { createSkyline, type Skyline } from '../render/skyline';
 import { Holograms } from '../render/holograms';
 import { BigScreens } from './bigScreens';
 import { GlassBreaker } from './glassBreaker';
+import { GrenadeFx } from './grenades';
 import { EngineSounds, rpm, type LoopSource } from './engineSounds';
 import { createLightTexture, createMaterialTexture, createTintTexture, envUniforms } from '../render/env';
 import { createOuterGround } from '../render/outer';
@@ -93,6 +94,7 @@ export class GameClient {
   readonly rain: Rain;
   readonly skyline: Skyline;
   readonly glass: GlassBreaker;
+  readonly grenades: GrenadeFx;
   private engines = new EngineSounds();
   private loopAcc = 0;
   readonly screens: BigScreens;
@@ -198,6 +200,8 @@ export class GameClient {
     this.scene.add(createOuterGround());
     this.skyline = createSkyline();
     this.scene.add(this.skyline.group);
+    this.grenades = new GrenadeFx(world.world);
+    this.scene.add(this.grenades.group);
     this.screens = new BigScreens(world.screens);
     this.scene.add(this.screens.group);
     this.holos = new Holograms(world.holos);
@@ -347,6 +351,7 @@ export class GameClient {
     for (const id of [...this.store.ents.keys()]) this.store.remove(id);
     for (const i of init.infos) this.store.addInfo(i);
     // verre : on remet tout en place puis on applique l'état de la partie
+    this.grenades.clear();
     this.glass.restore();
     for (const g of init.glass ?? []) this.glass.apply(g[0], g[1], g[2], g[3]);
     this.placed = false;
@@ -542,6 +547,9 @@ export class GameClient {
         }
         break;
       }
+      case 'grenade':
+        this.grenades.spawn(e.id, e.x, e.y, e.z, e.vx, e.vy, e.vz);
+        break;
       case 'glass': {
         const n = this.glass.apply(e.x, e.y, e.z, e.r);
         if (n > 0) {
@@ -838,6 +846,7 @@ export class GameClient {
     const canFight = !this.player.drive || (this.player.aiming && (this.weapons.current === Weapon.PISTOL || this.weapons.current === Weapon.SMG));
     if (!uiBlocked && !this.wheel.open && !this.player.dead && this.placed && canFight) this.handleCombat(now, input);
     if (!uiBlocked && input.hit('interact') && this.interact) this.interact.run();
+    if (!uiBlocked && !this.wheel.open && !this.player.dead && this.placed && !this.player.drive && input.hit('grenade')) this.throwGrenade();
     this.player.updateCamera(dt, settings.fov);
     // ------------------------------------------------- envoi de l'état (20 Hz)
     this.sendAcc += dt;
@@ -997,6 +1006,7 @@ export class GameClient {
     envUniforms.uFogDensity.value *= fq * this.fogBoost;
     this.marker.update(now);
     this.lootMarker.update(now);
+    this.grenades.update(dt);
     this.skyline.update(now);
     this.screens.update(now, camPos);
     this.holos.update(now, dt, camPos);
@@ -1161,6 +1171,7 @@ export class GameClient {
     hud.setHealth(me ? me.hp : 1);
     const w = this.weapons;
     hud.setWeapon(w.current, w.mag.get(w.current) ?? 0, w.reserve(w.current), w.reloading(now), w.owned);
+    hud.setGrenades(this.priv.grenades ?? 0, actionKey(settings.bindings, 'grenade'));
     // district
     const d = districtAt(p.x, p.z);
     const dOwner = this.pub.districts.find((x) => x.id === d.id)?.owner ?? 0;
@@ -1261,6 +1272,20 @@ export class GameClient {
       underground: Math.max(0, Math.min(1, (-p.y - 1) / 3)),
       altitude: bid >= 0 ? 0 : Math.max(0, p.y),
     });
+  }
+
+  /** Lance une grenade dans la direction du regard (le serveur simule la trajectoire et l'explosion). */
+  private throwGrenade(): void {
+    if ((this.priv.grenades ?? 0) <= 0) {
+      this.hud.notify('Plus de grenades : l’armurerie du QG en vend.', 'info', 2500);
+      return;
+    }
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    const p = this.player.pos;
+    this.myView.meleeAt = performance.now() / 1000;
+    this.app.net.act({ a: 'grenade', o: [p.x + dir.x * 0.4, p.y + 1.5, p.z + dir.z * 0.4], d: [dir.x, dir.y, dir.z] });
+    audio.play('swing', { volume: 0.7 });
   }
 
   /** Bâtiment (volume intérieur, tous étages) contenant le point. */

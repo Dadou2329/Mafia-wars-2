@@ -192,6 +192,9 @@ export interface FactionState {
   vehicles: Map<number, number>;
   vehicle: number;
   callAt: number;
+  /** Grenades en poche et prochain lancer possible. */
+  grenades: number;
+  grenadeAt: number;
   /** Drone de reconnaissance : prochain lancement possible, quartier survolé et fin de la reconnaissance. */
   droneAt: number;
   droneReveal: { district: string; until: number } | null;

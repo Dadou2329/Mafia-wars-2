@@ -21,6 +21,7 @@ export type ActionId =
   | 'weapon4'
   | 'weapon5'
   | 'weaponNext'
+  | 'grenade'
   | 'phone'
   | 'chat'
   | 'scores';
@@ -49,6 +50,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'weapon4', label: 'Fusil à pompe', group: 'Combat', def: ['Digit4'] },
   { id: 'weapon5', label: 'Fusil à rail', group: 'Combat', def: ['Digit5'] },
   { id: 'weaponNext', label: 'Arme suivante', group: 'Combat', def: ['WheelDown'] },
+  { id: 'grenade', label: 'Lancer une grenade', group: 'Combat', def: ['KeyG'] },
   { id: 'interact', label: 'Interagir', group: 'Commandement', def: ['KeyE'] },
   { id: 'wheel', label: 'Menu des ordres rapides', group: 'Commandement', def: ['KeyQ'] },
   { id: 'map', label: 'Carte stratégique', group: 'Commandement', def: ['KeyM'] },
