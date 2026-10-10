@@ -129,7 +129,7 @@ function buildPart(key: string): VoxelModel {
 
 const WEAPON_KEY: Record<Weapon, string | null> = {
   [Weapon.FISTS]: null,
-  [Weapon.REVOLVER]: 'weapon:revolver',
+  [Weapon.PISTOL]: 'weapon:revolver',
   [Weapon.SHOTGUN]: 'weapon:shotgun',
   [Weapon.RIFLE]: 'weapon:rifle',
   [Weapon.KNIFE]: 'weapon:knife',
@@ -374,7 +374,7 @@ export class CharacterRenderer {
     // visée
     const aimP = v.pitch;
     const twoHanded = v.weapon === Weapon.RIFLE || v.weapon === Weapon.SHOTGUN;
-    if (v.aiming && (v.weapon === Weapon.REVOLVER || twoHanded)) {
+    if (v.aiming && (v.weapon === Weapon.PISTOL || twoHanded)) {
       if (twoHanded) {
         t.shR.p = -HALF_PI * 0.78 - aimP;
         t.shR.r = 0.45;

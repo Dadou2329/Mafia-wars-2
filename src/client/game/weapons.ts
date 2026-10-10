@@ -55,11 +55,11 @@ export function rayCharacter(o: THREE.Vector3, d: THREE.Vector3, e: ClientEnt, m
 }
 
 export class WeaponSystem {
-  current: Weapon = Weapon.REVOLVER;
-  owned: Weapon[] = [Weapon.FISTS, Weapon.REVOLVER];
-  mag = new Map<Weapon, number>([[Weapon.REVOLVER, 6]]);
+  current: Weapon = Weapon.PISTOL;
+  owned: Weapon[] = [Weapon.FISTS, Weapon.PISTOL];
+  mag = new Map<Weapon, number>([[Weapon.PISTOL, 6]]);
   /** Munitions totales (chargeur + réserve) selon le serveur. */
-  total = new Map<Weapon, number>([[Weapon.REVOLVER, 36]]);
+  total = new Map<Weapon, number>([[Weapon.PISTOL, 36]]);
   reloadUntil = 0;
   nextFireAt = 0;
   private hit = makeRayHit();
@@ -77,7 +77,7 @@ export class WeaponSystem {
       if (!this.mag.has(w)) this.mag.set(w, Math.min(def.magazine, tot));
       if ((this.mag.get(w) ?? 0) > tot) this.mag.set(w, tot);
     }
-    if (!this.owned.includes(this.current)) this.current = this.owned.includes(Weapon.REVOLVER) ? Weapon.REVOLVER : this.owned[0];
+    if (!this.owned.includes(this.current)) this.current = this.owned.includes(Weapon.PISTOL) ? Weapon.PISTOL : this.owned[0];
   }
 
   reserve(w: Weapon): number {
@@ -110,7 +110,7 @@ export class WeaponSystem {
 
   /** Change d'arme selon l'emplacement (1 poings, 2 revolver, 3 arme longue, 4 arme blanche). */
   selectSlot(slot: number): boolean {
-    const groups: Weapon[][] = [[Weapon.FISTS], [Weapon.REVOLVER], [Weapon.SHOTGUN, Weapon.RIFLE], [Weapon.KNIFE, Weapon.CLUB]];
+    const groups: Weapon[][] = [[Weapon.FISTS], [Weapon.PISTOL], [Weapon.SHOTGUN, Weapon.RIFLE], [Weapon.KNIFE, Weapon.CLUB]];
     const g = groups[slot - 1]?.filter((w) => this.owned.includes(w)) ?? [];
     if (g.length === 0) return false;
     const i = g.indexOf(this.current);

@@ -79,7 +79,7 @@ export class PropRenderer {
         const matrix = new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), tmpQ.setFromAxisAngle(up, p.yaw), new THREE.Vector3(s, s, s));
         return { matrix, x: p.x, z: p.z, building: p.building, interior, tinted: !!def.tinted };
       });
-      const big = def.size[1] > 2.5 || kind === 'LAMP_POST' || kind === 'LAMP_WALL' || kind === 'LAMP_DOUBLE';
+      const big = def.size[1] > 2.5 || kind === 'STREET_LIGHT' || kind === 'STREET_LIGHT_DOUBLE' || kind === 'TRAFFIC_LIGHT' || kind === 'PARK_LAMP' || kind === 'NEON_SIGN';
       this.groups.push({ kind, mesh, owner, items, maxDist: big ? 150 : 70, big });
       this.group.add(mesh);
       this.stats.instances += list.length;

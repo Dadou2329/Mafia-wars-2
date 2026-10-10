@@ -25,7 +25,7 @@ type EnvKind = 'day' | 'night' | 'indoor';
 
 const WEAPON_NAMES: Record<number, string> = {
   [Weapon.FISTS]: 'Poings',
-  [Weapon.REVOLVER]: 'Revolver Webley',
+  [Weapon.PISTOL]: 'Revolver Webley',
   [Weapon.SHOTGUN]: 'Fusil juxtaposé',
   [Weapon.RIFLE]: 'Martini-Henry',
   [Weapon.KNIFE]: 'Couteau Bowie',
@@ -170,10 +170,10 @@ export function startVmGallery(root: HTMLElement): void {
     pitch: 0,
   };
   const weapons = {
-    current: Weapon.REVOLVER as Weapon,
+    current: Weapon.PISTOL as Weapon,
     reloadUntil: 0,
     mag: new Map<Weapon, number>([
-      [Weapon.REVOLVER, 6],
+      [Weapon.PISTOL, 6],
       [Weapon.SHOTGUN, 2],
       [Weapon.RIFLE, 1],
     ]),
@@ -319,7 +319,7 @@ export function startVmGallery(root: HTMLElement): void {
     };
     bar.appendChild(b);
   };
-  for (const w of [Weapon.FISTS, Weapon.REVOLVER, Weapon.SHOTGUN, Weapon.RIFLE, Weapon.KNIFE, Weapon.CLUB]) button(`${w + 1} ${WEAPON_NAMES[w]}`, () => setWeapon(w));
+  for (const w of [Weapon.FISTS, Weapon.PISTOL, Weapon.SHOTGUN, Weapon.RIFLE, Weapon.KNIFE, Weapon.CLUB]) button(`${w + 1} ${WEAPON_NAMES[w]}`, () => setWeapon(w));
   button('L Dadou/Even', () => api.set({ look: state.look === 'dadou' ? 'even' : 'dadou' }));
   button('A viser', () => (state.aimToggle = player.aiming = !player.aiming));
   button('F tirer/frapper', fire);

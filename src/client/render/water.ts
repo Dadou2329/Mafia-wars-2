@@ -36,7 +36,7 @@ void main() {
   vec3 skyCol = mix(uSkyHorizon, uSkyTop, clamp(r.y, 0.0, 1.0));
   vec3 deep = vec3(0.035, 0.05, 0.045) * (0.3 + 1.6 * (1.0 - uNight));
   vec2 L = sampleLightVol(vWPos + vec3(0.0, 0.6, 0.0));
-  vec3 lampRefl = uLampCol * L.y * L.y * 0.9 * (0.6 + 0.8 * pow(max(r.y, 0.0), 2.0));
+  vec3 lampRefl = lampColorAt(vWPos) * L.y * L.y * 0.9 * (0.6 + 0.8 * pow(max(r.y, 0.0), 2.0));
   vec3 col = mix(deep, skyCol, fres * 0.85) + lampRefl * (0.3 + fres);
   float glint = pow(max(dot(r, uMoonDirW), 0.0), 220.0);
   col += vec3(0.8, 0.85, 1.0) * glint * (0.4 + 0.8 * uNight);

@@ -1,26 +1,47 @@
-// Génération complète de la ville (identique sur le client et le serveur).
+// Génération complète de New York 2085 (identique sur le client et le serveur).
 
 import { M } from '../../materials';
 import { Rng, hash32 } from '../../util';
 import { GROUND_VY, INV_VOXEL, VOXEL, VoxelWorld } from '../../voxel';
-import { AREAS, BUILDINGS, PIERS, RIVER_Z, WORLD_D, WORLD_H, WORLD_W, type AreaDef } from '../plan';
+import {
+  AREAS,
+  BUILDINGS,
+  CREEK,
+  FILLERS,
+  RIVERBED_Y,
+  RIVER_X0,
+  RIVER_X1,
+  ROADS,
+  WORLD_D,
+  WORLD_H,
+  WORLD_W,
+  districtAt,
+  isWater,
+  type AreaDef,
+  type FillerDef,
+} from '../plan';
 import { GenContext, type BuildingInfo } from './context';
 import { generateBuilding } from './buildings';
-import { buildGasometer } from './landmarks';
+import { buildBoundaries, buildBridges, buildSubway } from './infra';
+import { Frame } from './frame';
+import { FACADE_DEFAULT, cladFace, curtainBlock, hollowBlock, ledRing, piers, windowRow, type Facade, type Wall } from './facade';
+import { cornice, parapet, waterTower } from './structure';
 
-export const CITY_SEED = 18881888;
+export const CITY_SEED = 20852085;
 
 export interface City {
   world: VoxelWorld;
   ctx: GenContext;
   buildings: BuildingInfo[];
-  /** Carte 2D (voxels) : 0 route, 1 trottoir, 2 bordure, 3 bâtiment, 4 zone spéciale, 5 fleuve, 6 jetée. */
+  /** Carte 2D (voxels) : voir GM. */
   groundMap: Uint8Array;
   gw: number;
   gd: number;
 }
 
-export const GM = { ROAD: 0, SIDEWALK: 1, CURB: 2, BUILDING: 3, AREA: 4, RIVER: 5, PIER: 6, BOUNDARY: 7 } as const;
+export const GM = { ROAD: 0, SIDEWALK: 1, CURB: 2, BUILDING: 3, AREA: 4, WATER: 5, BRIDGE: 6, BOUNDARY: 7, PLAZA: 8, PARK: 9 } as const;
+
+const V = (m: number): number => Math.round(m * INV_VOXEL);
 
 export function generateCity(seed = CITY_SEED): City {
   const sx = WORLD_W * INV_VOXEL;
@@ -30,204 +51,404 @@ export function generateCity(seed = CITY_SEED): City {
   const ctx = new GenContext(world, seed);
   const rng = new Rng(seed);
   for (const b of BUILDINGS) ctx.footprints.push(b.rect);
+  for (const f of FILLERS) ctx.footprints.push(f.rect);
+  ctx.footprints.push(ONE_TIMES_SQUARE);
 
-  // ------------------------------------------------------------------ sol de base
-  world.fill(0, 0, 0, sx, GROUND_VY - 1, sz, M.STONE_DARK);
-  world.fill(0, GROUND_VY - 1, 0, sx, GROUND_VY, sz, M.ROAD);
+  // ------------------------------------------------------------------ sous-sol
+  world.fill(0, 0, 0, sx, GROUND_VY - 1, sz, M.BEDROCK);
+  world.fill(0, GROUND_VY - 1, 0, sx, GROUND_VY, sz, M.ASPHALT);
 
   // ------------------------------------------------------------------ carte au sol 2D
-  const gm = new Uint8Array(sx * sz);
+  const gm = new Uint8Array(sx * sz).fill(GM.SIDEWALK);
   const idx = (x: number, z: number) => z * sx + x;
-  const markRect = (r: [number, number, number, number], v: number, onlyIf?: number) => {
-    const x0 = Math.max(0, Math.round(r[0] * INV_VOXEL));
-    const z0 = Math.max(0, Math.round(r[1] * INV_VOXEL));
-    const x1 = Math.min(sx, Math.round(r[2] * INV_VOXEL));
-    const z1 = Math.min(sz, Math.round(r[3] * INV_VOXEL));
-    for (let z = z0; z < z1; z++)
-      for (let x = x0; x < x1; x++) if (onlyIf === undefined || gm[idx(x, z)] === onlyIf) gm[idx(x, z)] = v;
+  const markRect = (r: readonly number[], v: number, onlyIf?: number) => {
+    const x0 = Math.max(0, V(r[0]));
+    const z0 = Math.max(0, V(r[1]));
+    const x1 = Math.min(sx, V(r[2]));
+    const z1 = Math.min(sz, V(r[3]));
+    for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) if (onlyIf === undefined || gm[idx(x, z)] === onlyIf) gm[idx(x, z)] = v;
   };
-  const riverVZ = RIVER_Z * INV_VOXEL;
-  markRect([0, RIVER_Z, WORLD_W, WORLD_D], GM.RIVER);
-  for (const p of PIERS) markRect(p, GM.PIER);
+  for (const r of ROADS) markRect(r.rect, GM.ROAD);
+  for (const a of AREAS) {
+    if (a.kind === 'park' || a.kind === 'lake') markRect(a.rect, GM.PARK);
+    else if (a.kind === 'plaza' || a.kind === 'square') markRect(a.rect, GM.PLAZA, GM.SIDEWALK);
+  }
   for (const b of BUILDINGS) markRect(b.rect, GM.BUILDING);
-  for (const a of AREAS) markRect(a.rect, GM.AREA, GM.ROAD);
-  // limites : viaduc au nord, parc à l'ouest, mur des docks à l'est
-  markRect([0, 0, WORLD_W, 5], GM.BOUNDARY);
-  markRect([0, 0, 4, RIVER_Z], GM.BOUNDARY);
-  markRect([198, 0, WORLD_W, RIVER_Z], GM.BOUNDARY);
-  // trottoirs autour des bâtiments et des zones
-  const pad = 6;
-  const expand = (r: [number, number, number, number]) => {
-    const x0 = Math.max(0, Math.round(r[0] * INV_VOXEL) - pad);
-    const z0 = Math.max(0, Math.round(r[1] * INV_VOXEL) - pad);
-    const x1 = Math.min(sx, Math.round(r[2] * INV_VOXEL) + pad);
-    const z1 = Math.min(sz, Math.round(r[3] * INV_VOXEL) + pad);
-    for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) if (gm[idx(x, z)] === GM.ROAD) gm[idx(x, z)] = GM.SIDEWALK;
-  };
-  for (const b of BUILDINGS) expand(b.rect);
-  for (const a of AREAS) if (a.kind !== 'market') expand(a.rect);
-  // promenade le long du fleuve et pied du viaduc
-  markRect([0, RIVER_Z - 2, WORLD_W, RIVER_Z], GM.SIDEWALK, GM.ROAD);
-  markRect([0, 5, WORLD_W, 6.5], GM.SIDEWALK, GM.ROAD);
-  markRect([4, 0, 5.5, RIVER_Z], GM.SIDEWALK, GM.ROAD);
-  markRect([196.5, 0, 198, RIVER_Z], GM.SIDEWALK, GM.ROAD);
-  // bordures
+  for (const f of FILLERS) markRect(f.rect, GM.BUILDING);
+  markRect(ONE_TIMES_SQUARE, GM.BUILDING);
+  for (let z = 0; z < sz; z++)
+    for (let x = 0; x < sx; x++) {
+      const xm = (x + 0.5) * VOXEL;
+      const zm = (z + 0.5) * VOXEL;
+      if (isWater(xm, zm)) gm[idx(x, z)] = GM.WATER;
+    }
+  // limites : viaduc nord, BQE à l'est
+  markRect([0, 0, WORLD_W, 6], GM.BOUNDARY);
+  markRect([284, 6, WORLD_W, WORLD_D], GM.BOUNDARY);
+  // ponts
+  for (const r of ROADS) if (r.name.startsWith('Pont')) markRect(r.rect, GM.BRIDGE, GM.WATER);
+  // bordures : trottoir au contact de la chaussée
   for (let z = 1; z < sz - 1; z++)
     for (let x = 1; x < sx - 1; x++) {
-      if (gm[idx(x, z)] !== GM.SIDEWALK) continue;
-      if (
-        gm[idx(x + 1, z)] === GM.ROAD ||
-        gm[idx(x - 1, z)] === GM.ROAD ||
-        gm[idx(x, z + 1)] === GM.ROAD ||
-        gm[idx(x, z - 1)] === GM.ROAD
-      )
-        gm[idx(x, z)] = GM.CURB;
+      const g = gm[idx(x, z)];
+      if (g !== GM.SIDEWALK && g !== GM.PLAZA) continue;
+      if (gm[idx(x + 1, z)] === GM.ROAD || gm[idx(x - 1, z)] === GM.ROAD || gm[idx(x, z + 1)] === GM.ROAD || gm[idx(x, z - 1)] === GM.ROAD) gm[idx(x, z)] = GM.CURB;
     }
   // écriture des voxels du sol
   for (let z = 0; z < sz; z++)
     for (let x = 0; x < sx; x++) {
       const g = gm[idx(x, z)];
-      if (g === GM.SIDEWALK || g === GM.BOUNDARY) world.set(x, GROUND_VY, z, M.SIDEWALK);
+      if (g === GM.SIDEWALK || g === GM.BOUNDARY) world.set(x, GROUND_VY, z, ((x >> 6) + (z >> 6)) % 7 === 0 ? M.SIDEWALK_DARK : M.SIDEWALK);
       else if (g === GM.CURB) world.set(x, GROUND_VY, z, M.CURB);
-      else if (g === GM.ROAD) {
-        // caniveau le long des bordures + motif de pavés plus sombres sur l'axe
-        const nearCurb =
-          gm[idx(Math.min(sx - 1, x + 1), z)] === GM.CURB ||
-          gm[idx(Math.max(0, x - 1), z)] === GM.CURB ||
-          gm[idx(x, Math.min(sz - 1, z + 1))] === GM.CURB ||
-          gm[idx(x, Math.max(0, z - 1))] === GM.CURB;
-        if (nearCurb) world.set(x, GROUND_VY - 1, z, M.ROAD_DARK);
-      }
+      else if (g === GM.PLAZA) world.set(x, GROUND_VY, z, M.SIDEWALK_DARK);
+      else if (g === GM.BUILDING) world.set(x, GROUND_VY, z, M.SIDEWALK);
+      else if (g === GM.ROAD && ((x * 7 + z * 13) & 255) < 3) world.set(x, GROUND_VY - 1, z, M.ASPHALT_WORN);
     }
+  roadMarkings(world, gm, sx, sz);
 
-  // ------------------------------------------------------------------ fleuve et quais
-  world.fill(0, 1, riverVZ, sx, GROUND_VY, sz, 0);
-  world.fill(0, 0, riverVZ, sx, 1, sz, M.RIVERBED);
-  world.fill(0, 0, riverVZ - 4, sx, GROUND_VY, riverVZ, M.QUAY);
-  // parapet de granit le long du quai (interrompu aux jetées)
-  for (let x = 16; x < sx; x++) {
-    const xm = x * VOXEL;
-    let atPier = false;
-    for (const p of PIERS) if (xm >= p[0] - 0.5 && xm < p[2] + 0.5) atPier = true;
-    if (xm > 140 && xm < 196) {
-      // les docks : quai ouvert avec bollards
-      if (!atPier && x % 24 === 0) world.fill(x, GROUND_VY, riverVZ - 2, x + 2, GROUND_VY + 3, riverVZ, M.IRON);
-      continue;
+  // ------------------------------------------------------------------ eau : East River et Newtown Creek
+  const bedVy = Math.round(RIVERBED_Y * INV_VOXEL) + GROUND_VY;
+  for (let z = 0; z < sz; z++)
+    for (let x = 0; x < sx; x++) {
+      if (gm[idx(x, z)] !== GM.WATER) continue;
+      world.fill(x, bedVy, z, x + 1, GROUND_VY + 1, z + 1, 0);
+      world.set(x, bedVy - 1, z, M.RIVERBED);
     }
-    if (atPier) continue;
-    world.fill(x, GROUND_VY, riverVZ - 2, x + 1, GROUND_VY + 3, riverVZ, M.STONE_GREY);
-    if (x % 2 === 0) world.set(x, GROUND_VY + 3, riverVZ - 2, M.STONE_GREY);
-  }
-  // jetées en bois sur pilotis
-  for (const p of PIERS) {
-    const x0 = Math.round(p[0] * INV_VOXEL);
-    const x1 = Math.round(p[2] * INV_VOXEL);
-    const z1 = Math.round(p[3] * INV_VOXEL);
-    world.fill(x0, GROUND_VY - 1, riverVZ, x1, GROUND_VY, z1, M.DOCK_PLANK);
-    for (let z = riverVZ + 2; z < z1; z += 8) {
-      for (const x of [x0, x1 - 2]) world.fill(x, 0, z, x + 2, GROUND_VY - 1, z + 2, M.TIMBER);
-      world.fill(x0, GROUND_VY - 2, z, x1, GROUND_VY - 1, z + 1, M.TIMBER);
-    }
-    // bollards en fonte
-    for (let z = riverVZ + 6; z < z1; z += 12) {
-      world.fill(x0, GROUND_VY, z, x0 + 1, GROUND_VY + 2, z + 1, M.IRON);
-      world.fill(x1 - 1, GROUND_VY, z, x1, GROUND_VY + 2, z + 1, M.IRON);
-    }
-    ctx.prop('GAS_LANTERN_PIER', (p[0] + p[2]) / 2 - 2.2, 0, p[3] - 1.2, 0);
-    ctx.prop('ROPE_COIL', p[0] + 1, 0, p[1] + 5, 0.4);
-    ctx.prop('FISH_CRATES', p[2] - 1.2, 0, p[1] + 9, 1.57);
-  }
+  // quais : murs de granit le long de l'eau, garde-corps
+  quayWalls(ctx, gm, sx, sz, bedVy);
 
-  // ------------------------------------------------------------------ limites de la ville
-  buildViaduct(world);
-  buildDockWall(world);
-  buildWestPark(ctx, rng);
+  // ------------------------------------------------------------------ infrastructures
+  buildBridges(ctx);
+  buildSubway(ctx);
+  buildBoundaries(ctx);
+
+  // ------------------------------------------------------------------ espaces publics
+  for (const a of AREAS) buildArea(ctx, a, rng.fork(hash32(a.rect[0] * 31 + a.rect[1])));
+  oneTimesSquare(ctx);
 
   // ------------------------------------------------------------------ bâtiments
-  for (const def of BUILDINGS) {
-    generateBuilding(ctx, def);
-  }
-  buildGasometer(ctx, 122.5, 126.5, 4.6);
-
-  // ------------------------------------------------------------------ zones spéciales
-  for (const a of AREAS) buildArea(ctx, a, rng.fork(hash32(a.rect[0] * 31 + a.rect[1])));
-
-  // ------------------------------------------------------------------ navires et grues des docks
-  buildShip(world, ctx, 156, 144.5, 20, 7.5);
-  buildBarge(world, ctx, 187.5, 145, 8.5, 5);
-  buildCrane(world, ctx, 165, 136.5);
-  buildCrane(world, ctx, 190, 136.5);
+  for (const def of BUILDINGS) generateBuilding(ctx, def);
+  for (const f of FILLERS) buildFiller(ctx, f, rng.fork(hash32(f.rect[0] * 131 + f.rect[1])));
 
   // ------------------------------------------------------------------ mobilier urbain
   streetFurniture(ctx, gm, sx, sz, rng);
+  holograms(ctx);
 
+  world.compact();
   return { world, ctx, buildings: ctx.buildings, groundMap: gm, gw: sx, gd: sz };
 }
 
 // ======================================================================================
+// Marquages routiers
 
-function buildViaduct(world: VoxelWorld): void {
-  const z0 = 0;
-  const z1 = 20; // 5 m
-  const top = GROUND_VY + 30;
-  world.fill(0, GROUND_VY, z0, world.sx, top, z1, M.BRICK_SOOT);
-  // arches aveugles sur la face sud
-  for (let x = 6; x + 18 < world.sx; x += 24) {
-    for (let y = GROUND_VY; y < GROUND_VY + 22; y++) {
-      for (let dx = 0; dx < 18; dx++) {
-        const cx = dx - 8.5;
-        const archY = GROUND_VY + 15 + Math.sqrt(Math.max(0, 81 - cx * cx)) * 0.8;
-        if (y < archY) {
-          world.set(x + dx, y, z1 - 1, 0);
-          world.set(x + dx, y, z1 - 2, 0);
-          world.set(x + dx, y, z1 - 3, (dx + y) % 7 === 0 ? M.BRICK_BROWN : M.BRICK_SOOT);
-        }
+function roadMarkings(world: VoxelWorld, gm: Uint8Array, sx: number, sz: number): void {
+  const inCross = (x: number, z: number, axis: 'x' | 'z') => {
+    // vrai si la cellule est dans une chaussée d'axe opposé (carrefour)
+    for (const r of ROADS) {
+      if (r.axis === axis) continue;
+      if (x >= V(r.rect[0]) && x < V(r.rect[2]) && z >= V(r.rect[1]) && z < V(r.rect[3])) return true;
+    }
+    return false;
+  };
+  const y = GROUND_VY - 1;
+  for (const r of ROADS) {
+    const [x0, z0, x1, z1] = [V(r.rect[0]), V(r.rect[1]), V(r.rect[2]), V(r.rect[3])];
+    const bridge = r.name.startsWith('Pont');
+    if (r.axis === 'z') {
+      const mid = Math.round((x0 + x1) / 2);
+      for (let z = z0; z < z1; z++) {
+        if (inCross(mid, z, 'z')) continue;
+        if (gm[z * sx + mid] !== 0 && !bridge) continue;
+        // double ligne jaune centrale, lignes de rive blanches
+        world.set(mid - 2, y, z, M.LINE_YELLOW);
+        world.set(mid + 1, y, z, M.LINE_YELLOW);
+        world.set(x0 + 1, y, z, M.LINE_WHITE);
+        world.set(x1 - 2, y, z, M.LINE_WHITE);
+      }
+      // passages piétons de part et d'autre des carrefours
+      for (let z = z0; z < z1; z++) {
+        if (!inCross(mid, z, 'z')) continue;
+        const before = !inCross(mid, z - 1, 'z');
+        const after = !inCross(mid, z + 1, 'z');
+        if (before) zebra(world, x0, z - 14, x1, z - 2, 'x');
+        if (after) zebra(world, x0, z + 2, x1, z + 14, 'x');
+      }
+    } else {
+      const mid = Math.round((z0 + z1) / 2);
+      for (let x = x0; x < x1; x++) {
+        if (inCross(x, mid, 'x')) continue;
+        if (gm[mid * sx + x] !== 0 && !bridge) continue;
+        world.set(x, y, mid - 2, M.LINE_YELLOW);
+        world.set(x, y, mid + 1, M.LINE_YELLOW);
+        world.set(x, y, z0 + 1, M.LINE_WHITE);
+        world.set(x, y, z1 - 2, M.LINE_WHITE);
+      }
+      for (let x = x0; x < x1; x++) {
+        if (!inCross(x, mid, 'x')) continue;
+        if (!inCross(x - 1, mid, 'x')) zebra(world, x - 14, z0, x - 2, z1, 'z');
+        if (!inCross(x + 1, mid, 'x')) zebra(world, x + 2, z0, x + 14, z1, 'z');
       }
     }
-    // grille de fer
-    for (let dx = 1; dx < 18; dx += 2) world.fill(x + dx, GROUND_VY, z1 - 2, x + dx + 1, GROUND_VY + 12, z1 - 1, M.IRON);
-    world.fill(x, GROUND_VY + 12, z1 - 2, x + 18, GROUND_VY + 13, z1 - 1, M.IRON);
   }
-  // corniche, parapet et rails
-  world.fill(0, top, z0, world.sx, top + 1, z1 + 1, M.STONE_GREY);
-  world.fill(0, top + 1, z1 - 1, world.sx, top + 4, z1, M.BRICK_SOOT);
-  world.fill(0, top + 1, z0, world.sx, top + 2, z1 - 1, M.GRAVEL);
-  for (const rz of [6, 12]) world.fill(0, top + 2, rz, world.sx, top + 3, rz + 1, M.IRON);
+  void sz;
 }
 
-function buildDockWall(world: VoxelWorld): void {
-  const x0 = 198 * INV_VOXEL;
-  const z1 = (RIVER_Z - 1) * INV_VOXEL;
-  world.fill(x0, GROUND_VY, 20, world.sx, GROUND_VY + 22, z1, M.BRICK_SOOT);
-  world.fill(x0 - 1, GROUND_VY + 22, 20, world.sx, GROUND_VY + 23, z1, M.STONE_GREY);
-  for (let z = 30; z < z1; z += 40) world.fill(x0 - 1, GROUND_VY, z, x0, GROUND_VY + 22, z + 3, M.BRICK_BROWN);
-  // grand portail fermé
-  const gz = 100 * INV_VOXEL;
-  world.fill(x0 - 1, GROUND_VY, gz, x0, GROUND_VY + 16, gz + 24, M.PAINT_GREEN);
-  for (let z = gz; z < gz + 24; z += 3) world.fill(x0 - 2, GROUND_VY, z, x0 - 1, GROUND_VY + 16, z + 1, M.IRON);
+/** Bandes de passage piéton (les bandes sont parallèles à la circulation). */
+function zebra(world: VoxelWorld, x0: number, z0: number, x1: number, z1: number, stripesAlong: 'x' | 'z'): void {
+  const y = GROUND_VY - 1;
+  for (let z = z0; z < z1; z++)
+    for (let x = x0; x < x1; x++) {
+      if (world.get(x, y, z) !== M.ASPHALT && world.get(x, y, z) !== M.ASPHALT_WORN) continue;
+      if (world.get(x, GROUND_VY, z) !== 0) continue;
+      const k = stripesAlong === 'x' ? x : z;
+      if (((k % 6) + 6) % 6 < 3) world.set(x, y, z, M.LINE_WHITE);
+    }
 }
 
-function buildWestPark(ctx: GenContext, rng: Rng): void {
+// ======================================================================================
+// Quais
+
+function quayWalls(ctx: GenContext, gm: Uint8Array, sx: number, sz: number, bedVy: number): void {
   const w = ctx.world;
-  w.fill(0, GROUND_VY, 20, 16, GROUND_VY + 1, (RIVER_Z - 1) * INV_VOXEL, M.GRASS);
-  for (let zm = 9; zm < RIVER_Z - 4; zm += 2) ctx.prop('RAILING', 4.06, 0.25, zm + 1, Math.PI / 2);
-  for (let zm = 12; zm < RIVER_Z - 6; zm += 9) tree(w, 1.6 * INV_VOXEL, GROUND_VY + 1, (zm + rng.range(-1, 1)) * INV_VOXEL, rng, 0.85);
+  const at = (x: number, z: number) => (x < 0 || z < 0 || x >= sx || z >= sz ? GM.BOUNDARY : gm[z * sx + x]);
+  for (let z = 0; z < sz; z++)
+    for (let x = 0; x < sx; x++) {
+      const g = at(x, z);
+      if (g === GM.WATER || g === GM.BRIDGE) continue;
+      const nearWater = at(x + 1, z) === GM.WATER || at(x - 1, z) === GM.WATER || at(x, z + 1) === GM.WATER || at(x, z - 1) === GM.WATER;
+      if (!nearWater) continue;
+      // mur de quai (granit) du lit jusqu'au niveau de la rue, garde-corps au-dessus
+      w.fill(x, bedVy - 1, z, x + 1, GROUND_VY + 1, z + 1, M.QUAY);
+      w.fill(x, GROUND_VY + 1, z, x + 1, GROUND_VY + 6, z + 1, M.BARRIER);
+      if ((x + z) % 8 === 0) w.fill(x, GROUND_VY + 1, z, x + 1, GROUND_VY + 5, z + 1, M.IRON);
+      w.fill(x, GROUND_VY + 4, z, x + 1, GROUND_VY + 5, z + 1, M.IRON);
+    }
 }
 
-/** Arbre (platane) en voxels. Coordonnées en voxels. */
-export function tree(w: VoxelWorld, x: number, y: number, z: number, rng: Rng, scale = 1): void {
+// ======================================================================================
+// Parcs, places, promenades
+
+const ONE_TIMES_SQUARE: [number, number, number, number] = [100, 126, 108, 136];
+
+function buildArea(ctx: GenContext, a: AreaDef, rng: Rng): void {
+  const w = ctx.world;
+  const [x0m, z0m, x1m, z1m] = a.rect;
+  const x0 = V(x0m);
+  const z0 = V(z0m);
+  const x1 = V(x1m);
+  const z1 = V(z1m);
+  const cxm = (x0m + x1m) / 2;
+  const czm = (z0m + z1m) / 2;
+  switch (a.kind) {
+    case 'park': {
+      // pelouse, allées sinueuses, muret de pierre, arbres, rochers de schiste, lampadaires
+      for (let z = z0; z < z1; z++)
+        for (let x = x0; x < x1; x++) {
+          const xm = x * VOXEL;
+          const zm = z * VOXEL;
+          const edge = x < x0 + 2 || x >= x1 - 2 || z < z0 + 2 || z >= z1 - 2;
+          const path =
+            Math.abs(zm - (czm + Math.sin(xm * 0.09) * 6)) < 1.6 ||
+            Math.abs(xm - (110 + Math.sin(zm * 0.2) * 3)) < 1.4 ||
+            Math.abs(xm - (176 + Math.sin(zm * 0.25) * 2)) < 1.4;
+          if (edge) w.fill(x, GROUND_VY, z, x + 1, GROUND_VY + 3, z + 1, M.LIMESTONE);
+          else w.set(x, GROUND_VY, z, path ? M.GRAVEL : M.GRASS);
+        }
+      // entrées dans le muret
+      for (const ex of [104, 140, 178]) {
+        w.fill(V(ex) - 8, GROUND_VY + 1, z1 - 2, V(ex) + 8, GROUND_VY + 3, z1, 0);
+        w.fill(V(ex) - 8, GROUND_VY + 1, z0, V(ex) + 8, GROUND_VY + 3, z0 + 2, 0);
+      }
+      w.fill(x0, GROUND_VY + 1, V(30) - 8, x0 + 2, GROUND_VY + 3, V(30) + 8, 0);
+      w.fill(x1 - 2, GROUND_VY + 1, V(30) - 8, x1, GROUND_VY + 3, V(30) + 8, 0);
+      // arbres
+      for (let i = 0; i < 46; i++) {
+        const tx = rng.range(x0m + 3, x1m - 3);
+        const tz = rng.range(z0m + 3, z1m - 3);
+        if (inRect(tx, tz, [124, 20, 156, 42], 1.5) || inRect(tx, tz, [102, 20, 122, 36], 2) || inRect(tx, tz, [158, 20, 178, 34], 2)) continue;
+        if (Math.abs(tz - (czm + Math.sin(tx * 0.09) * 6)) < 2.6) continue;
+        tree(w, tx * INV_VOXEL, GROUND_VY + 1, tz * INV_VOXEL, rng, rng.range(0.9, 1.35), rng.chance(0.12));
+      }
+      // rochers de schiste
+      for (let i = 0; i < 7; i++) {
+        const rx = rng.range(x0m + 5, x1m - 5);
+        const rz = rng.range(z0m + 5, z1m - 5);
+        if (inRect(rx, rz, [122, 18, 158, 44], 1) || inRect(rx, rz, [100, 18, 124, 38], 1)) continue;
+        rock(w, V(rx), V(rz), rng);
+      }
+      for (let xm = x0m + 6; xm < x1m - 4; xm += 12) {
+        ctx.prop('PARK_LAMP', xm, 0.25, czm + Math.sin(xm * 0.09) * 6 + 2.2, 0, 0);
+        if (rng.chance(0.6)) ctx.prop('BENCH', xm + 4, 0.25, czm + Math.sin((xm + 4) * 0.09) * 6 + 2.4, Math.PI, 0);
+      }
+      // fontaine de Bethesda : bassin et ange
+      fountain(ctx, 116, 41);
+      break;
+    }
+    case 'lake': {
+      // le lac : creusé sous la pelouse, bords de pierre, pont de fonte (Bow Bridge)
+      for (let z = z0; z < z1; z++)
+        for (let x = x0; x < x1; x++) {
+          const dx = (x + 0.5 - (x0 + x1) / 2) / ((x1 - x0) / 2);
+          const dz = (z + 0.5 - (z0 + z1) / 2) / ((z1 - z0) / 2);
+          const n = Math.sin(x * 0.11) * 0.08 + Math.sin(z * 0.13) * 0.07;
+          const d = dx * dx + dz * dz + n;
+          if (d > 1.0) continue;
+          if (d > 0.86) {
+            w.fill(x, GROUND_VY - 2, z, x + 1, GROUND_VY + 1, z + 1, M.ROCK);
+            continue;
+          }
+          w.fill(x, GROUND_VY - 6, z, x + 1, GROUND_VY + 1, z + 1, 0);
+          w.set(x, GROUND_VY - 7, z, M.RIVERBED);
+        }
+      // Bow Bridge : arche de fonte blanche
+      const bz = V(czm);
+      for (let x = x0 + 6; x < x1 - 6; x++) {
+        const t = (x - x0 - 6) / (x1 - x0 - 12);
+        const y = GROUND_VY + 1 + Math.round(Math.sin(t * Math.PI) * 4);
+        w.fill(x, y - 1, bz - 6, x + 1, y, bz + 6, M.PAINT_CREAM);
+        w.fill(x, y, bz - 6, x + 1, y + 4, bz - 5, (x % 3 === 0 ? M.PAINT_CREAM : M.BARRIER));
+        w.fill(x, y, bz + 5, x + 1, y + 4, bz + 6, (x % 3 === 0 ? M.PAINT_CREAM : M.BARRIER));
+        w.fill(x, y + 3, bz - 6, x + 1, y + 4, bz - 5, M.PAINT_CREAM);
+        w.fill(x, y + 3, bz + 5, x + 1, y + 4, bz + 6, M.PAINT_CREAM);
+      }
+      ctx.prop('BOAT', cxm - 5, -0.9, czm - 4, 0.6, 0, -1);
+      ctx.prop('BOAT', cxm + 6, -0.9, czm + 5, 2.1, 1, -1);
+      break;
+    }
+    case 'plaza': {
+      // Times Square : dalles rouges et lumineuses, gradins rouges, écrans, chaussée de Broadway
+      for (let z = z0; z < z1; z++)
+        for (let x = x0; x < x1; x++) {
+          if (w.get(x, GROUND_VY, z) === 0) continue; // chaussée
+          const xm = x * VOXEL;
+          const zm = z * VOXEL;
+          const led = ((Math.floor(xm / 3) + Math.floor(zm / 3)) & 3) === 0;
+          w.set(x, GROUND_VY, z, led ? M.PAVER_LED : M.PLAZA_RED);
+        }
+      // les marches rouges (TKTS) face au sud
+      const sx0 = V(102);
+      const sx1 = V(118);
+      const sz0 = V(103);
+      for (let k = 0; k < 8; k++) {
+        w.fill(sx0, GROUND_VY + 1, sz0 + k * 3, sx1, GROUND_VY + 1 + (8 - k) * 2, sz0 + k * 3 + 3, k % 2 === 0 ? M.LED_RED : M.STUCCO_RED);
+      }
+      ctx.light(110, 2, 108, 0.9, 9, 0xff3040);
+      // bornes et mobilier
+      for (let xm = x0m + 4; xm < x1m - 2; xm += 8) {
+        if (xm > 86 && xm < 98) continue;
+        ctx.prop('STREET_LIGHT_DOUBLE', xm, 0.25, czm - 14, 0, 0);
+        ctx.prop('STREET_LIGHT_DOUBLE', xm + 4, 0.25, czm + 14, 0, 0);
+      }
+      ctx.prop('HOLO_KIOSK', 78, 0.25, 116, Math.PI / 2, 0);
+      ctx.prop('FOOD_CART', 112, 0.25, 132, 0, 0);
+      ctx.prop('FOOD_CART', 80, 0.25, 128, Math.PI, 1);
+      ctx.prop('NEWS_STAND', 118, 0.25, 116, -Math.PI / 2, 0);
+      ctx.prop('VENDING_MACHINE', 75, 0.25, 132, Math.PI / 2, 4);
+      for (const [x, z] of [
+        [86, 101],
+        [98, 101],
+        [86, 139],
+        [98, 139],
+      ])
+        ctx.prop('BOLLARD', x, 0.25, z, 0, 0);
+      break;
+    }
+    case 'square': {
+      // place du Taureau : le taureau de bronze, arbres, bancs
+      for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) w.set(x, GROUND_VY, z, ((x + z) & 15) < 8 ? M.GRANITE : M.SIDEWALK);
+      ctx.prop('BULL_STATUE', cxm, 0.25, czm, Math.PI * 0.75, 0);
+      for (const [dx, dz] of [
+        [-7, -8],
+        [7, -8],
+        [-7, 8],
+        [7, 8],
+      ])
+        tree(w, V(cxm + dx), GROUND_VY + 1, V(czm + dz), rng, 0.8, false);
+      ctx.prop('BENCH', cxm - 7, 0.25, czm, Math.PI / 2, 0);
+      ctx.prop('BENCH', cxm + 7, 0.25, czm, -Math.PI / 2, 0);
+      ctx.prop('PARK_LAMP', cxm - 4, 0.25, czm - 10, 0, 0);
+      ctx.prop('PARK_LAMP', cxm + 4, 0.25, czm + 10, 0, 0);
+      break;
+    }
+    case 'promenade': {
+      // promenades le long de l'eau : arbres et bancs
+      const alongX = x1m - x0m > z1m - z0m;
+      const len = alongX ? x1m - x0m : z1m - z0m;
+      for (let s = 6; s < len - 4; s += 11) {
+        const px = alongX ? x0m + s : (x0m + x1m) / 2;
+        const pz = alongX ? (z0m + z1m) / 2 : z0m + s;
+        if (isWater(px, pz) || ctx.inFootprint(px, pz, 1)) continue;
+        if (alongX && px > RIVER_X0 - 2 && px < RIVER_X1 + 2) continue;
+        if (rng.chance(0.55)) ctx.prop('BENCH', px, 0.25, pz, alongX ? 0 : Math.PI / 2, 0);
+        else ctx.prop('PARK_LAMP', px, 0.25, pz, 0, 0);
+      }
+      break;
+    }
+    case 'yard':
+      break;
+  }
+}
+
+function inRect(x: number, z: number, r: readonly number[], m = 0): boolean {
+  return x >= r[0] - m && x < r[2] + m && z >= r[1] - m && z < r[3] + m;
+}
+
+/** One Times Square : la tour d'écrans et la boule du Nouvel An. */
+function oneTimesSquare(ctx: GenContext): void {
+  const f = new Frame(ctx, ONE_TIMES_SQUARE, 'N', -1);
+  const top = 150;
+  f.fill(0, 0, 0, f.W, top, f.D, M.METAL_PANEL_DARK);
+  // écrans sur les quatre faces, empilés
+  const faces: Wall[] = ['front', 'back', 'left', 'right'];
+  for (const wl of faces) {
+    cladFace(f, wl, 8, 40, M.SCREEN_ADS);
+    cladFace(f, wl, 42, 74, M.SCREEN);
+    cladFace(f, wl, 76, 100, M.SCREEN_ADS);
+    cladFace(f, wl, 102, 108, M.SCREEN_TICKER);
+    cladFace(f, wl, 110, 140, M.SCREEN);
+  }
+  ledRing(f, 0, 0, f.W, f.D, 41, M.LED_WHITE);
+  ledRing(f, 0, 0, f.W, f.D, 101, M.LED_WHITE);
+  f.fill(Math.round(f.W / 2) - 1, top, Math.round(f.D / 2) - 1, Math.round(f.W / 2) + 1, top + 18, Math.round(f.D / 2) + 1, M.STEEL);
+  const c = f.pt(f.W / 2, f.D / 2);
+  ctx.prop('BALL_TOWER', c.x, top * VOXEL + 2.5, c.z, 0, 0);
+  const faceYaw: Record<Wall, number> = { front: f.yaw(Math.PI), back: f.yaw(0), left: f.yaw(-Math.PI / 2), right: f.yaw(Math.PI / 2) };
+  for (const wl of faces) {
+    const len = wl === 'front' || wl === 'back' ? f.W : f.D;
+    const off = wl === 'front' ? f.pt(f.W / 2, -0.08) : wl === 'back' ? f.pt(f.W / 2, f.D + 0.08) : wl === 'left' ? f.pt(-0.08, f.D / 2) : f.pt(f.W + 0.08, f.D / 2);
+    ctx.screens.push({ x: off.x, y: 15, z: off.z, yaw: faceYaw[wl], w: len * VOXEL - 0.2, h: 7.6, kind: wl === 'front' || wl === 'back' ? 'boss' : 'ad', district: 'midtown', seed: ctx.screens.length * 17 + 5 });
+  }
+}
+
+/** Fontaine de Bethesda (bassin circulaire et ange). */
+function fountain(ctx: GenContext, xm: number, zm: number): void {
+  const w = ctx.world;
+  const cx = V(xm);
+  const cz = V(zm);
+  for (let x = cx - 14; x < cx + 14; x++)
+    for (let z = cz - 14; z < cz + 14; z++) {
+      const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
+      if (d > 13) continue;
+      if (d > 11.5) w.fill(x, GROUND_VY + 1, z, x + 1, GROUND_VY + 3, z + 1, M.LIMESTONE);
+      else w.set(x, GROUND_VY, z, M.SIDEWALK_DARK);
+    }
+  ctx.prop('FOUNTAIN_ANGEL', xm, 0.25, zm, Math.PI, 0);
+  ctx.light(xm, 1.5, zm, 0.6, 7, 0xa8e0ff);
+}
+
+/** Arbre (feuillu) en voxels. Coordonnées en voxels. */
+export function tree(w: VoxelWorld, x: number, y: number, z: number, rng: Rng, scale = 1, blossom = false): void {
   x = Math.round(x);
   z = Math.round(z);
-  const trunkH = Math.round((13 + rng.int(0, 4)) * scale);
+  const trunkH = Math.round((14 + rng.int(0, 5)) * scale);
   w.fill(x - 1, y, z - 1, x + 1, y + trunkH, z + 1, M.BARK);
-  w.fill(x - 2, y, z - 2, x + 2, y + 1, z + 2, M.BARK);
   const blobs = 4 + rng.int(0, 2);
   for (let i = 0; i < blobs; i++) {
     const r = (5 + rng.range(0, 3)) * scale;
     const bx = x + rng.range(-4, 4) * scale;
     const bz = z + rng.range(-4, 4) * scale;
     const by = y + trunkH + rng.range(-1, 5) * scale;
-    const mat = rng.chance(0.5) ? M.LEAVES : M.LEAVES_DARK;
+    const mat = blossom ? M.LEAVES_PINK : rng.chance(0.5) ? M.LEAVES : M.LEAVES_DARK;
     for (let vx = Math.floor(bx - r); vx <= bx + r; vx++)
       for (let vy = Math.floor(by - r * 0.8); vy <= by + r * 0.8; vy++)
         for (let vz = Math.floor(bz - r); vz <= bz + r; vz++) {
@@ -240,321 +461,206 @@ export function tree(w: VoxelWorld, x: number, y: number, z: number, rng: Rng, s
           if (w.get(vx, vy, vz) === 0) w.set(vx, vy, vz, mat);
         }
   }
-  // quelques branches
   for (let i = 0; i < 3; i++) {
     const a = rng.range(0, Math.PI * 2);
     for (let k = 0; k < 5 * scale; k++) w.set(Math.round(x + Math.cos(a) * k), y + trunkH - 3 + Math.floor(k / 2), Math.round(z + Math.sin(a) * k), M.BARK);
   }
 }
 
-function buildArea(ctx: GenContext, a: AreaDef, rng: Rng): void {
-  const w = ctx.world;
-  const [x0m, z0m, x1m, z1m] = a.rect;
-  const x0 = Math.round(x0m * INV_VOXEL);
-  const z0 = Math.round(z0m * INV_VOXEL);
-  const x1 = Math.round(x1m * INV_VOXEL);
-  const z1 = Math.round(z1m * INV_VOXEL);
-  const cxm = (x0m + x1m) / 2;
-  const czm = (z0m + z1m) / 2;
-  switch (a.kind) {
-    case 'garden':
-    case 'park': {
-      w.fill(x0, GROUND_VY, z0, x1, GROUND_VY + 1, z1, M.GRASS);
-      // bordure de pierre
-      w.fill(x0, GROUND_VY, z0, x1, GROUND_VY + 1, z0 + 1, M.STONE_GREY);
-      w.fill(x0, GROUND_VY, z1 - 1, x1, GROUND_VY + 1, z1, M.STONE_GREY);
-      w.fill(x0, GROUND_VY, z0, x0 + 1, GROUND_VY + 1, z1, M.STONE_GREY);
-      w.fill(x1 - 1, GROUND_VY, z0, x1, GROUND_VY + 1, z1, M.STONE_GREY);
-      // allées de gravier en croix
-      const cx = Math.round((x0 + x1) / 2);
-      const cz = Math.round((z0 + z1) / 2);
-      w.fill(cx - 4, GROUND_VY, z0 + 1, cx + 4, GROUND_VY + 1, z1 - 1, M.GRAVEL);
-      w.fill(x0 + 1, GROUND_VY, cz - 4, x1 - 1, GROUND_VY + 1, cz + 4, M.GRAVEL);
-      // grilles avec portillons au milieu de chaque côté
-      const big = x1m - x0m > 12 && z1m - z0m > 6;
-      if (a.kind === 'garden' && big) {
-        for (let xm = x0m + 1; xm < x1m - 0.5; xm += 2) {
-          if (Math.abs(xm - cxm) < 2) continue;
-          ctx.prop('RAILING', xm, 0.25, z0m + 0.1, 0);
-          ctx.prop('RAILING', xm, 0.25, z1m - 0.1, 0);
-        }
-        for (let zm = z0m + 1; zm < z1m - 0.5; zm += 2) {
-          if (Math.abs(zm - czm) < 2) continue;
-          ctx.prop('RAILING', x0m + 0.1, 0.25, zm, Math.PI / 2);
-          ctx.prop('RAILING', x1m - 0.1, 0.25, zm, Math.PI / 2);
-        }
-      }
-      if (big) {
-        // arbres aux quatre coins
-        const inset = Math.min(4.5, (x1m - x0m) / 5);
-        const insetZ = Math.min(4.5, (z1m - z0m) / 4);
-        const spots: [number, number][] =
-          a.kind === 'park'
-            ? Array.from({ length: Math.floor((x1m - x0m) / 8) }, (_, i) => [x0m + 4 + i * 8, z0m + 3] as [number, number])
-            : [
-                [x0m + inset, z0m + insetZ],
-                [x1m - inset, z0m + insetZ],
-                [x0m + inset, z1m - insetZ],
-                [x1m - inset, z1m - insetZ],
-              ];
-        for (const [tx, tz] of spots) tree(w, tx * INV_VOXEL, GROUND_VY + 1, tz * INV_VOXEL, rng, a.kind === 'park' ? 0.9 : 1.1);
-        // statue centrale ou fontaine
-        if (a.kind === 'garden') {
-          if (a.name === 'Soho Square') {
-            // fontaine : bassin + statue
-            for (let vx = cx - 10; vx < cx + 10; vx++)
-              for (let vz = cz - 10; vz < cz + 10; vz++) {
-                const d = Math.hypot(vx + 0.5 - cx, vz + 0.5 - cz);
-                if (d < 10 && d > 8.5) w.fill(vx, GROUND_VY + 1, vz, vx + 1, GROUND_VY + 4, vz + 1, M.STONE);
-                else if (d <= 8.5) w.set(vx, GROUND_VY + 1, vz, M.QUAY);
-              }
-            ctx.prop('STATUE', cxm, 0.5, czm, Math.PI);
-          } else {
-            ctx.prop('STATUE', cxm, 0.25, czm, Math.PI);
-          }
-          for (const [dx, dz, yaw] of [
-            [-5, -2.5, Math.PI / 2],
-            [5, 2.5, -Math.PI / 2],
-          ] as const)
-            ctx.prop('BENCH', cxm + dx, 0.25, czm + dz, yaw);
-          ctx.prop('LAMP_POST', cxm - 2.6, 0.25, czm - 2.6, 0);
-          ctx.prop('LAMP_POST', cxm + 2.6, 0.25, czm + 2.6, 0);
-        } else {
-          for (let xm = x0m + 6; xm < x1m - 4; xm += 10) {
-            ctx.prop('BENCH', xm, 0.25, z1m - 1.3, Math.PI);
-            ctx.prop('LAMP_POST', xm + 5, 0.25, z1m - 1.1, 0);
-          }
-          ctx.prop('STATUE', x0m + 3, 0.25, z1m - 4, Math.PI);
-        }
-      }
-      break;
+/** Affleurement de schiste (Central Park). */
+function rock(w: VoxelWorld, x: number, z: number, rng: Rng): void {
+  const r = rng.range(6, 11);
+  for (let vx = Math.floor(x - r); vx <= x + r; vx++)
+    for (let vz = Math.floor(z - r); vz <= z + r; vz++) {
+      const d = Math.hypot(vx - x, (vz - z) * 1.3) / r;
+      if (d > 1) continue;
+      const h = Math.round((1 - d * d) * r * 0.5 + rng.range(0, 1));
+      w.fill(vx, GROUND_VY, vz, vx + 1, GROUND_VY + h, vz + 1, M.ROCK);
     }
-    case 'plaza': {
-      w.fill(x0, GROUND_VY, z0, x1, GROUND_VY + 1, z1, M.SIDEWALK);
-      // socle et statue équestre
-      const cx = Math.round((x0 + x1) / 2);
-      const cz = Math.round((z0 + z1) / 2);
-      w.fill(cx - 10, GROUND_VY + 1, cz - 8, cx + 10, GROUND_VY + 2, cz + 8, M.STONE_GREY);
-      ctx.prop('STATUE_HORSE', cxm, 0.5, czm, Math.PI / 2);
-      ctx.prop('STREET_CLOCK', cxm - 12, 0.25, czm - 1.5, 0);
-      ctx.prop('NEWS_STAND', cxm + 12, 0.25, czm - 2, 0);
-      for (let xm = x0m + 4; xm < x1m - 2; xm += 12) {
-        if (Math.abs(xm - cxm) < 6) continue;
-        ctx.prop('LAMP_DOUBLE', xm, 0.25, czm, 0);
-        ctx.prop('BENCH', xm + 3, 0.25, czm + 2.2, Math.PI);
-      }
-      break;
-    }
-    case 'market': {
-      const along = x1m - x0m < z1m - z0m; // marché en long sur z
-      if (along) {
-        for (let zm = z0m + 2; zm < z1m - 2; zm += 4.2) {
-          ctx.prop('MARKET_STALL', x0m + 1.6, 0, zm, Math.PI / 2, rng.int(0, 5));
-          ctx.prop('MARKET_STALL', x1m - 1.6, 0, zm + 2, -Math.PI / 2, rng.int(0, 5));
-          if (rng.chance(0.5)) ctx.prop(rng.chance(0.5) ? 'CRATE' : 'BARREL', x0m + 3.6, 0, zm + 1.2, rng.range(0, 3));
-        }
-        for (let zm = z0m + 8; zm < z1m - 4; zm += 16) ctx.prop('LAMP_POST', (x0m + x1m) / 2, 0, zm, 0);
-      } else {
-        for (let xm = x0m + 2; xm < x1m - 2; xm += 4.2) {
-          ctx.prop('MARKET_STALL', xm, 0, z0m + 1.6, 0, rng.int(0, 5));
-          ctx.prop('MARKET_STALL', xm + 2, 0, z1m - 1.6, Math.PI, rng.int(0, 5));
-        }
-        ctx.prop('HANDCART', cxm, 0, czm, 0.3);
-        ctx.prop('LAMP_POST', cxm - 5, 0, czm, 0);
-      }
-      break;
-    }
-    case 'yard': {
-      w.fill(x0, GROUND_VY - 1, z0, x1, GROUND_VY, z1, M.DIRT);
-      ctx.prop('CRATE_STACK', cxm, 0, czm, 0);
-      break;
-    }
-  }
-}
-
-function buildShip(w: VoxelWorld, ctx: GenContext, x0m: number, z0m: number, lenM: number, beamM: number): void {
-  const x0 = Math.round(x0m * INV_VOXEL);
-  const z0 = Math.round(z0m * INV_VOXEL);
-  const L = Math.round(lenM * INV_VOXEL);
-  const B = Math.round(beamM * INV_VOXEL);
-  const waterY = 4; // couche voxel de la surface de l'eau
-  const deck = waterY + 9;
-  for (let i = 0; i < L; i++) {
-    const t = i / (L - 1);
-    // proue effilée côté est
-    const taper = t > 0.75 ? 1 - ((t - 0.75) / 0.25) ** 1.6 : t < 0.08 ? 0.82 + 0.18 * (t / 0.08) : 1;
-    const half = Math.max(1, Math.round((B / 2) * taper));
-    const cz = z0 + B / 2;
-    for (let y = 1; y <= deck; y++) {
-      const narrow = y < 4 ? (4 - y) * 0.6 : 0;
-      const hh = Math.max(1, Math.round(half - narrow));
-      for (let dz = -hh; dz < hh; dz++) {
-        const edge = dz === -hh || dz === hh - 1 || y <= 2;
-        const m = y < waterY + 2 ? M.HULL_RED : y === deck - 1 ? M.PAINT_CREAM : M.HULL;
-        if (y === deck) {
-          w.set(x0 + i, y, Math.round(cz + dz), M.DOCK_PLANK);
-        } else if (edge || i === 0 || i === L - 1) {
-          w.set(x0 + i, y, Math.round(cz + dz), m);
-        } else w.set(x0 + i, y, Math.round(cz + dz), M.HULL);
-      }
-      // bastingage
-      if (y === deck) {
-        w.set(x0 + i, deck + 1, Math.round(cz - hh), M.HULL);
-        w.set(x0 + i, deck + 1, Math.round(cz + hh - 1), M.HULL);
-      }
-    }
-  }
-  // mâts, vergues et voiles carguées
-  const masts = [0.22, 0.5, 0.76];
-  for (const mt of masts) {
-    const mx = x0 + Math.round(L * mt);
-    const mz = z0 + Math.round(B / 2);
-    const h = mt === 0.5 ? 92 : 80;
-    w.fill(mx, deck + 1, mz, mx + 1, deck + h, mz + 1, M.TIMBER);
-    for (const yy of [deck + 30, deck + 52, deck + 72]) {
-      if (yy >= deck + h) continue;
-      const span = yy > deck + 60 ? 9 : 14;
-      w.fill(mx, yy, mz - span, mx + 1, yy + 1, mz + span, M.TIMBER);
-      w.fill(mx, yy - 1, mz - span + 1, mx + 1, yy, mz + span - 1, M.SAIL);
-    }
-  }
-  // beaupré
-  for (let k = 0; k < 22; k++) w.set(x0 + L + k, deck + 2 + Math.floor(k / 3), z0 + Math.round(B / 2), M.TIMBER);
-  // passerelle vers la jetée ouest
-  const gx = Math.round(152 * INV_VOXEL);
-  for (let x = gx; x < x0 + 2; x++) {
-    const t = (x - gx) / Math.max(1, x0 + 2 - gx);
-    const y = Math.round(GROUND_VY - 1 + t * (deck - GROUND_VY + 1));
-    w.fill(x, y, z0 + 10, x + 1, y + 1, z0 + 16, M.DOCK_PLANK);
-  }
-  ctx.light(x0m + lenM * 0.5, (deck - GROUND_VY) * VOXEL + 2, z0m + beamM / 2, 0.6, 7);
-  ctx.prop('SHIP_WHEEL', x0m + 2.5, (deck + 1 - GROUND_VY) * VOXEL, z0m + beamM / 2, Math.PI / 2);
-  ctx.prop('BARREL', x0m + 6, (deck + 1 - GROUND_VY) * VOXEL, z0m + 1.5, 0);
-  ctx.prop('CRATE', x0m + 9, (deck + 1 - GROUND_VY) * VOXEL, z0m + beamM - 1.6, 0.3);
-}
-
-function buildBarge(w: VoxelWorld, ctx: GenContext, x0m: number, z0m: number, lenM: number, beamM: number): void {
-  const x0 = Math.round(x0m * INV_VOXEL);
-  const z0 = Math.round(z0m * INV_VOXEL);
-  const L = Math.round(lenM * INV_VOXEL);
-  const B = Math.round(beamM * INV_VOXEL);
-  const deck = 9;
-  for (let i = 0; i < L; i++)
-    for (let j = 0; j < B; j++) {
-      for (let y = 2; y < deck; y++) {
-        const edge = i === 0 || j === 0 || i === L - 1 || j === B - 1;
-        if (edge) w.set(x0 + i, y, z0 + j, y < 5 ? M.HULL_RED : M.HULL);
-      }
-      w.set(x0 + i, 2, z0 + j, M.HULL);
-      // cargaison de charbon
-      if (i > 3 && i < L - 4 && j > 2 && j < B - 3) w.fill(x0 + i, 3, z0 + j, x0 + i + 1, 6 + ((i * 7 + j * 3) % 3), z0 + j + 1, M.COAL);
-    }
-  // cheminée du remorqueur
-  w.fill(x0 + 3, deck, z0 + B / 2 - 1, x0 + 6, deck + 14, z0 + B / 2 + 2, M.PAINT_BLACK);
-  w.fill(x0 + 3, deck + 12, z0 + B / 2 - 1, x0 + 6, deck + 13, z0 + B / 2 + 2, M.PAINT_RED);
-  ctx.smokes.push({ x: x0m + 1.1, y: (deck + 14 - GROUND_VY) * VOXEL, z: z0m + beamM / 2, big: false });
-}
-
-function buildCrane(w: VoxelWorld, ctx: GenContext, xm: number, zm: number): void {
-  const x = Math.round(xm * INV_VOXEL);
-  const z = Math.round(zm * INV_VOXEL);
-  // base en bois
-  w.fill(x - 3, GROUND_VY, z - 3, x + 3, GROUND_VY + 3, z + 3, M.TIMBER);
-  w.fill(x - 1, GROUND_VY + 3, z - 1, x + 1, GROUND_VY + 44, z + 1, M.TIMBER);
-  // flèche inclinée vers le fleuve
-  for (let k = 0; k < 40; k++) {
-    w.set(x, GROUND_VY + 40 + Math.floor(k / 3), z + k, M.TIMBER);
-    w.set(x, GROUND_VY + 41 + Math.floor(k / 3), z + k, M.TIMBER);
-  }
-  // câble et crochet
-  w.fill(x, GROUND_VY + 18, z + 39, x + 1, GROUND_VY + 53, z + 40, M.ROPE);
-  w.fill(x - 1, GROUND_VY + 16, z + 38, x + 2, GROUND_VY + 18, z + 41, M.IRON);
-  ctx.prop('CRATE', xm, 0.75, zm + 1.6, 0.2);
 }
 
 // ======================================================================================
+// Immeubles de décor (fermés)
+
+function buildFiller(ctx: GenContext, def: FillerDef, rng: Rng): void {
+  const f = new Frame(ctx, def.rect, def.front, -1);
+  const top = Math.round(def.height * INV_VOXEL);
+  const { W, D } = f;
+  const st: Facade = {
+    ...FACADE_DEFAULT,
+    wall: def.style === 'walkup' ? rng.pick([M.BRICK_RED, M.BRICK_BROWN, M.BRICK_YELLOW]) : def.style === 'deco' ? M.LIMESTONE : M.METAL_PANEL_DARK,
+    wallSide: M.BRICK_BROWN,
+    lit: 0.5,
+  };
+  f.fill(0, 0, 0, W, 1, D, M.GRANITE);
+  hollowBlock(f, 0, 0, W, D, 1, top, st.wall, M.ROOF_TAR);
+  if (def.style === 'glass') {
+    curtainBlock(f, 0, 0, W, D, 18, top - 2, rng.chance(0.5) ? M.CURTAIN_BLUE : M.CURTAIN_DARK, M.METAL_PANEL_DARK);
+    cladFace(f, 'front', 1, 16, M.GLASS_SHOP);
+    ledRing(f, 0, 0, W, D, 17, M.LED_WHITE);
+  } else {
+    for (let base = 1; base < top - 10; base += 14) for (const wl of ['front', 'back', 'left', 'right'] as Wall[]) windowRow(f, wl, st, rng, base + 4, 7);
+    if (def.style === 'deco') for (const wl of ['front', 'back'] as Wall[]) piers(f, wl, st, 14, top - 2, M.LIMESTONE);
+    if (def.style === 'walkup') {
+      cornice(f, top - 2, M.LIMESTONE, true);
+      waterTower(f, Math.round(W / 2), Math.round(D / 2), top, 5);
+    }
+  }
+  parapet(f, top, st.wall, 3);
+}
+
+// ======================================================================================
+// Mobilier urbain
 
 function streetFurniture(ctx: GenContext, gm: Uint8Array, sx: number, sz: number, rng: Rng): void {
-  const lamps: [number, number][] = [];
-  const doors = ctx.buildings.flatMap((b) => b.doors.map((d) => [d.x, d.z] as [number, number]));
-  const nearDoor = (x: number, z: number, r: number) => doors.some(([dx, dz]) => (dx - x) ** 2 + (dz - z) ** 2 < r * r);
   const g = (x: number, z: number) => {
     const vx = Math.floor(x * INV_VOXEL);
     const vz = Math.floor(z * INV_VOXEL);
     if (vx < 0 || vz < 0 || vx >= sx || vz >= sz) return GM.BOUNDARY;
     return gm[vz * sx + vx];
   };
+  const doors = ctx.buildings.flatMap((b) => b.doors.map((d) => [d.x, d.z] as [number, number]));
+  const nearDoor = (x: number, z: number, r: number) => doors.some(([dx, dz]) => (dx - x) ** 2 + (dz - z) ** 2 < r * r);
   const solidAt = (x: number, z: number) => ctx.world.get(Math.floor(x * INV_VOXEL), GROUND_VY + 1, Math.floor(z * INV_VOXEL)) !== 0;
-  // réverbères au bord des trottoirs, tous les ~13 m
-  for (let zm = 3; zm < RIVER_Z; zm += 6.5) {
-    for (let xm = 3; xm < 198; xm += 6.5) {
-      // on cherche une bordure proche
-      let best: [number, number, number] | null = null;
-      for (let dz = -3; dz <= 3; dz += 0.25) {
-        for (let dx = -3; dx <= 3; dx += 0.25) {
-          const x = xm + dx;
-          const z = zm + dz;
-          if (g(x, z) !== GM.CURB) continue;
-          const d = dx * dx + dz * dz;
-          if (!best || d < best[2]) best = [x, z, d];
-        }
+  const free = (x: number, z: number, m = 0.6) => !nearDoor(x, z, 3.2) && !solidAt(x, z) && !ctx.inFootprint(x, z, m) && !isWater(x, z);
+  const placed: [number, number][] = [];
+  const far = (x: number, z: number, d: number) => placed.every(([a, b]) => (a - x) ** 2 + (b - z) ** 2 > d * d);
+  // ---------------------------------------------- lampadaires LED le long des bordures (bras vers la chaussée)
+  for (const r of ROADS) {
+    if (r.name.startsWith('Pont')) continue;
+    const [x0, z0, x1, z1] = r.rect;
+    const along = r.axis === 'z';
+    const len = along ? z1 - z0 : x1 - x0;
+    for (let s = 5; s < len - 3; s += 14) {
+      for (const side of [0, 1]) {
+        if ((Math.floor(s / 14) + side) % 2 === 1) continue;
+        const x = along ? (side === 0 ? x0 - 0.15 : x1 + 0.15) : x0 + s;
+        const z = along ? z0 + s : side === 0 ? z0 - 0.15 : z1 + 0.15;
+        if (g(x, z) !== GM.CURB || !free(x, z, 0.3) || !far(x, z, 9)) continue;
+        // le bras pointe vers la chaussée
+        const yaw = along ? (side === 0 ? Math.PI / 2 : -Math.PI / 2) : side === 0 ? 0 : Math.PI;
+        ctx.prop('STREET_LIGHT', x, 0.25, z, yaw, 0);
+        placed.push([x, z]);
       }
-      if (!best) continue;
-      // direction de la chaussée
-      let rx = 0;
-      let rz = 0;
-      for (const [ox, oz] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ]) {
-        if (g(best[0] + ox * 0.5, best[1] + oz * 0.5) === GM.ROAD) {
-          rx = ox;
-          rz = oz;
-        }
-      }
-      if (rx === 0 && rz === 0) continue;
-      const lx = best[0] - rx * 0.45;
-      const lz = best[1] - rz * 0.45;
-      if (lamps.some(([ax, az]) => (ax - lx) ** 2 + (az - lz) ** 2 < 12.5 * 12.5)) continue;
-      if (nearDoor(lx, lz, 3) || solidAt(lx, lz) || ctx.inFootprint(lx, lz, 0.4)) continue;
-      lamps.push([lx, lz]);
-      ctx.prop('LAMP_POST', lx, 0.25, lz, Math.atan2(rx, rz));
-      // mobilier occasionnel à côté
-      const r = rng.next();
-      const ox = lx - rz * 2.2 - rx * 0.3;
-      const oz = lz + rx * 2.2 - rz * 0.3;
-      if (nearDoor(ox, oz, 3) || solidAt(ox, oz) || ctx.inFootprint(ox, oz, 0.5) || g(ox, oz) !== GM.SIDEWALK && g(ox, oz) !== GM.CURB) continue;
-      if (r < 0.12) ctx.prop('PILLAR_BOX', ox, 0.25, oz, Math.atan2(rx, rz));
-      else if (r < 0.24) ctx.prop('BENCH', ox, 0.25, oz, Math.atan2(rx, rz));
-      else if (r < 0.32) ctx.prop('BOLLARD', ox, 0.25, oz, 0);
-      else if (r < 0.4) ctx.prop('BARREL', ox, 0.25, oz, rng.range(0, 3));
-      else if (r < 0.46) ctx.prop('WATER_PUMP', ox, 0.25, oz, Math.atan2(rx, rz));
-      else if (r < 0.52) ctx.prop('HORSE_TROUGH', ox, 0.25, oz, Math.atan2(-rz, rx));
-      else if (r < 0.58) ctx.prop('POSTER_BOARD', ox, 0.25, oz, Math.atan2(rx, rz));
     }
   }
-  // caisses et tonneaux dans les docks et le quartier industriel
-  for (let i = 0; i < 70; i++) {
-    const x = rng.range(138, 196);
-    const z = rng.range(78, 138);
-    if (g(x, z) !== GM.SIDEWALK || nearDoor(x, z, 3.5) || solidAt(x, z) || ctx.inFootprint(x, z, 0.6)) continue;
-    const k = rng.pick(['CRATE', 'CRATE', 'BARREL', 'SACKS', 'CRATE_STACK'] as const);
-    ctx.prop(k, x, 0.25, z, rng.range(0, Math.PI));
+  // ---------------------------------------------- feux tricolores aux angles des carrefours
+  for (const a of ROADS)
+    for (const b of ROADS) {
+      if (a.axis !== 'z' || b.axis !== 'x') continue;
+      const ix0 = Math.max(a.rect[0], b.rect[0]);
+      const ix1 = Math.min(a.rect[2], b.rect[2]);
+      const iz0 = Math.max(a.rect[1], b.rect[1]);
+      const iz1 = Math.min(a.rect[3], b.rect[3]);
+      if (ix1 <= ix0 || iz1 <= iz0) continue;
+      const corners: [number, number, number][] = [
+        [ix0 - 0.6, iz0 - 0.6, 0],
+        [ix1 + 0.6, iz1 + 0.6, Math.PI],
+        [ix0 - 0.6, iz1 + 0.6, Math.PI / 2],
+        [ix1 + 0.6, iz0 - 0.6, -Math.PI / 2],
+      ];
+      for (const [x, z, yaw] of corners) {
+        if (g(x, z) !== GM.CURB && g(x, z) !== GM.SIDEWALK) continue;
+        if (!free(x, z, 0.3) || !far(x, z, 3)) continue;
+        ctx.prop('TRAFFIC_LIGHT', x, 0.25, z, yaw, 0);
+        placed.push([x, z]);
+        // bouche d'incendie et poubelle près du coin
+        const hx = x + Math.sin(yaw + 0.8) * 2.5;
+        const hz = z + Math.cos(yaw + 0.8) * 2.5;
+        if ((g(hx, hz) === GM.SIDEWALK || g(hx, hz) === GM.CURB) && free(hx, hz) && far(hx, hz, 2)) {
+          ctx.prop(rng.chance(0.5) ? 'HYDRANT' : 'TRASH_CAN', hx, 0.25, hz, rng.range(0, 3), 0);
+          placed.push([hx, hz]);
+        }
+      }
+    }
+  // ---------------------------------------------- mobilier dispersé sur les trottoirs
+  const kinds = ['HYDRANT', 'TRASH_CAN', 'MAILBOX', 'VENDING_MACHINE', 'HOLO_KIOSK', 'BENCH', 'AD_COLUMN', 'BIKE_RACK', 'CHARGING_POST', 'PLANTER', 'NEWS_STAND', 'FOOD_CART', 'HOLO_BOOTH', 'PARKING_METER', 'DUMPSTER'] as const;
+  for (let i = 0; i < 520; i++) {
+    const x = rng.range(4, WORLD_W - 6);
+    const z = rng.range(8, WORLD_D - 2);
+    if (g(x, z) !== GM.SIDEWALK || !free(x, z, 0.8) || !far(x, z, 3.2)) continue;
+    // il faut un bord de trottoir proche (mobilier aligné sur la rue)
+    let nx = 0;
+    let nz = 0;
+    for (const [ox, oz] of [
+      [1.2, 0],
+      [-1.2, 0],
+      [0, 1.2],
+      [0, -1.2],
+    ])
+      if (g(x + ox, z + oz) === GM.CURB) {
+        nx = ox;
+        nz = oz;
+      }
+    if (nx === 0 && nz === 0) continue;
+    const d = districtAt(x, z).id;
+    let k: (typeof kinds)[number] = rng.pick(kinds);
+    if (k === 'DUMPSTER' && d !== 'brooklyn' && d !== 'queens' && d !== 'chinatown') k = 'TRASH_CAN';
+    if (k === 'FOOD_CART' && d !== 'midtown' && d !== 'wallstreet' && d !== 'chinatown') k = 'HYDRANT';
+    const yaw = Math.atan2(nx, nz);
+    ctx.prop(k, x, 0.25, z, yaw, rng.int(0, 7));
+    placed.push([x, z]);
   }
-  for (let i = 0; i < 30; i++) {
-    const x = rng.range(72, 130);
-    const z = rng.range(78, 132);
-    if (g(x, z) !== GM.SIDEWALK || nearDoor(x, z, 3.5) || solidAt(x, z) || ctx.inFootprint(x, z, 0.6)) continue;
-    ctx.prop(rng.pick(['CRATE', 'BARREL', 'CART_WHEEL', 'SACKS'] as const), x, 0.25, z, rng.range(0, Math.PI));
+  // ---------------------------------------------- bouches à vapeur sur la chaussée
+  for (let i = 0; i < 40; i++) {
+    const r = rng.pick(ROADS);
+    if (r.name.startsWith('Pont')) continue;
+    const x = rng.range(r.rect[0] + 1.5, r.rect[2] - 1.5);
+    const z = rng.range(r.rect[1] + 1.5, r.rect[3] - 1.5);
+    if (g(x, z) !== GM.ROAD || isWater(x, z)) continue;
+    ctx.prop('STEAM_VENT', x, 0, z, 0, 0);
+    ctx.smokes.push({ x, y: 0.1, z, big: rng.chance(0.25) });
   }
-  // charrettes à bras dans Whitechapel et Soho
-  for (let i = 0; i < 10; i++) {
-    const x = rng.range(10, 196);
-    const z = rng.range(10, 70);
-    if (g(x, z) !== GM.ROAD || nearDoor(x, z, 4) || solidAt(x, z)) continue;
-    if (g(x + 1.5, z) !== GM.ROAD || g(x - 1.5, z) !== GM.ROAD || g(x, z + 1.5) !== GM.ROAD || g(x, z - 1.5) !== GM.ROAD) continue;
-    ctx.prop('HANDCART', x, 0, z, rng.range(0, Math.PI * 2));
+  // ---------------------------------------------- arbres d'alignement (Harlem, Brooklyn, Queens, Chinatown)
+  for (let i = 0; i < 160; i++) {
+    const x = rng.range(4, WORLD_W - 6);
+    const z = rng.range(8, WORLD_D - 2);
+    const d = districtAt(x, z).id;
+    if (d === 'midtown' || d === 'wallstreet') continue;
+    if (g(x, z) !== GM.SIDEWALK || !free(x, z, 2.2) || !far(x, z, 6)) continue;
+    let curb = false;
+    for (const [ox, oz] of [
+      [1.2, 0],
+      [-1.2, 0],
+      [0, 1.2],
+      [0, -1.2],
+    ])
+      if (g(x + ox, z + oz) === GM.CURB) curb = true;
+    if (!curb) continue;
+    const w = ctx.world;
+    const vx = Math.floor(x * INV_VOXEL);
+    const vz = Math.floor(z * INV_VOXEL);
+    w.fill(vx - 2, GROUND_VY, vz - 2, vx + 2, GROUND_VY + 1, vz + 2, M.DIRT);
+    tree(w, vx, GROUND_VY + 1, vz, rng, 0.75, d === 'chinatown' && rng.chance(0.4));
+    placed.push([x, z]);
   }
+  // ---------------------------------------------- néons de rue (Chinatown, Times Square, Brooklyn)
+  for (const b of ctx.buildings) {
+    const d = b.def.district;
+    if (d !== 'chinatown' && d !== 'midtown' && d !== 'brooklyn') continue;
+    if (b.def.type === 'tower' || b.def.type === 'penthouse' || b.def.type === 'landmark') continue;
+    const door = b.doors[0];
+    const ox = door.out.x - door.x;
+    const oz = door.out.z - door.z;
+    const l = Math.hypot(ox, oz) || 1;
+    const px = door.x + (ox / l) * 0.6 + (oz / l) * 5;
+    const pz = door.z + (oz / l) * 0.6 - (ox / l) * 5;
+    ctx.prop('NEON_SIGN', px, 4.2, pz, Math.atan2(oz, ox), rng.int(0, 7), -1);
+  }
+}
+
+/** Hologrammes géants (silhouettes animées dessinées par le client). */
+function holograms(ctx: GenContext): void {
+  ctx.holos.push({ x: 98, y: 24, z: 112, yaw: 0, scale: 6, kind: 'dancer', color: 0xff3cc8 });
+  ctx.holos.push({ x: 84, y: 30, z: 128, yaw: 0.4, scale: 7, kind: 'koi', color: 0x3ce8ff });
+  ctx.holos.push({ x: 114, y: 32, z: 120, yaw: -0.3, scale: 5, kind: 'bottle', color: 0xffd040 });
+  ctx.holos.push({ x: 40, y: 22, z: 186, yaw: 0, scale: 6, kind: 'dragon', color: 0xff4040 });
+  ctx.holos.push({ x: 70, y: 18, z: 211, yaw: 0, scale: 4, kind: 'koi', color: 0xff8a20 });
+  ctx.holos.push({ x: 145, y: 34, z: 211, yaw: 0, scale: 6, kind: 'logo', color: 0x40c8ff });
+  ctx.holos.push({ x: 272, y: 18, z: 216, yaw: 0, scale: 4, kind: 'dancer', color: 0xff3050 });
+  ctx.holos.push({ x: 272, y: 18, z: 24, yaw: 0, scale: 4, kind: 'ring', color: 0x40a0ff });
+  ctx.holos.push({ x: 168, y: 48, z: 152, yaw: 0, scale: 8, kind: 'ring', color: 0xa848ff });
+  ctx.holos.push({ x: 140, y: 26, z: 60, yaw: 0, scale: 4, kind: 'face', color: 0x7dffb0 });
+  ctx.holos.push({ x: 28, y: 20, z: 56, yaw: 0, scale: 5, kind: 'logo', color: 0xffb020 });
+  void CREEK;
 }

@@ -8,6 +8,73 @@ import { MAT_BLOCKS_LIGHT } from '../../shared/materials';
 import { CHUNK, GROUND_VY, VOXEL, type VoxelWorld } from '../../shared/voxel';
 import type { LightSource } from '../../shared/city/gen/context';
 
+export interface TintVolume {
+  data: Uint8Array; // RGBA : teinte normalisée des lampes
+  nx: number;
+  ny: number;
+  nz: number;
+  origin: [number, number, number];
+  cell: number;
+}
+
+const TINT_CELL = 2;
+const DEFAULT_LAMP = 0xffc890;
+
+/**
+ * Teinte des lampes, en cellules de 2 m : chaque lumière ajoute sa couleur pondérée, puis on
+ * normalise (la composante la plus forte vaut 255). L'intensité, elle, vient du volume fin.
+ */
+export function computeTintVolume(world: VoxelWorld, lights: LightSource[]): TintVolume {
+  const nx = Math.ceil((world.sx * VOXEL) / TINT_CELL);
+  const ny = Math.ceil((Math.min(world.sy, LIGHT_TOP_VY) * VOXEL) / TINT_CELL);
+  const nz = Math.ceil((world.sz * VOXEL) / TINT_CELL);
+  const oy = -GROUND_VY * VOXEL;
+  const acc = new Float32Array(nx * ny * nz * 3);
+  const lin = (c: number) => Math.pow(c / 255, 2.2);
+  for (const L of lights) {
+    const col = L.color ?? DEFAULT_LAMP;
+    const r = lin((col >> 16) & 255);
+    const g = lin((col >> 8) & 255);
+    const b = lin(col & 255);
+    const R = L.radius * 1.15;
+    const i0 = Math.max(0, Math.floor((L.x - R) / TINT_CELL));
+    const i1 = Math.min(nx - 1, Math.floor((L.x + R) / TINT_CELL));
+    const j0 = Math.max(0, Math.floor((L.y - oy - R) / TINT_CELL));
+    const j1 = Math.min(ny - 1, Math.floor((L.y - oy + R) / TINT_CELL));
+    const k0 = Math.max(0, Math.floor((L.z - R) / TINT_CELL));
+    const k1 = Math.min(nz - 1, Math.floor((L.z + R) / TINT_CELL));
+    for (let k = k0; k <= k1; k++)
+      for (let j = j0; j <= j1; j++)
+        for (let i = i0; i <= i1; i++) {
+          const dx = (i + 0.5) * TINT_CELL - L.x;
+          const dy = (j + 0.5) * TINT_CELL + oy - L.y;
+          const dz = (k + 0.5) * TINT_CELL - L.z;
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz) / R;
+          if (d >= 1) continue;
+          const w = L.intensity * (1 - d) * (1 - d);
+          const n = ((k * ny + j) * nx + i) * 3;
+          acc[n] += r * w;
+          acc[n + 1] += g * w;
+          acc[n + 2] += b * w;
+        }
+  }
+  const data = new Uint8Array(nx * ny * nz * 4);
+  for (let c = 0; c < nx * ny * nz; c++) {
+    const r = acc[c * 3];
+    const g = acc[c * 3 + 1];
+    const b = acc[c * 3 + 2];
+    const m = Math.max(r, g, b);
+    if (m <= 1e-5) continue;
+    // la force (jusqu'à 1) atténue la teinte loin des lampes ; la couleur est normalisée
+    const s = Math.min(1, m * 4);
+    data[c * 4] = Math.round((r / m) * 255 * s);
+    data[c * 4 + 1] = Math.round((g / m) * 255 * s);
+    data[c * 4 + 2] = Math.round((b / m) * 255 * s);
+    data[c * 4 + 3] = 255;
+  }
+  return { data, nx, ny, nz, origin: [0, oy, 0], cell: TINT_CELL };
+}
+
 export interface LightVolume {
   data: Uint8Array; // RG entrelacé
   nx: number;

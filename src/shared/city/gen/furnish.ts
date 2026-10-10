@@ -1,15 +1,17 @@
-// Ameublement des pièces selon leur fonction. Tout est en coordonnées locales (voxels).
+// Ameublement des pièces selon leur fonction (New York 2085). Coordonnées locales (voxels).
+// Toutes les pièces sont meublées et décorées par le jeu : le joueur ne décore rien.
 
 import { M } from '../../materials';
 import { Rng } from '../../util';
-import { PROP_DEFS, type PropKind } from '../props';
+import { PROP_DEFS, type PropDef, type PropKind } from '../props';
 import type { Frame } from './frame';
-import { fireplace, type Room } from './interior';
-import type { Levels } from './shell';
+import type { Levels } from './structure';
 
 const HALF_PI = Math.PI / 2;
 /** Orientation locale pour un objet adossé à un mur et tourné vers la pièce. */
 export const FACE = { fromLeft: HALF_PI, fromRight: -HALF_PI, fromBack: Math.PI, fromFront: 0 };
+
+export type Side4 = 'left' | 'right' | 'back' | 'front';
 
 export interface Rect {
   x0: number;
@@ -18,23 +20,29 @@ export interface Rect {
   z1: number;
 }
 
-export interface BossInfo {
-  boss: 'dadou' | 'even' | null;
+export interface Room extends Rect {
+  kind: string;
+  /** Étage (index dans la liste des étages accessibles). */
+  floor: number;
 }
 
 export class Furnisher {
   readonly f: Frame;
-  readonly lv: Levels;
+  lv: Levels;
   readonly rng: Rng;
   readonly reserved: Rect[] = [];
-  /** Points d'intérêt relevés pendant l'ameublement (desk, recrutement…). */
-  readonly marks: Record<string, { lx: number; lz: number; yaw?: number }> = {};
+  /** Points d'intérêt relevés pendant l'ameublement (bureau, recrutement…), avec leur étage. */
+  readonly marks: Record<string, { lx: number; lz: number; ly: number; yaw?: number }> = {};
   boss: 'dadou' | 'even' | null = null;
 
   constructor(f: Frame, lv: Levels, rng: Rng) {
     this.f = f;
     this.lv = lv;
     this.rng = rng;
+  }
+
+  mark(name: string, lx: number, lz: number, yaw?: number): void {
+    this.marks[name] = { lx, lz, ly: this.lv.floorTop, yaw };
   }
 
   reserve(x0: number, z0: number, x1: number, z1: number): void {
@@ -59,7 +67,7 @@ export class Furnisher {
     for (const r of this.reserved) {
       if (x0 < r.x1 && x1 > r.x0 && z0 < r.z1 && z1 > r.z0) return false;
     }
-    if (PROP_DEFS[kind].collide === 'none') return true;
+    if ((PROP_DEFS[kind] as PropDef).collide === 'none') return true;
     const y = this.lv.floorTop;
     for (let x = Math.floor(x0 + 0.3); x < Math.ceil(x1 - 0.3); x++) {
       for (let z = Math.floor(z0 + 0.3); z < Math.ceil(z1 - 0.3); z++) {
@@ -77,8 +85,8 @@ export class Furnisher {
   }
 
   /** Objet fixé à une hauteur (voxels au-dessus du sol) contre un mur de la pièce. */
-  wall(r: Room, kind: PropKind, wall: 'left' | 'right' | 'back' | 'front', along: number, height: number, variant = 0): void {
-    const d = PROP_DEFS[kind].size[2] * 2; // demi-profondeur en voxels
+  wall(r: Rect, kind: PropKind, wall: Side4, along: number, height: number, variant = 0): void {
+    const d = PROP_DEFS[kind].size[2] * 2;
     const y = this.lv.floorTop + height;
     switch (wall) {
       case 'left':
@@ -97,7 +105,7 @@ export class Furnisher {
   }
 
   /** Objet posé au sol, adossé à un mur. */
-  againstWall(r: Room, kind: PropKind, wall: 'left' | 'right' | 'back' | 'front', along: number, variant = 0): boolean {
+  againstWall(r: Rect, kind: PropKind, wall: Side4, along: number, variant = 0): boolean {
     const s = PROP_DEFS[kind].size;
     const d = s[2] * 2 + 0.05;
     switch (wall) {
@@ -113,7 +121,7 @@ export class Furnisher {
   }
 
   /** Remplit un mur d'objets identiques espacés régulièrement. */
-  lineWall(r: Room, kind: PropKind, wall: 'left' | 'right' | 'back' | 'front', spacing: number, margin = 2, variantFn?: (i: number) => number): number {
+  lineWall(r: Rect, kind: PropKind, wall: Side4, spacing: number, margin = 2, variantFn?: (i: number) => number): number {
     const s = PROP_DEFS[kind].size;
     const len = wall === 'left' || wall === 'right' ? r.z1 - r.z0 : r.x1 - r.x0;
     const start = wall === 'left' || wall === 'right' ? r.z0 : r.x0;
@@ -126,11 +134,10 @@ export class Furnisher {
   }
 
   /** Table entourée de chaises. */
-  tableSet(table: PropKind, lx: number, lz: number, chairs: number, chair: PropKind = 'CHAIR', yaw = 0): boolean {
-    if (!this.p(table, lx, lz, yaw)) return false;
+  tableSet(table: PropKind, lx: number, lz: number, chairs: number, chair: PropKind = 'CHAIR', yaw = 0, variant = 0): boolean {
+    if (!this.p(table, lx, lz, yaw, variant)) return false;
     const [w, d] = this.footprint(table, yaw);
     const pos: [number, number, number][] = [];
-    // chaises tournées vers la table
     pos.push([lx, lz - d / 2 - 1.2, 0]);
     pos.push([lx, lz + d / 2 + 1.2, Math.PI]);
     pos.push([lx - w / 2 - 1.2, lz, HALF_PI]);
@@ -142,18 +149,13 @@ export class Furnisher {
     let n = 0;
     for (const [x, z, a] of pos) {
       if (n >= chairs) break;
-      if (this.p(chair, x, z, a + this.rng.range(-0.25, 0.25))) n++;
+      if (this.p(chair, x, z, a + this.rng.range(-0.2, 0.2), variant)) n++;
     }
     return true;
   }
 
-  /** Grille d'éléments dans une zone, en sautant les cases occupées. */
-  grid(
-    area: Rect,
-    stepX: number,
-    stepZ: number,
-    place: (lx: number, lz: number, i: number, j: number) => void,
-  ): void {
+  /** Grille d'éléments dans une zone. */
+  grid(area: Rect, stepX: number, stepZ: number, place: (lx: number, lz: number, i: number, j: number) => void): void {
     const nx = Math.max(1, Math.floor((area.x1 - area.x0) / stepX));
     const nz = Math.max(1, Math.floor((area.z1 - area.z0) / stepZ));
     const ox = area.x0 + (area.x1 - area.x0 - (nx - 1) * stepX) / 2;
@@ -161,49 +163,25 @@ export class Furnisher {
     for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) place(ox + i * stepX, oz + j * stepZ, i, j);
   }
 
-  /** Éclairage au plafond. */
-  ceilingLight(kind: 'CHANDELIER' | 'HANGING_LAMP', lx: number, lz: number): void {
+  /** Luminaire au plafond. */
+  ceiling(kind: PropKind, lx: number, lz: number, variant = 0): void {
     const h = PROP_DEFS[kind].size[1] * 4;
-    this.f.prop(kind, lx, this.lv.ceil - h, lz, 0, 0);
+    this.f.prop(kind, lx, this.lv.ceil - h, lz, 0, variant);
   }
 
-  /** Lumières d'une pièce : lustres/suspensions répartis + appliques. */
-  roomLights(r: Room, kind: 'CHANDELIER' | 'HANGING_LAMP', sconces: boolean, spacing = 22): void {
+  /** Luminaires répartis dans une pièce. */
+  lights(r: Rect, kind: PropKind, spacing = 20, variant = 0): void {
     const w = r.x1 - r.x0;
     const d = r.z1 - r.z0;
-    const nx = Math.max(1, Math.round(w / spacing));
-    const nz = Math.max(1, Math.round(d / spacing));
-    for (let i = 0; i < nx; i++)
-      for (let j = 0; j < nz; j++) this.ceilingLight(kind, r.x0 + ((i + 0.5) * w) / nx, r.z0 + ((j + 0.5) * d) / nz);
-    if (sconces) {
-      const y = 8;
-      if (d > 14) {
-        this.wall(r, 'WALL_SCONCE', 'left', r.z0 + d / 2, y);
-        this.wall(r, 'WALL_SCONCE', 'right', r.z0 + d / 2, y);
-      }
-      if (w > 18) {
-        this.wall(r, 'WALL_SCONCE', 'back', r.x0 + w * 0.25, y);
-        this.wall(r, 'WALL_SCONCE', 'back', r.x0 + w * 0.75, y);
-      }
-    }
+    // espacement réel un peu plus large que demandé : moins de sources, même ambiance
+    const nx = Math.max(1, Math.round(w / (spacing * 1.7)));
+    const nz = Math.max(1, Math.round(d / (spacing * 1.7)));
+    for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) this.ceiling(kind, r.x0 + ((i + 0.5) * w) / nx, r.z0 + ((j + 0.5) * d) / nz, variant);
   }
 
-  /** Quelques tableaux aux murs libres. */
-  paintings(r: Room, n: number, kinds: PropKind[] = ['PAINTING', 'PORTRAIT']): void {
-    const walls: ('left' | 'right' | 'back')[] = ['left', 'right', 'back'];
-    for (let i = 0; i < n; i++) {
-      const w = walls[i % walls.length];
-      const len = w === 'back' ? r.x1 - r.x0 : r.z1 - r.z0;
-      const start = w === 'back' ? r.x0 : r.z0;
-      const along = start + len * (0.25 + 0.5 * ((i * 0.618) % 1));
-      if (!this.wallClear(r, w, along)) continue;
-      this.wall(r, this.rng.pick(kinds), w, along, 7, this.rng.int(0, 7));
-    }
-  }
-
-  /** Vrai si le mur est dégagé (pas d'ouverture ni d'objet) à cet endroit, à hauteur de tableau. */
-  wallClear(r: Room, wall: 'left' | 'right' | 'back' | 'front', along: number): boolean {
-    const y = this.lv.floorTop + 8;
+  /** Vrai si le mur est plein (pas d'ouverture) à cet endroit, à hauteur de tableau. */
+  wallClear(r: Rect, wall: Side4, along: number, height = 8): boolean {
+    const y = this.lv.floorTop + height;
     for (let k = -3; k <= 3; k++) {
       const a = Math.floor(along + k);
       let x: number;
@@ -213,8 +191,7 @@ export class Furnisher {
       else if (wall === 'back') [x, z] = [a, r.z1];
       else [x, z] = [a, r.z0 - 1];
       const m = this.f.get(x, y, z);
-      if (m === 0 || m === M.GLASS || m === M.GLASS_LIT || m === M.GLASS_SHOP) return false;
-      // l'espace devant le mur doit être libre
+      if (m === 0 || m === M.GLASS || m === M.GLASS_LIT || m === M.GLASS_SHOP || m === M.GLASS_CLEAR || m === M.GLASS_COOL) return false;
       let fx = x;
       let fz = z;
       if (wall === 'left') fx = x + 1;
@@ -226,21 +203,77 @@ export class Furnisher {
     return true;
   }
 
-  // ------------------------------------------------------------------------------------
-  // Éléments construits en voxels
-
-  /** Comptoir (bar, boutique) le long de z (orient 'z') ou de x. */
-  counter(x0: number, z0: number, x1: number, z1: number, wood: number, top: number, height = 4): void {
-    const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + height - 1, z1, wood);
-    this.f.fill(x0, y + height - 1, z0, x1, y + height, z1, top);
+  /** Quelques cadres aux murs pleins. */
+  art(r: Rect, n: number, kinds: PropKind[] = ['WALL_ART'], height = 7): void {
+    const walls: Side4[] = ['back', 'left', 'right'];
+    let placed = 0;
+    for (let i = 0; i < n * 4 && placed < n; i++) {
+      const w = walls[i % walls.length];
+      const len = w === 'back' ? r.x1 - r.x0 : r.z1 - r.z0;
+      const start = w === 'back' ? r.x0 : r.z0;
+      const along = start + len * (0.2 + 0.6 * ((i * 0.618) % 1));
+      if (!this.wallClear(r, w, along, height)) continue;
+      this.wall(r, this.rng.pick(kinds), w, along, height, this.rng.int(0, 7));
+      placed++;
+    }
   }
 
-  /** Étagères murales en voxels garnies de marchandises colorées. */
-  shelves(x0: number, z0: number, x1: number, z1: number, height: number, goods: number[]): void {
+  // --------------------------------------------------------------------- éléments en voxels
+
+  /** Comptoir (bar, boutique) : corps + plateau. */
+  counter(x0: number, z0: number, x1: number, z1: number, body: number, top: number, height = 4, led?: number): void {
     const y = this.lv.floorTop;
-    this.f.fill(x0, y, z0, x1, y + height, z1, M.WALNUT);
-    // creux des étagères remplis de marchandises
+    this.f.fill(x0, y, z0, x1, y + height - 1, z1, body);
+    this.f.fill(x0, y + height - 1, z0, x1, y + height, z1, top);
+    if (led) this.f.fill(x0, y, z0, x1, y + 1, z1, led);
+  }
+
+  /** Revêtement de sol sur une zone (tapis, piste de danse…). */
+  floor(x0: number, z0: number, x1: number, z1: number, mat: number): void {
+    this.f.fill(Math.round(x0), this.lv.floorTop - 1, Math.round(z0), Math.round(x1), this.lv.floorTop, Math.round(z1), mat);
+  }
+
+  /** Estrade (scène, ring) : plateau surélevé. */
+  dais(x0: number, z0: number, x1: number, z1: number, h: number, mat: number, edge?: number): void {
+    const y = this.lv.floorTop;
+    this.f.fill(x0, y, z0, x1, y + h, z1, mat);
+    if (edge) {
+      this.f.fill(x0, y + h - 1, z0, x1, y + h, z0 + 1, edge);
+      this.f.fill(x0, y + h - 1, z1 - 1, x1, y + h, z1, edge);
+      this.f.fill(x0, y + h - 1, z0, x0 + 1, y + h, z1, edge);
+      this.f.fill(x1 - 1, y + h - 1, z0, x1, y + h, z1, edge);
+    }
+  }
+
+  /** Cylindre vertical en voxels (cuves, piliers). */
+  cylinder(cx: number, cz: number, r: number, y0: number, y1: number, mat: number, shell = false): void {
+    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++)
+      for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
+        const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
+        if (d <= r && (!shell || d > r - 1.5)) this.f.fill(x, y0, z, x + 1, y1, z + 1, mat);
+      }
+  }
+
+  /** Colonne carrée du sol au plafond. */
+  column(cx: number, cz: number, size: number, mat: number, cap: number): void {
+    const y0 = this.lv.floorTop;
+    const x0 = Math.round(cx - size / 2);
+    const z0 = Math.round(cz - size / 2);
+    this.f.fill(x0, y0, z0, x0 + size, this.lv.ceil, z0 + size, mat);
+    this.f.fill(x0 - 1, this.lv.ceil - 1, z0 - 1, x0 + size + 1, this.lv.ceil, z0 + size + 1, cap);
+    this.f.fill(x0 - 1, y0, z0 - 1, x0 + size + 1, y0 + 1, z0 + size + 1, cap);
+  }
+
+  /** Cloison basse ou vitrée entre deux points (le long de x ou de z). */
+  partition(x0: number, z0: number, x1: number, z1: number, h: number, mat: number): void {
+    const y = this.lv.floorTop;
+    this.f.fill(x0, y, z0, x1, y + h, z1, mat);
+  }
+
+  /** Étagères murales garnies de marchandises colorées (voxels). */
+  shelves(x0: number, z0: number, x1: number, z1: number, height: number, goods: number[], frame = M.STEEL): void {
+    const y = this.lv.floorTop;
+    this.f.fill(x0, y, z0, x1, y + height, z1, frame);
     const horizontal = x1 - x0 > z1 - z0;
     for (let ly = y + 1; ly < y + height - 1; ly += 3) {
       if (horizontal) {
@@ -258,603 +291,480 @@ export class Furnisher {
       }
     }
   }
-
-  /** Tapis (remplace le sol sur une zone). */
-  rug(x0: number, z0: number, x1: number, z1: number, mat: number): void {
-    this.f.fill(Math.round(x0), this.lv.floorTop - 1, Math.round(z0), Math.round(x1), this.lv.floorTop, Math.round(z1), mat);
-  }
-
-  /** Cylindre vertical en voxels (cuves, chaudières, piliers). */
-  cylinder(cx: number, cz: number, r: number, y0: number, y1: number, mat: number, shell = false): void {
-    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
-      for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
-        const d = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
-        if (d <= r && (!shell || d > r - 1.5)) this.f.fill(x, y0, z, x + 1, y1, z + 1, mat);
-      }
-    }
-  }
-
-  /** Colonne (pilier) carrée. */
-  column(cx: number, cz: number, size: number, mat: number, cap: number): void {
-    const y0 = this.lv.floorTop;
-    const x0 = Math.round(cx - size / 2);
-    const z0 = Math.round(cz - size / 2);
-    this.f.fill(x0, y0, z0, x0 + size, this.lv.ceil, z0 + size, mat);
-    this.f.fill(x0 - 1, this.lv.ceil - 1, z0 - 1, x0 + size + 1, this.lv.ceil, z0 + size + 1, cap);
-    this.f.fill(x0 - 1, y0, z0 - 1, x0 + size + 1, y0 + 1, z0 + size + 1, cap);
-  }
-
-  fireplace(r: Room, wall: 'left' | 'right' | 'back' | 'front', mantel: number, at?: number): void {
-    const pos = fireplace(this.f, this.lv, r, wall, mantel, at);
-    // pare-feu et fauteuils
-    const yaw = wall === 'left' ? FACE.fromLeft : wall === 'right' ? FACE.fromRight : wall === 'back' ? FACE.fromBack : 0;
-    const dx = Math.sin(yaw);
-    const dz = Math.cos(yaw);
-    this.p('FIRE_SCREEN', pos.lx + dx * 2.2, pos.lz + dz * 2.2, yaw, 0, true);
-    this.reserve(pos.lx - 5 + dx * 2, pos.lz - 5 + dz * 2, pos.lx + 5 + dx * 2, pos.lz + 5 + dz * 2);
-  }
 }
 
 // ======================================================================================
 // Ameublement par type de pièce
 
-const GOODS_HATS = [M.PAINT_BLACK, M.CLOTH_NAVY, M.SACK, M.PAINT_CREAM, M.PAINT_MAROON, M.FELT];
-const GOODS_PAWN = [M.BRASS, M.SILVER, M.CRATE, M.BOOKS, M.PAINT_BLACK, M.GOLD, M.CLOTH_RED, M.COPPER];
-const GOODS_BREAD = [M.HAY, M.PAINT_OCHRE, M.SACK, M.CRATE];
-const GOODS_GROCER = [M.CRATE, M.SACK, M.PAINT_GREEN, M.PAINT_RED, M.BARREL, M.HAY];
+const GOODS_STORE = [M.PAINT_RED, M.PAINT_YELLOW, M.PAINT_TEAL, M.PAINT_WHITE, M.STUCCO_GREEN, M.PAINT_NAVY];
+const GOODS_HERBS = [M.WALNUT, M.BRASS, M.STUCCO_RED, M.PAINT_CREAM, M.STUCCO_GREEN];
+const GOODS_TECH = [M.METAL_PANEL_DARK, M.LED_CYAN, M.STEEL, M.LED_PINK, M.METAL_PANEL_WHITE];
+const GOODS_PHARMA = [M.PAINT_WHITE, M.PAINT_TEAL, M.PAINT_RED, M.CONCRETE_WHITE];
 
-export function furnishRoom(fu: Furnisher, r: Room, buildingType: string, variant: number): void {
+/** Variante de couleur liée au parrain (0 = neutre, 1 = Dadou, 2 = Even). */
+function bossVar(fu: Furnisher): number {
+  return fu.boss === 'dadou' ? 1 : fu.boss === 'even' ? 2 : 0;
+}
+
+export function furnishRoom(fu: Furnisher, r: Room, variant: number): void {
   const rng = fu.rng;
   const cx = (r.x0 + r.x1) / 2;
   const cz = (r.z0 + r.z1) / 2;
   const w = r.x1 - r.x0;
   const d = r.z1 - r.z0;
-  // passage devant l'accès de la pièce
-  if (r.doorX !== undefined && r.doorZ !== undefined) {
-    fu.reserve(r.doorX - 4, r.doorZ - 6, r.doorX + 4, r.doorZ + 6);
-  }
+  const bv = bossVar(fu);
   switch (r.kind) {
+    // ------------------------------------------------------------------ nuit et loisirs
+    case 'club_floor': {
+      // piste de danse lumineuse au centre, DJ au fond, bar à gauche, enceintes
+      fu.floor(cx - w * 0.22, cz - d * 0.1, cx + w * 0.22, cz + d * 0.3, M.PAVER_LED);
+      fu.dais(cx - 7, r.z1 - 7, cx + 7, r.z1, 3, M.METAL_PANEL_DARK, M.LED_PINK);
+      fu.p('DJ_BOOTH', cx, r.z1 - 4.5, Math.PI, variant + 1, true, fu.lv.floorTop + 3);
+      fu.p('SPEAKER_STACK', cx - 9, r.z1 - 3, Math.PI, 0, true);
+      fu.p('SPEAKER_STACK', cx + 9, r.z1 - 3, Math.PI, 0, true);
+      fu.counter(r.x0 + 2, r.z0 + 6, r.x0 + 5, r.z1 - 10, M.METAL_PANEL_DARK, M.MARBLE_BLACK, 4, M.LED_PINK);
+      fu.p('BOTTLE_SHELF', r.x0 + 0.9, cz - 2, FACE.fromLeft, 0, true);
+      for (let z = r.z0 + 8; z < r.z1 - 11; z += 3) fu.p('BAR_STOOL', r.x0 + 7, z, -HALF_PI);
+      fu.mark('bar', r.x0 + 6.5, cz);
+      for (let x = r.x0 + 10; x < r.x1 - 6; x += 10) fu.ceiling('STAGE_LIGHTS', x, cz, (x * 7) & 7);
+      fu.lineWall(r, 'SOFA', 'right', 12, 3, () => 2);
+      fu.art(r, 2, ['NEON_ART'], 8);
+      break;
+    }
+    case 'club_vip': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_PURPLE);
+      fu.p('SOFA_LUXE', cx, r.z1 - 3, Math.PI, 3);
+      fu.p('SOFA_LUXE', cx, r.z0 + 3, 0, 3);
+      fu.p('COFFEE_TABLE', cx, cz, 0);
+      fu.p('BAR_COUNTER', r.x0 + 2, cz, FACE.fromLeft, 6);
+      fu.p('POOL_TABLE', cx + w * 0.25, cz, HALF_PI);
+      fu.lights(r, 'PENDANT_LIGHT', 14);
+      fu.art(r, 2, ['NEON_ART'], 8);
+      break;
+    }
+    case 'jazz_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.FLOOR_WALNUT);
+      fu.dais(cx - 9, r.z1 - 9, cx + 9, r.z1, 3, M.FLOOR_DARK, M.BRASS);
+      fu.p('GRAND_PIANO', cx - 4, r.z1 - 5, Math.PI + 0.3, 0, true, fu.lv.floorTop + 3);
+      fu.p('MIC_STAND', cx + 2, r.z1 - 7, Math.PI, 0, true, fu.lv.floorTop + 3);
+      fu.p('SPEAKER', cx + 6, r.z1 - 3, Math.PI, 0, true, fu.lv.floorTop + 3);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 6, x1: r.x1 - 4, z1: r.z1 - 13 }, 9, 8, (x, z) => fu.tableSet('TABLE_SMALL', x, z, 3, 'CHAIR', 0, 1));
+      fu.counter(r.x0 + 2, r.z0 + 3, r.x0 + 5, r.z0 + 3 + Math.min(20, d - 16), M.MAHOGANY, M.BRASS, 4, M.LED_GOLD);
+      fu.p('BOTTLE_SHELF', r.x0 + 0.9, r.z0 + 10, FACE.fromLeft, 0, true);
+      fu.mark('bar', r.x0 + 6.5, r.z0 + 10);
+      fu.lights(r, 'PENDANT_LIGHT', 12);
+      fu.ceiling('STAGE_LIGHTS', cx, r.z1 - 6, 5);
+      fu.art(r, 3, ['WALL_ART', 'NEON_ART'], 8);
+      break;
+    }
     case 'bar': {
-      // comptoir le long du mur gauche
-      const cx0 = r.x0 + 5;
-      const cz0 = r.z0 + 4;
-      const cz1 = r.z1 - 5;
-      fu.counter(cx0, cz0, cx0 + 2, cz1, M.MAHOGANY, M.MAHOGANY, 4);
-      fu.counter(r.x0, cz1 - 1, cx0 + 2, cz1 + 1, M.MAHOGANY, M.MAHOGANY, 4);
-      fu.f.fill(r.x0 + 1, fu.lv.floorTop, cz1 - 1, r.x0 + 4, fu.lv.floorTop + 4, cz1 + 1, 0); // passage du barman
-      fu.f.fill(cx0 + 2, fu.lv.floorTop, cz0, cx0 + 3, fu.lv.floorTop + 1, cz1, M.BRASS); // repose-pieds
-      fu.reserve(r.x0, r.z0, cx0 + 3, r.z1);
-      // étagères à bouteilles derrière le comptoir
-      for (let z = cz0 + 4; z < cz1 - 4; z += 8) fu.f.prop('BOTTLE_SHELF', r.x0 + 0.8, fu.lv.floorTop, z, FACE.fromLeft, rng.int(0, 3));
-      for (let z = cz0 + 3; z < cz1 - 2; z += 6) fu.f.prop('BEER_TAPS', cx0 + 1, fu.lv.floorTop + 4, z, FACE.fromLeft, 0);
-      fu.marks.bar = { lx: cx0 + 4.5, lz: (cz0 + cz1) / 2 };
-      fu.marks.barman = { lx: r.x0 + 2.5, lz: (cz0 + cz1) / 2, yaw: FACE.fromLeft };
-      // tabourets devant le comptoir
-      for (let z = cz0 + 2; z < cz1 - 1; z += 5) fu.p('STOOL', cx0 + 4, z, -HALF_PI, 0, true);
-      fu.reserve(cx0 + 3, r.z0, cx0 + 6, r.z1);
-      // tables
-      const area = { x0: cx0 + 7, z0: r.z0 + 3, x1: r.x1 - 2, z1: r.z1 - 2 };
-      fu.grid(area, 10, 10, (x, z) => {
-        if (rng.chance(0.85)) fu.tableSet(rng.chance(0.6) ? 'TABLE_ROUND' : 'TABLE_SQUARE', x, z, rng.int(2, 4));
+      fu.counter(r.x0 + 2, r.z0 + 4, r.x0 + 5, r.z1 - 4, M.WALNUT, M.MARBLE_BLACK, 4, M.LED_WARM);
+      fu.p('BOTTLE_SHELF', r.x0 + 0.9, cz, FACE.fromLeft, 0, true);
+      for (let z = r.z0 + 6; z < r.z1 - 5; z += 3) fu.p('BAR_STOOL', r.x0 + 7, z, -HALF_PI);
+      fu.mark('bar', r.x0 + 6.5, cz);
+      fu.grid({ x0: r.x0 + 12, z0: r.z0 + 4, x1: r.x1 - 3, z1: r.z1 - 3 }, 9, 8, (x, z) => fu.tableSet('TABLE_SMALL', x, z, 2, 'BAR_STOOL'));
+      fu.againstWall(r, 'JUKEBOX', 'back', r.x1 - 5);
+      fu.lights(r, 'PENDANT_LIGHT', 12);
+      fu.art(r, 2, ['NEON_ART', 'WALL_ART'], 8);
+      break;
+    }
+    case 'casino_floor': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_RED);
+      fu.grid({ x0: r.x0 + 5, z0: r.z0 + 6, x1: r.x1 - 5, z1: r.z1 - 8 }, 12, 9, (x, z, i, j) => {
+        if ((i + j) % 3 === 0) fu.p('ROULETTE', x, z, HALF_PI);
+        else fu.p('CASINO_TABLE', x, z, 0, i + j);
       });
-      fu.lineWall(r, 'BARREL', 'right', 9, 3);
-      fu.roomLights(r, 'HANGING_LAMP', true, 18);
-      fu.wall(r, 'DARTBOARD', 'right', r.z0 + d * 0.3, 7);
-      fu.paintings(r, 2, ['MIRROR', 'PAINTING']);
-      fu.p('SPITTOON', cx0 + 5, cz1 - 2, 0, 0, true);
-      break;
-    }
-    case 'parlour': {
-      fu.fireplace(r, 'back', M.MARBLE_BLACK);
-      fu.rug(r.x0 + 3, r.z0 + 3, r.x1 - 3, r.z1 - 3, M.CARPET_WORN);
-      fu.tableSet('TABLE_ROUND', cx, cz, 3, 'ARMCHAIR');
-      fu.lineWall(r, 'BENCH', 'left', 8, 3);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      fu.paintings(r, 2);
-      break;
-    }
-    case 'storeroom':
-    case 'stock':
-    case 'seized': {
-      fu.lineWall(r, 'BARREL', 'left', 3, 2);
-      fu.lineWall(r, 'CRATE_STACK', 'back', 5, 2);
-      fu.lineWall(r, 'CRATE', 'right', 4, 2);
-      fu.grid({ x0: r.x0 + 6, z0: r.z0 + 6, x1: r.x1 - 6, z1: r.z1 - 6 }, 7, 7, (x, z) => {
-        if (rng.chance(0.5)) fu.p(rng.pick(['SACKS', 'CRATE', 'BARREL'] as PropKind[]), x, z, rng.range(0, 3));
-      });
-      if (r.kind === 'seized') fu.p('CHEST', cx, cz, 0);
-      fu.roomLights(r, 'HANGING_LAMP', false, 24);
-      break;
-    }
-    case 'office': {
-      // bureau du parrain
-      const carpet = fu.boss === 'even' ? M.CARPET_BLUE : M.CARPET_RED;
-      fu.rug(r.x0 + 2, r.z0 + 3, r.x1 - 2, r.z1 - 2, carpet);
-      const dz = r.z1 - 6;
-      fu.p('DESK_BOSS', cx, dz, Math.PI, 0, true);
-      fu.p('BOSS_CHAIR', cx, dz + 3.6, Math.PI, 0, true);
-      fu.f.prop('OIL_LAMP', cx - 3.5, fu.lv.floorTop + 3.5, dz - 1, 0, 0);
-      fu.marks.desk = { lx: cx, lz: dz, yaw: Math.PI };
-      fu.marks.deskSeat = { lx: cx, lz: dz - 4.2 };
-      fu.reserve(cx - 6, dz - 7, cx + 6, r.z1);
-      // fauteuils des visiteurs, assez écartés pour laisser la place devant le bureau
-      fu.p('ARMCHAIR', cx - 5.5, dz - 7.5, 0.35, 0, true);
-      fu.p('ARMCHAIR', cx + 5.5, dz - 7.5, -0.35, 0, true);
-      fu.lineWall(r, 'BOOKSHELF', 'left', 5.5, 2);
-      fu.againstWall(r, 'SAFE', 'right', r.z1 - 4);
-      fu.againstWall(r, 'GLOBE', 'right', r.z0 + 4);
-      fu.againstWall(r, 'TROPHY_CASE', 'right', cz);
-      fu.wall(r, 'BANNER', 'back', cx - 6, 4, 0);
-      fu.wall(r, 'BANNER', 'back', cx + 6, 4, 0);
-      fu.wall(r, 'PORTRAIT', 'back', cx, 7, 9);
-      fu.roomLights(r, 'CHANDELIER', true, 30);
-      fu.p('MAP_STAND', r.x0 + 3, r.z0 + 3, Math.PI * 0.75, 0);
-      break;
-    }
-    case 'armory': {
-      fu.lineWall(r, 'WEAPON_RACK', 'back', 7, 1);
-      fu.lineWall(r, 'WEAPON_RACK', 'right', 7, 2);
-      fu.p('WORKBENCH', cx, cz, 0);
-      fu.lineWall(r, 'AMMO_CRATE', 'left', 4, 2);
-      fu.marks.armory = { lx: cx, lz: cz - 4 };
-      fu.roomLights(r, 'HANGING_LAMP', false, 20);
-      break;
-    }
-    case 'shop':
-    case 'backroom': {
-      if (r.kind === 'shop') {
-        const goods =
-          buildingType === 'bakery' ? GOODS_BREAD : buildingType === 'pawn' ? GOODS_PAWN : variant === 1 ? GOODS_HATS : GOODS_GROCER;
-        // comptoir transversal
-        const z = r.z0 + Math.round(d * 0.62);
-        fu.counter(r.x0 + 4, z, r.x1 - 9, z + 2, M.WALNUT, buildingType === 'butcher' ? M.MARBLE : M.WALNUT, 4);
-        fu.reserve(r.x0, z - 1, r.x1, r.z1);
-        fu.shelves(r.x0, r.z0 + 2, r.x0 + 1, z - 1, 9, goods);
-        fu.shelves(r.x1 - 1, r.z0 + 2, r.x1, z - 1, 9, goods);
-        fu.shelves(r.x0 + 2, r.z1 - 1, r.x1 - 2, r.z1, 10, goods);
-        if (buildingType === 'butcher') {
-          fu.f.prop('MEAT_RACK', cx - 3, fu.lv.floorTop, r.z1 - 3, Math.PI, 0);
-          fu.f.prop('MEAT_RACK', cx + 4, fu.lv.floorTop, r.z1 - 3, Math.PI, 1);
-        } else if (buildingType === 'bakery') {
-          fu.f.prop('BREAD_SHELF', cx, fu.lv.floorTop, r.z1 - 2.5, Math.PI, 0);
-        } else if (buildingType === 'pawn') {
-          fu.p('DISPLAY_CASE', cx - 4, r.z0 + 6, 0);
-          fu.p('GRANDFATHER_CLOCK', r.x0 + 3, z - 4, FACE.fromLeft);
-        }
-        fu.marks.counter = { lx: cx, lz: z - 2 };
-        fu.p('CHAIR', r.x0 + 4, r.z0 + 4, 0.6);
-        fu.f.prop('OIL_LAMP', r.x0 + 6, fu.lv.floorTop + 4, z + 1, 0, 0);
-        fu.roomLights(r, 'HANGING_LAMP', false, 20);
-      } else {
-        fu.lineWall(r, 'CRATE', 'back', 4, 2);
-        fu.lineWall(r, 'SACKS', 'left', 5, 2);
-        if (buildingType === 'bakery') {
-          // four à pain en briques
-          fu.f.fill(r.x1 - 9, fu.lv.floorTop, r.z1 - 6, r.x1 - 1, fu.lv.floorTop + 7, r.z1 - 1, M.FIREBRICK);
-          fu.f.fill(r.x1 - 7, fu.lv.floorTop + 1, r.z1 - 6, r.x1 - 3, fu.lv.floorTop + 3, r.z1 - 5, M.FIRE);
-          fu.f.light(r.x1 - 5, fu.lv.floorTop + 3, r.z1 - 7, 0.7, 6);
-        }
-        fu.p('TABLE_LONG', cx, cz, 0);
-        fu.roomLights(r, 'HANGING_LAMP', false, 24);
-      }
-      break;
-    }
-    case 'gaming': {
-      fu.rug(r.x0 + 2, r.z0 + 2, r.x1 - 2, r.z1 - 2, M.CARPET_RED);
-      const area = { x0: r.x0 + 4, z0: r.z0 + 5, x1: r.x1 - 4, z1: r.z1 - 4 };
-      fu.grid(area, 11, 11, (x, z, i, j) => {
-        if ((i + j) % 3 === 2) fu.p('ROULETTE', x, z, 0);
-        else fu.tableSet('CARD_TABLE', x, z, 4);
-      });
-      fu.counter(r.x1 - 3, r.z0 + 4, r.x1, r.z0 + 14, M.MAHOGANY, M.MAHOGANY, 4);
-      fu.roomLights(r, 'CHANDELIER', true, 20);
-      fu.paintings(r, 3);
+      fu.lineWall(r, 'SLOT_MACHINE', 'left', 4, 3, (i) => i);
+      fu.lineWall(r, 'SLOT_MACHINE', 'right', 4, 3, (i) => i + 3);
+      fu.lights(r, 'CHANDELIER', 18);
       break;
     }
     case 'cashier': {
-      fu.againstWall(r, 'SAFE', 'back', cx - 3);
-      fu.againstWall(r, 'SAFE', 'back', cx + 3);
-      fu.p('DESK', cx, cz, Math.PI);
-      fu.p('CHAIR', cx, cz + 3, Math.PI);
-      fu.roomLights(r, 'HANGING_LAMP', false);
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
+      fu.counter(r.x0 + 2, r.z0 + 3, r.x1 - 2, r.z0 + 6, M.METAL_PANEL_DARK, M.GOLD, 5);
+      fu.f.fill(r.x0 + 2, fu.lv.floorTop + 5, r.z0 + 4, r.x1 - 2, fu.lv.floorTop + 11, r.z0 + 5, M.GLASS);
+      fu.againstWall(r, 'SAFE', 'back', cx - 4);
+      fu.againstWall(r, 'SAFE', 'back', cx + 4);
+      fu.againstWall(r, 'SERVER_RACK', 'right', cz + 3);
+      fu.lights(r, 'CEILING_LIGHT', 14);
+      fu.mark('vault', cx, r.z1 - 4);
+      break;
+    }
+    case 'theatre_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_RED);
+      fu.dais(r.x0 + 3, r.z1 - 12, r.x1 - 3, r.z1, 4, M.FLOOR_DARK, M.GOLD);
+      fu.f.fill(r.x0 + 3, fu.lv.floorTop + 4, r.z1 - 2, r.x1 - 3, fu.lv.ceil - 1, r.z1 - 1, M.SCREEN);
+      for (let z = r.z0 + 5; z < r.z1 - 15; z += 4)
+        for (let x = r.x0 + 4; x < r.x1 - 6; x += 11) if (Math.abs(x + 5 - cx) > 3) fu.p('SEAT_ROW', x + 5, z, Math.PI);
+      fu.ceiling('STAGE_LIGHTS', cx - 8, r.z1 - 14, 1);
+      fu.ceiling('STAGE_LIGHTS', cx + 8, r.z1 - 14, 6);
+      fu.lights(r, 'CHANDELIER', 22);
       break;
     }
     case 'foyer': {
-      fu.rug(r.x0 + 1, r.z0 + 1, r.x1 - 1, r.z1 - 1, M.CARPET_RED);
-      fu.p('TICKET_BOOTH', r.x0 + 5, cz, FACE.fromLeft);
-      fu.lineWall(r, 'POSTER_BOARD', 'right', 8, 3);
-      fu.lineWall(r, 'PLANT_POT', 'front', 12, 3);
-      fu.roomLights(r, 'CHANDELIER', true, 24);
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE);
+      fu.p('TICKET_BOOTH', r.x0 + 5, cz, HALF_PI);
+      fu.p('BAR_COUNTER', r.x1 - 3, cz, -HALF_PI, 5);
+      fu.p('PLANT_BIG', r.x0 + 3, r.z0 + 3, 0);
+      fu.p('PLANT_BIG', r.x1 - 3, r.z0 + 3, 0);
+      fu.lights(r, 'CHANDELIER', 16);
+      fu.art(r, 3, ['WALL_ART'], 8);
       break;
     }
-    case 'auditorium': {
-      // scène au fond
-      const sz = r.z1 - 14;
-      fu.f.fill(r.x0, fu.lv.floorTop, sz, r.x1, fu.lv.floorTop + 4, r.z1, M.FLOOR_DARK);
-      fu.f.fill(r.x0, fu.lv.floorTop, sz, r.x1, fu.lv.floorTop + 3, sz + 1, M.PAINT_MAROON);
-      // rideaux
-      fu.f.fill(r.x0, fu.lv.floorTop + 4, sz + 1, r.x0 + 6, fu.lv.ceil, sz + 2, M.CLOTH_RED);
-      fu.f.fill(r.x1 - 6, fu.lv.floorTop + 4, sz + 1, r.x1, fu.lv.ceil, sz + 2, M.CLOTH_RED);
-      fu.f.fill(r.x0, fu.lv.ceil - 3, sz + 1, r.x1, fu.lv.ceil, sz + 2, M.CLOTH_RED);
-      fu.f.fill(r.x0, fu.lv.floorTop + 4, r.z1 - 1, r.x1, fu.lv.ceil, r.z1, M.PAINT_NAVY);
-      // rampe
-      for (let x = r.x0 + 3; x < r.x1 - 2; x += 5) fu.f.light(x, fu.lv.floorTop + 5, sz + 1, 0.45, 5);
-      fu.f.prop('PIANO', r.x0 + 5, fu.lv.floorTop + 4, sz + 6, Math.PI, 0);
-      fu.reserve(r.x0, sz - 2, r.x1, r.z1);
-      // rangées de sièges face à la scène
-      for (let z = r.z0 + 4; z < sz - 4; z += 4) {
-        for (let x = r.x0 + 4; x < r.x1 - 3; x += 11) {
-          if (Math.abs(x + 5 - cx) < 3) continue;
-          fu.p('SEAT_ROW', x + 5, z, 0);
-        }
-      }
-      fu.roomLights(r, 'CHANDELIER', true, 30);
+    case 'gym_floor': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.RUBBER);
+      // ring au centre
+      const rx0 = Math.round(cx - 10);
+      const rz0 = Math.round(cz - 8);
+      fu.dais(rx0, rz0, rx0 + 20, rz0 + 20, 3, M.CLOTH_WHITE, M.PAINT_RED);
+      for (const [x, z] of [
+        [rx0 + 0.5, rz0 + 0.5],
+        [rx0 + 19.5, rz0 + 0.5],
+        [rx0 + 0.5, rz0 + 19.5],
+        [rx0 + 19.5, rz0 + 19.5],
+      ])
+        fu.p('RING_POST', x, z, 0, 0, true, fu.lv.floorTop + 3);
+      fu.reserve(rx0 - 1, rz0 - 1, rx0 + 21, rz0 + 21);
+      fu.lineWall(r, 'PUNCHING_BAG', 'left', 5, 3);
+      fu.lineWall(r, 'WEIGHT_BENCH', 'right', 7, 3);
+      fu.lights(r, 'NEON_TUBE_CEILING', 12, 7);
+      fu.art(r, 2, ['WALL_ART'], 8);
       break;
     }
-    case 'cafe': {
-      fu.counter(r.x0 + 3, r.z1 - 4, r.x1 - 3, r.z1 - 2, M.MAHOGANY, M.MARBLE, 4);
-      fu.reserve(r.x0, r.z1 - 6, r.x1, r.z1);
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 3, x1: r.x1 - 3, z1: r.z1 - 7 }, 8, 8, (x, z) => {
-        fu.tableSet('TABLE_SQUARE', x, z, 2);
-      });
-      fu.lineWall(r, 'PLANT_POT', 'left', 12, 3);
-      fu.paintings(r, 3, ['MIRROR', 'PAINTING']);
-      fu.roomLights(r, 'CHANDELIER', true, 22);
+    // ------------------------------------------------------------------ commerces
+    case 'store':
+    case 'pharmacy':
+    case 'herbal': {
+      const goods = r.kind === 'herbal' ? GOODS_HERBS : r.kind === 'pharmacy' ? GOODS_PHARMA : GOODS_STORE;
+      const frame = r.kind === 'herbal' ? M.WALNUT : M.STEEL;
+      fu.shelves(r.x0, r.z0 + 3, r.x0 + 2, r.z1 - 3, 9, goods, frame);
+      fu.shelves(r.x0 + 4, r.z1 - 2, r.x1 - 4, r.z1, 9, goods, frame);
+      for (let x = r.x0 + 8; x < r.x1 - 8; x += 9) fu.p('STORE_SHELF', x, cz, HALF_PI);
+      fu.p('CHECKOUT', r.x1 - 4, r.z0 + 5, -HALF_PI);
+      fu.mark('counter', r.x1 - 7, r.z0 + 5);
+      fu.lights(r, r.kind === 'herbal' ? 'LANTERN_RED' : 'CEILING_LIGHT', 12);
+      break;
+    }
+    case 'diner': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CHECKER);
+      fu.counter(r.x0 + 3, r.z1 - 6, r.x1 - 6, r.z1 - 3, M.CHROME, M.STUCCO_RED, 4, M.LED_RED);
+      for (let x = r.x0 + 5; x < r.x1 - 7; x += 3) fu.p('BAR_STOOL', x, r.z1 - 8, 0, 1);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 11 }, 8, 7, (x, z) => fu.tableSet('TABLE_SMALL', x, z, 2, 'CHAIR', 0, 2));
+      fu.againstWall(r, 'JUKEBOX', 'right', cz);
+      fu.lights(r, 'PENDANT_LIGHT', 10);
+      fu.mark('counter', cx, r.z1 - 8);
       break;
     }
     case 'kitchen': {
-      fu.f.fill(r.x0, fu.lv.floorTop, r.z1 - 4, r.x0 + 8, fu.lv.floorTop + 4, r.z1, M.IRON);
-      fu.f.fill(r.x0 + 2, fu.lv.floorTop + 1, r.z1 - 4, r.x0 + 6, fu.lv.floorTop + 2, r.z1 - 3, M.FIRE);
-      fu.f.light(r.x0 + 4, fu.lv.floorTop + 3, r.z1 - 6, 0.6, 6);
-      fu.p('TABLE_LONG', cx, cz, 0);
-      fu.lineWall(r, 'BARREL', 'right', 4, 2);
-      fu.lineWall(r, 'CABINET', 'back', 6, 10);
-      fu.roomLights(r, 'HANGING_LAMP', false);
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TILE_WHITE);
+      fu.lineWall(r, 'KITCHEN_COUNTER', 'back', 10, 2);
+      fu.againstWall(r, 'FRIDGE', 'left', cz);
+      fu.p('KITCHEN_ISLAND', cx, cz, 0);
+      fu.lights(r, 'CEILING_LIGHT', 10);
       break;
     }
-    case 'banking_hall': {
-      // comptoir des guichetiers avec grille en laiton
-      const z = r.z0 + Math.round(d * 0.55);
-      fu.counter(r.x0 + 3, z, r.x1 - 3, z + 2, M.MAHOGANY, M.MARBLE, 5);
-      for (let x = r.x0 + 3; x < r.x1 - 3; x += 2) fu.f.fill(x, fu.lv.floorTop + 5, z + 1, x + 1, fu.lv.floorTop + 9, z + 2, M.BRASS);
-      fu.f.fill(r.x0 + 3, fu.lv.floorTop + 9, z + 1, r.x1 - 3, fu.lv.floorTop + 10, z + 2, M.BRASS);
-      // ouverture dans le comptoir
-      fu.f.fill(r.x1 - 7, fu.lv.floorTop, z, r.x1 - 3, fu.lv.floorTop + 10, z + 2, 0);
-      fu.reserve(r.x1 - 9, z - 3, r.x1 - 2, z + 5);
-      for (let x = r.x0 + 6; x < r.x1 - 10; x += 8) {
-        fu.p('DESK', x, z + 5, Math.PI);
-        fu.p('CHAIR', x, z + 3.5, Math.PI);
-      }
-      fu.column(r.x0 + 8, r.z0 + 8, 2, M.MARBLE, M.GOLD);
-      fu.column(r.x1 - 8, r.z0 + 8, 2, M.MARBLE, M.GOLD);
-      fu.lineWall(r, 'BENCH', 'left', 9, 3);
-      fu.wall(r, 'PORTRAIT', 'right', cz, 7, 8);
-      fu.roomLights(r, 'CHANDELIER', true, 24);
-      fu.p('GRANDFATHER_CLOCK', r.x1 - 3, r.z0 + 3, FACE.fromRight);
+    case 'teahouse': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.FLOOR_DARK);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 9, 9, (x, z, i, j) => {
+        if ((i + j) % 2 === 0) fu.tableSet('TEA_TABLE', x, z, 4, 'CHAIR', 0, 3);
+        else fu.p('PLANT_BIG', x, z, 0);
+      });
+      fu.lights(r, 'LANTERN_RED', 9);
+      fu.art(r, 3, ['WALL_ART'], 8);
+      fu.againstWall(r, 'AQUARIUM', 'back', cx);
+      break;
+    }
+    case 'mahjong_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_RED);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 8, 8, (x, z) => fu.tableSet('MAHJONG_TABLE', x, z, 4, 'CHAIR', 0, 4));
+      fu.lights(r, 'LANTERN_RED', 8);
+      fu.mark('vault', r.x1 - 3, r.z1 - 3);
+      break;
+    }
+    case 'tech_market': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TILE_DARK);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 5, x1: r.x1 - 4, z1: r.z1 - 4 }, 11, 8, (x, z, i, j) => fu.p('MARKET_STALL', x, z, j % 2 ? Math.PI : 0, i * 3 + j));
+      fu.shelves(r.x0, r.z0 + 4, r.x0 + 2, r.z1 - 4, 8, GOODS_TECH, M.METAL_PANEL_DARK);
+      fu.lights(r, 'NEON_TUBE_CEILING', 10, 1);
+      break;
+    }
+    case 'clinic': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.LINOLEUM);
+      fu.p('MEDICAL_BED', cx - 4, cz, 0);
+      fu.p('SURGERY_ARM', cx - 4, cz - 4, 0);
+      fu.p('MEDICAL_BED', cx + 5, cz, 0);
+      fu.againstWall(r, 'SERVER_RACK', 'back', cx + 8);
+      fu.lights(r, 'CEILING_LIGHT', 9);
+      break;
+    }
+    case 'restaurant': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.PARQUET);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 10, 9, (x, z) => fu.tableSet('DINING_TABLE', x, z, 6, 'CHAIR', 0, 5));
+      fu.lights(r, 'CHANDELIER', 16);
+      fu.art(r, 3, ['WALL_ART'], 8);
+      fu.mark('vault', r.x1 - 3, r.z1 - 3);
+      break;
+    }
+    case 'boathouse': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.DECK_WOOD);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 8, 7, (x, z) => fu.tableSet('TABLE_SMALL', x, z, 3, 'CHAIR', 0, 1));
+      fu.p('BAR_COUNTER', r.x1 - 2, cz, -HALF_PI, 4);
+      fu.lights(r, 'PENDANT_LIGHT', 10);
+      break;
+    }
+    case 'hotel_lobby': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE);
+      fu.p('RECEPTION_DESK', cx, r.z1 - 4, Math.PI);
+      fu.p('SOFA_LUXE', r.x0 + 6, cz, HALF_PI, 4);
+      fu.p('SOFA_LUXE', r.x1 - 6, cz, -HALF_PI, 4);
+      fu.p('COFFEE_TABLE', r.x0 + 10, cz, HALF_PI);
+      fu.p('LUGGAGE_CART', r.x1 - 4, r.z0 + 4, 0);
+      fu.p('PLANT_BIG', r.x0 + 3, r.z0 + 3, 0);
+      fu.p('PLANT_BIG', r.x1 - 3, r.z0 + 3, 0);
+      fu.lights(r, 'CHANDELIER', 16);
+      fu.art(r, 3, ['WALL_ART'], 9);
+      break;
+    }
+    case 'suite': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_BLUE);
+      fu.againstWall(r, 'BED_KING', 'back', cx);
+      fu.p('NIGHTSTAND', cx - 6, r.z1 - 2, Math.PI);
+      fu.p('NIGHTSTAND', cx + 6, r.z1 - 2, Math.PI);
+      fu.p('SOFA', cx, r.z0 + 4, 0, 4);
+      fu.wall(r, 'TV_WALL', 'front', cx, 6);
+      fu.lights(r, 'PENDANT_LIGHT', 12);
+      break;
+    }
+    case 'gallery_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO);
+      fu.grid({ x0: r.x0 + 6, z0: r.z0 + 6, x1: r.x1 - 6, z1: r.z1 - 6 }, 10, 10, (x, z, i, j) => fu.p((i + j) % 2 ? 'SCULPTURE' : 'ART_PEDESTAL', x, z, rng.range(0, 3), i + j));
+      fu.art(r, 6, ['WALL_ART'], 8);
+      fu.lights(r, 'CEILING_LIGHT', 12);
+      fu.mark('vault', cx, r.z1 - 3);
+      break;
+    }
+    case 'bank_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE_GREEN);
+      fu.counter(r.x0 + 4, r.z1 - 9, r.x1 - 4, r.z1 - 6, M.MARBLE, M.BRASS, 5);
+      fu.f.fill(r.x0 + 4, fu.lv.floorTop + 5, r.z1 - 8, r.x1 - 4, fu.lv.floorTop + 10, r.z1 - 7, M.GLASS);
+      for (let x = r.x0 + 6; x < r.x1 - 6; x += 7) fu.p('OFFICE_CHAIR', x, r.z1 - 4, Math.PI);
+      fu.p('PLANT_BIG', r.x0 + 3, r.z0 + 3, 0);
+      fu.p('PLANT_BIG', r.x1 - 3, r.z0 + 3, 0);
+      for (const x of [cx - w / 4, cx + w / 4]) fu.column(x, cz - 3, 3, M.MARBLE, M.GOLD);
+      fu.lights(r, 'CHANDELIER', 16);
       break;
     }
     case 'vault': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.METAL_PANEL_DARK);
+      fu.againstWall(r, 'VAULT_DOOR', 'front', cx);
       fu.lineWall(r, 'SAFE', 'left', 4, 2);
       fu.lineWall(r, 'SAFE', 'right', 4, 2);
-      // lingots
-      for (let x = cx - 3; x < cx + 3; x++) fu.f.fill(Math.floor(x), fu.lv.floorTop, Math.floor(cz), Math.floor(x) + 1, fu.lv.floorTop + 2 - (x & 1), Math.floor(cz) + 2, M.GOLD);
-      fu.lineWall(r, 'CHEST', 'back', 5, 2);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      break;
-    }
-    case 'manager':
-    case 'director':
-    case 'police_office':
-    case 'foreman':
-    case 'customs_hall': {
-      if (r.kind === 'customs_hall') {
-        const z = r.z0 + Math.round(d * 0.5);
-        fu.counter(r.x0 + 3, z, r.x1 - 8, z + 2, M.WALNUT, M.WALNUT, 4);
-        fu.reserve(r.x0, z - 2, r.x1 - 7, z + 4);
-        fu.lineWall(r, 'CRATE', 'back', 5, 3);
-        fu.lineWall(r, 'BENCH', 'left', 9, 3);
-        fu.p('DESK', cx - 6, z + 6, Math.PI);
-        fu.p('DESK', cx + 4, z + 6, Math.PI);
-        fu.roomLights(r, 'HANGING_LAMP', true, 20);
-        break;
-      }
-      const rich = r.kind === 'manager' || r.kind === 'director';
-      if (rich) fu.rug(r.x0 + 2, r.z0 + 2, r.x1 - 2, r.z1 - 2, M.CARPET_GREEN);
-      fu.p('DESK', cx, r.z1 - 5, Math.PI);
-      fu.p('CHAIR', cx, r.z1 - 2.5, Math.PI);
-      fu.f.prop('OIL_LAMP', cx + 2, fu.lv.floorTop + 3.3, r.z1 - 5, 0, 0);
-      fu.lineWall(r, rich ? 'BOOKSHELF' : 'FILING_CABINET', 'left', rich ? 5.5 : 3, 2);
-      if (rich) fu.againstWall(r, 'GLOBE', 'right', r.z0 + 4);
-      fu.againstWall(r, 'SAFE', 'right', r.z1 - 4);
-      fu.p('CHAIR', cx - 2, r.z1 - 9, 0.3);
-      fu.roomLights(r, rich ? 'CHANDELIER' : 'HANGING_LAMP', false);
-      fu.paintings(r, rich ? 2 : 1);
+      fu.lights(r, 'CEILING_LIGHT', 10);
+      fu.mark('vault', cx, cz + 2);
       break;
     }
     case 'trading_floor': {
-      fu.rug(r.x0 + 2, r.z0 + 2, r.x1 - 2, r.z1 - 2, M.CHECKER);
-      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 6, x1: r.x1 - 4, z1: r.z1 - 4 }, 12, 9, (x, z) => {
-        fu.tableSet('TABLE_LONG', x, z, 4);
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_BLUE);
+      fu.f.fill(r.x0 + 2, fu.lv.ceil - 5, r.z1 - 1, r.x1 - 2, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
+      fu.grid({ x0: r.x0 + 5, z0: r.z0 + 5, x1: r.x1 - 5, z1: r.z1 - 6 }, 9, 6, (x, z) => {
+        fu.p('TRADING_DESK', x, z, 0);
+        fu.p('OFFICE_CHAIR', x, z + 3, Math.PI);
       });
-      fu.column(cx - 10, r.z0 + 5, 2, M.MARBLE, M.GOLD);
-      fu.column(cx + 10, r.z0 + 5, 2, M.MARBLE, M.GOLD);
-      fu.wall(r, 'POSTER_BOARD', 'back', cx, 2, 0);
-      fu.roomLights(r, 'CHANDELIER', true, 22);
-      fu.p('GRANDFATHER_CLOCK', r.x0 + 3, r.z1 - 3, FACE.fromLeft);
+      fu.lights(r, 'CEILING_LIGHT', 12);
       break;
     }
-    case 'clerks': {
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 5, x1: r.x1 - 3, z1: r.z1 - 3 }, 9, 7, (x, z) => {
-        if (fu.p('DESK', x, z, Math.PI)) {
-          fu.p('CHAIR', x, z + 2.8, Math.PI);
-          fu.f.prop('TYPEWRITER', x - 1, fu.lv.floorTop + 3.3, z, Math.PI, 0);
-        }
+    case 'office': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_GREY);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 12, 10, (x, z) => {
+        fu.p('DESK', x, z, 0);
+        fu.p('COMPUTER', x, z - 0.6, Math.PI, 0, true, fu.lv.floorTop + 3);
+        fu.p('OFFICE_CHAIR', x, z + 3, Math.PI);
       });
-      fu.lineWall(r, 'FILING_CABINET', 'left', 3, 2);
-      fu.wall(r, 'PAINTING', 'right', cz, 7, 3);
-      fu.roomLights(r, 'HANGING_LAMP', true, 16);
+      fu.lineWall(r, 'FILING_CABINET', 'left', 3, 3);
+      fu.lights(r, 'CEILING_LIGHT', 10);
       break;
     }
-    case 'archive':
-    case 'library':
-    case 'reading': {
-      fu.lineWall(r, 'BOOKSHELF', 'left', 5.3, 1);
-      fu.lineWall(r, 'BOOKSHELF', 'right', 5.3, 1);
-      fu.lineWall(r, 'BOOKSHELF', 'back', 5.3, 1);
-      fu.rug(r.x0 + 4, r.z0 + 4, r.x1 - 4, r.z1 - 4, M.CARPET_GREEN);
-      if (r.kind !== 'archive') {
-        fu.tableSet('TABLE_ROUND', cx, cz, 3, 'ARMCHAIR');
-        fu.p('GLOBE', cx + 5, cz + 4, 0);
-      } else fu.p('TABLE_LONG', cx, cz, 0);
-      fu.roomLights(r, 'CHANDELIER', false);
+    case 'exec_office': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.FLOOR_WALNUT);
+      fu.p('DESK_BOSS', cx, r.z1 - 5, Math.PI);
+      fu.p('BOSS_CHAIR', cx, r.z1 - 2.5, Math.PI);
+      fu.p('SOFA_LUXE', cx, r.z0 + 4, 0, 4);
+      fu.p('COFFEE_TABLE', cx, r.z0 + 8, 0);
+      fu.againstWall(r, 'BOOKSHELF', 'left', cz);
+      fu.againstWall(r, 'SAFE', 'right', cz);
+      fu.wall(r, 'SCREEN_WALL', 'back', cx + 8, 3);
+      fu.lights(r, 'PENDANT_LIGHT', 12);
+      fu.mark('vault', r.x1 - 3, cz);
       break;
     }
-    case 'post_hall': {
-      const z = r.z0 + Math.round(d * 0.6);
-      fu.counter(r.x0 + 3, z, r.x1 - 8, z + 2, M.WALNUT, M.WALNUT, 4);
-      fu.reserve(r.x0, z - 2, r.x1 - 7, z + 4);
-      for (let x = r.x0 + 5; x < r.x1 - 9; x += 5) fu.f.fill(x, fu.lv.floorTop + 4, z + 1, x + 1, fu.lv.floorTop + 8, z + 2, M.BRASS);
-      fu.lineWall(r, 'BENCH', 'left', 9, 3);
-      fu.p('PILLAR_BOX', r.x1 - 4, r.z0 + 4, 0);
-      fu.lineWall(r, 'SACKS', 'back', 6, 2);
-      fu.p('GRANDFATHER_CLOCK', r.x0 + 3, r.z0 + 3, FACE.fromLeft);
-      fu.roomLights(r, 'CHANDELIER', true, 22);
+    case 'security_room': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.HEX_PANEL);
+      fu.wall(r, 'SCREEN_WALL', 'back', cx - 6, 3);
+      fu.wall(r, 'SCREEN_WALL', 'back', cx + 6, 3);
+      fu.p('COMMAND_DESK', cx, r.z1 - 5, Math.PI, 0);
+      fu.p('OFFICE_CHAIR', cx - 3, r.z1 - 8, Math.PI);
+      fu.p('OFFICE_CHAIR', cx + 3, r.z1 - 8, Math.PI);
+      fu.lineWall(r, 'SERVER_RACK', 'left', 3, 3);
+      fu.lights(r, 'CEILING_LIGHT', 12);
+      fu.mark('vault', cx, cz);
       break;
     }
-    case 'sorting': {
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 4, x1: r.x1 - 3, z1: r.z1 - 3 }, 12, 7, (x, z) => fu.p('TABLE_LONG', x, z, 0));
-      fu.shelves(r.x0 + 2, r.z1 - 1, r.x1 - 2, r.z1, 10, [M.POSTER, M.SACK, M.CLOTH_WHITE]);
-      fu.lineWall(r, 'SACKS', 'left', 5, 2);
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+    case 'server_room': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.HEX_PANEL);
+      for (let x = r.x0 + 3; x < r.x1 - 3; x += 7) for (let z = r.z0 + 3; z < r.z1 - 3; z += 5) fu.p('SERVER_RACK', x, z, HALF_PI);
+      fu.lights(r, 'NEON_TUBE_CEILING', 8, 1);
       break;
     }
-    case 'nave': {
-      // allée centrale, bancs de part et d'autre
-      fu.rug(cx - 3, r.z0 + 2, cx + 3, r.z1 - 8, M.CARPET_RED);
-      for (let z = r.z0 + 6; z < r.z1 - 14; z += 5) {
-        fu.p('PEW', cx - 9, z, 0);
-        fu.p('PEW', cx + 9, z, 0);
-      }
-      // chœur surélevé
-      fu.f.fill(r.x0, fu.lv.floorTop, r.z1 - 9, r.x1, fu.lv.floorTop + 1, r.z1, M.MARBLE);
-      fu.f.prop('ALTAR', cx, fu.lv.floorTop + 1, r.z1 - 3, Math.PI, 0);
-      fu.f.prop('CANDELABRA', cx - 3, fu.lv.floorTop + 5.4, r.z1 - 3, Math.PI, 0);
-      fu.f.prop('CANDELABRA', cx + 3, fu.lv.floorTop + 5.4, r.z1 - 3, Math.PI, 0);
-      fu.p('PULPIT', r.x0 + 4, r.z1 - 12, FACE.fromLeft);
-      fu.reserve(cx - 4, r.z0, cx + 4, r.z1);
-      fu.roomLights(r, 'CHANDELIER', true, 26);
+    case 'studio_set': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
+      fu.f.fill(r.x0 + 3, fu.lv.floorTop + 1, r.z1 - 1, r.x1 - 3, fu.lv.ceil - 2, r.z1, M.SCREEN);
+      fu.p('NEWS_DESK', cx, r.z1 - 7, Math.PI);
+      fu.p('HOLO_CAMERA', cx - 6, cz, 0);
+      fu.p('HOLO_CAMERA', cx + 6, cz, 0);
+      fu.p('STUDIO_LIGHT', r.x0 + 4, cz - 4, 0.6);
+      fu.p('STUDIO_LIGHT', r.x1 - 4, cz - 4, -0.6);
+      fu.lights(r, 'STAGE_LIGHTS', 12, 7);
       break;
     }
-    case 'common': {
-      fu.fireplace(r, 'left', M.STONE_DARK);
-      fu.grid({ x0: r.x0 + 6, z0: r.z0 + 4, x1: r.x1 - 3, z1: r.z1 - 3 }, 12, 7, (x, z) => {
-        if (fu.p('TABLE_LONG', x, z, 0)) {
-          fu.p('BENCH', x, z - 3, 0);
-          fu.p('BENCH', x, z + 3, Math.PI);
-        }
-      });
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+    case 'control_room': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CARPET_GREY);
+      fu.wall(r, 'SCREEN_WALL', 'back', cx, 3);
+      fu.lineWall(r, 'COMMAND_DESK', 'left', 11, 3, () => 0);
+      fu.lineWall(r, 'SERVER_RACK', 'right', 3, 3);
+      fu.lights(r, 'CEILING_LIGHT', 10);
+      fu.mark('vault', cx, cz);
       break;
     }
-    case 'dormitory': {
-      fu.grid({ x0: r.x0 + 2, z0: r.z0 + 3, x1: r.x1 - 2, z1: r.z1 - 2 }, 5, 10, (x, z, i) => {
-        fu.p(i % 2 ? 'BUNK_BED' : 'BED_POOR', x, z, 0, rng.int(0, 3));
-      });
-      fu.roomLights(r, 'HANGING_LAMP', false, 20);
-      break;
-    }
-    case 'living': {
-      fu.fireplace(r, 'right', M.STONE_DARK);
-      fu.rug(r.x0 + 4, r.z0 + 4, r.x1 - 6, r.z1 - 4, M.CARPET_WORN);
-      fu.tableSet('TABLE_SQUARE', cx - 2, cz, 3);
-      fu.againstWall(r, 'CABINET', 'left', r.z0 + 5);
-      fu.againstWall(r, 'BED_POOR', 'left', r.z1 - 6);
-      fu.againstWall(r, 'WASH_STAND', 'back', r.x0 + 5);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      fu.paintings(r, 1);
-      break;
-    }
-    case 'bedroom': {
-      fu.againstWall(r, 'BED', 'back', cx, rng.int(0, 3));
-      fu.againstWall(r, 'WARDROBE', 'left', r.z0 + 4);
-      fu.againstWall(r, 'CHEST', 'right', r.z1 - 4);
-      fu.againstWall(r, 'WASH_STAND', 'right', r.z0 + 4);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      break;
-    }
-    case 'scullery': {
-      fu.lineWall(r, 'BARREL', 'left', 3, 2);
-      fu.againstWall(r, 'WASH_STAND', 'back', cx);
-      fu.p('BUCKET', cx, cz, 0);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      break;
-    }
-    case 'workshop': {
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 4, x1: r.x1 - 3, z1: r.z1 - 3 }, 6, 6, (x, z) => {
-        if (fu.p('SEWING_TABLE', x, z, Math.PI)) fu.p('STOOL', x, z + 2.6, 0);
-      });
-      fu.lineWall(r, 'SACKS', 'left', 5, 2);
-      fu.roomLights(r, 'HANGING_LAMP', false, 14);
-      break;
-    }
-    case 'police_front': {
-      const z = r.z0 + Math.round(d * 0.55);
-      fu.p('POLICE_DESK', cx + 3, z, Math.PI, 0);
-      fu.lineWall(r, 'BENCH', 'left', 9, 3);
-      fu.lineWall(r, 'POSTER_BOARD', 'right', 8, 3);
-      fu.roomLights(r, 'HANGING_LAMP', true);
-      break;
-    }
-    case 'cells': {
-      // cellules : barreaux le long du fond
-      const z = r.z1 - 9;
-      for (let x = r.x0 + 2; x < r.x1 - 4; x += 8) {
-        fu.f.prop('CELL_BARS', x + 4, fu.lv.floorTop, z, 0, 0);
-        fu.p('BED_POOR', x + 4, r.z1 - 4, Math.PI, 0, true);
-      }
-      fu.reserve(r.x0, z - 1, r.x1, r.z1);
-      fu.roomLights(r, 'HANGING_LAMP', false);
-      break;
-    }
-    case 'salon':
-    case 'lounge': {
-      const carpet = buildingType === 'club' ? M.CARPET_GREEN : variant ? M.CARPET_BLUE : M.CARPET_RED;
-      fu.rug(r.x0 + 3, r.z0 + 3, r.x1 - 3, r.z1 - 3, carpet);
-      fu.fireplace(r, 'right', M.MARBLE);
-      const area = { x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 7, z1: r.z1 - 4 };
-      fu.grid(area, 12, 11, (x, z, i, j) => {
-        if ((i + j) % 2 === 0) {
-          fu.p('CHESTERFIELD', x, z - 2.5, 0);
-          fu.p('TABLE_ROUND', x, z + 1, 0, 0);
-          fu.p('ARMCHAIR', x - 3.5, z + 3.5, 2.3);
-        } else {
-          fu.tableSet('TABLE_ROUND', x, z, 3, 'ARMCHAIR');
-        }
-      });
-      if (buildingType !== 'club') fu.againstWall(r, 'GRAND_PIANO', 'left', r.z0 + 7) || fu.againstWall(r, 'PIANO', 'left', r.z0 + 6);
-      fu.lineWall(r, 'PLANT_POT', 'front', 14, 3);
-      fu.p('GRANDFATHER_CLOCK', r.x0 + 3, r.z1 - 3, FACE.fromLeft);
-      fu.paintings(r, 3);
-      fu.roomLights(r, 'CHANDELIER', true, 24);
-      break;
-    }
-    case 'dining': {
-      fu.rug(r.x0 + 3, r.z0 + 3, r.x1 - 3, r.z1 - 3, M.CARPET_RED);
-      fu.tableSet('TABLE_DINING', cx, cz, 8, 'CHAIR', HALF_PI * (w > d ? 0 : 1));
-      fu.f.prop('CANDELABRA', cx, fu.lv.floorTop + 3.3, cz, 0, 0);
-      fu.againstWall(r, 'SIDEBOARD', 'back', cx);
-      fu.paintings(r, 2);
-      fu.roomLights(r, 'CHANDELIER', false, 30);
-      break;
-    }
-    case 'clock_hall': {
-      // mécanisme d'horloge et cordes de cloches
-      fu.cylinder(cx, cz, 2.5, fu.lv.floorTop, fu.lv.floorTop + 1, M.IRON);
-      fu.cylinder(cx, cz, 1.5, fu.lv.floorTop + 1, fu.lv.ceil, M.BRASS, true);
-      fu.p('WORKBENCH', cx, r.z0 + 3, 0);
-      fu.roomLights(r, 'HANGING_LAMP', false);
+    case 'station_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.MARBLE);
+      fu.f.fill(r.x0 + 4, fu.lv.ceil - 6, r.z1 - 1, r.x1 - 4, fu.lv.ceil - 2, r.z1, M.SCREEN_TICKER);
+      // kiosque central (l'horloge de Grand Central est dessinée par le client)
+      fu.cylinder(cx, cz, 3, fu.lv.floorTop, fu.lv.floorTop + 5, M.BRASS);
+      fu.cylinder(cx, cz, 2.2, fu.lv.floorTop + 5, fu.lv.floorTop + 9, M.MARBLE);
       fu.reserve(cx - 4, cz - 4, cx + 4, cz + 4);
+      for (const z of [r.z0 + 6, r.z1 - 8]) for (let x = r.x0 + 6; x < r.x1 - 6; x += 9) if (Math.abs(x - cx) > 6) fu.p('BENCH', x, z, 0);
+      fu.lineWall(r, 'TICKET_BOOTH', 'left', 7, 4);
+      fu.lights(r, 'CHANDELIER', 16);
       break;
     }
-    case 'foundry_floor': {
-      // haut fourneau
-      const fx = r.x1 - 10;
-      const fz = r.z1 - 10;
-      fu.f.fill(fx - 5, fu.lv.floorTop, fz - 5, fx + 6, fu.lv.ceil, fz + 6, M.FIREBRICK);
-      fu.f.fill(fx - 2, fu.lv.floorTop, fz - 5, fx + 3, fu.lv.floorTop + 4, fz - 4, M.FIRE);
-      fu.f.light(fx, fu.lv.floorTop + 3, fz - 8, 1, 12);
-      fu.reserve(fx - 7, fz - 9, fx + 8, r.z1);
-      // tas de charbon
-      for (let i = 0; i < 4; i++) fu.f.fill(r.x0 + i, fu.lv.floorTop, r.z1 - 8 + i, r.x0 + 8 - i, fu.lv.floorTop + 4 - i, r.z1 - i, M.COAL);
-      fu.grid({ x0: r.x0 + 6, z0: r.z0 + 6, x1: fx - 8, z1: r.z1 - 8 }, 9, 8, (x, z, i, j) => {
-        const pick = (i + j) % 3;
-        if (pick === 0) fu.p('ANVIL', x, z, rng.range(0, 3));
-        else if (pick === 1) fu.p('CANNON', x, z, HALF_PI);
-        else fu.p('WORKBENCH', x, z, 0);
-      });
-      fu.lineWall(r, 'CRATE_STACK', 'left', 5, 6);
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+    case 'showroom': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
+      fu.p('CAR_PARKED', cx - w / 4, cz, 0.4, variant);
+      fu.p('CAR_PARKED', cx + w / 4, cz, -0.4, variant + 2);
+      fu.p('RECEPTION_DESK', cx, r.z1 - 3, Math.PI);
+      fu.lights(r, 'CEILING_LIGHT', 10);
+      break;
+    }
+    // ------------------------------------------------------------------ industrie, logistique
+    case 'depot_floor': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE);
+      fu.lineWall(r, 'SHELF_RACK', 'left', 12, 3);
+      fu.lineWall(r, 'SHELF_RACK', 'right', 12, 3);
+      fu.grid({ x0: r.x0 + 9, z0: r.z0 + 6, x1: r.x1 - 9, z1: r.z1 - 6 }, 10, 12, (x, z, i, j) => fu.p((i + j) % 3 === 0 ? 'FORKLIFT' : 'PALLET_STACK', x, z, rng.range(0, 3)));
+      fu.lights(r, 'NEON_TUBE_CEILING', 12, 7);
+      break;
+    }
+    case 'garage_floor': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE_DARK);
+      fu.p('CAR_LIFT', cx - 5, cz, 0, 0, true);
+      fu.p('CAR_PARKED', cx + 6, cz, 0.15, variant + 1);
+      fu.lineWall(r, 'TIRE_STACK', 'left', 3, 3);
+      fu.againstWall(r, 'WORKBENCH', 'back', cx + 4);
+      fu.wall(r, 'TOOL_WALL', 'back', cx - 6, 4);
+      fu.lights(r, 'NEON_TUBE_CEILING', 10, 7);
+      break;
+    }
+    case 'factory_floor': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE);
+      for (let z = r.z0 + 5; z < r.z1 - 4; z += 8) {
+        for (let x = r.x0 + 6; x < r.x1 - 6; x += 13) fu.p('CONVEYOR', x, z, 0);
+        fu.p('ROBOT_ARM', r.x0 + 4, z + 3, HALF_PI);
+      }
+      fu.grid({ x0: r.x0 + 4, z0: r.z1 - 6, x1: r.x1 - 4, z1: r.z1 - 2 }, 5, 4, (x, z) => fu.p('DRONE_PARKED', x, z, 0, 0, true));
+      fu.lights(r, 'NEON_TUBE_CEILING', 10, 1);
       break;
     }
     case 'brewhouse': {
-      // cuves en cuivre
-      const cols = Math.max(1, Math.floor((w - 6) / 12));
-      for (let i = 0; i < cols; i++) {
-        const vx = r.x0 + 7 + i * 12;
-        const vz = r.z1 - 8;
-        fu.cylinder(vx, vz, 4, fu.lv.floorTop, fu.lv.floorTop + 10, M.COPPER);
-        fu.cylinder(vx, vz, 3, fu.lv.floorTop + 10, fu.lv.floorTop + 12, M.COPPER);
-        fu.f.fill(vx, fu.lv.floorTop + 12, vz, vx + 1, fu.lv.ceil, vz + 1, M.IRON);
-        fu.reserve(vx - 5, vz - 5, vx + 5, vz + 5);
-      }
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 4, x1: r.x1 - 3, z1: r.z1 - 14 }, 5, 6, (x, z) => {
-        if (rng.chance(0.55)) fu.p('BARREL', x, z, 0);
-      });
-      fu.lineWall(r, 'SACKS', 'left', 5, 3);
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TILE_GREEN);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 6 }, 8, 9, (x, z) => fu.p('BREW_TANK', x, z, 0));
+      fu.lineWall(r, 'BARREL', 'back', 3, 2);
+      fu.lights(r, 'BARE_BULB', 8);
       break;
     }
-    case 'cellar': {
-      fu.grid({ x0: r.x0 + 2, z0: r.z0 + 2, x1: r.x1 - 2, z1: r.z1 - 2 }, 3.5, 6, (x, z, i) => {
-        if (i % 4 !== 2) fu.p('BARREL', x, z, HALF_PI);
-      });
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+    case 'junk_yard': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.GRAVEL);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 9, 7, (x, z, i, j) => fu.p((i + j) % 2 ? 'TIRE_STACK' : 'CAR_PARKED', x, z, rng.range(0, 3), 7));
+      fu.lights(r, 'BARE_BULB', 10);
       break;
     }
-    case 'mill_floor': {
-      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 5, x1: r.x1 - 4, z1: r.z1 - 4 }, 11, 9, (x, z) => fu.p('LOOM', x, z, 0, rng.int(0, 3)));
-      fu.lineWall(r, 'SACKS', 'left', 5, 2);
-      // arbres de transmission au plafond
-      for (let z = r.z0 + 5; z < r.z1 - 3; z += 9) fu.f.fill(r.x0, fu.lv.ceil - 2, z, r.x1, fu.lv.ceil - 1, z + 1, M.IRON);
-      fu.roomLights(r, 'HANGING_LAMP', false, 16);
+    case 'market_hall': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE_DARK);
+      fu.grid({ x0: r.x0 + 4, z0: r.z0 + 4, x1: r.x1 - 4, z1: r.z1 - 4 }, 8, 7, (x, z, i, j) => fu.p((i + j) % 2 ? 'FOOD_STALL' : 'MARKET_STALL', x, z, j % 2 ? Math.PI : 0, i + j * 3));
+      fu.lights(r, 'LANTERN_STRING', 9);
       break;
     }
-    case 'pump_room': {
-      fu.cylinder(r.x0 + 7, cz, 3.5, fu.lv.floorTop, fu.lv.floorTop + 9, M.MACHINE_GREEN);
-      fu.f.fill(r.x0 + 4, fu.lv.floorTop + 2, cz - 1, r.x0 + 5, fu.lv.floorTop + 4, cz + 1, M.FIRE);
-      fu.reserve(r.x0, cz - 5, r.x0 + 12, cz + 5);
-      fu.f.fill(r.x0 + 10, fu.lv.floorTop + 7, cz, r.x1, fu.lv.floorTop + 8, cz + 1, M.MACHINE);
-      fu.p('DESK', r.x1 - 6, r.z0 + 4, 0);
-      fu.p('CHAIR', r.x1 - 6, r.z0 + 6.5, Math.PI);
-      fu.roomLights(r, 'HANGING_LAMP', false);
+    case 'tattoo': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TILE_DARK);
+      fu.p('TATTOO_CHAIR', cx - 4, cz, 0);
+      fu.p('TATTOO_CHAIR', cx + 4, cz, 0);
+      fu.againstWall(r, 'SOFA_OLD', 'front', cx);
+      fu.art(r, 4, ['NEON_ART', 'WALL_ART'], 8);
+      fu.lights(r, 'PENDANT_LIGHT', 9);
       break;
     }
-    case 'warehouse_floor': {
-      // allée centrale et rangées de caisses
-      fu.reserve(cx - 4, r.z0, cx + 4, r.z1);
-      fu.grid({ x0: r.x0 + 3, z0: r.z0 + 6, x1: r.x1 - 3, z1: r.z1 - 4 }, 6, 6, (x, z) => {
-        const pick = rng.next();
-        if (pick < 0.45) fu.p('CRATE_STACK', x, z, 0);
-        else if (pick < 0.65) fu.p('BARREL', x, z, 0);
-        else if (pick < 0.8) fu.p('SACKS', x, z, rng.range(0, 3));
-        else if (pick < 0.88) fu.p('CRATE', x, z, 0);
-      });
-      fu.p('HANDCART', cx + 2, r.z0 + 6, 0.2);
-      fu.p('DESK', r.x1 - 5, r.z0 + 4, FACE.fromRight);
-      fu.roomLights(r, 'HANGING_LAMP', false, 18);
+    case 'storeroom': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE);
+      fu.lineWall(r, 'CRATE_STACK', 'back', 4, 2);
+      fu.lineWall(r, 'CARDBOARD_BOXES', 'left', 3, 2);
+      fu.lights(r, 'BARE_BULB', 9);
       break;
     }
-    case 'shed': {
-      // coque de bateau en construction
-      const bx = cx;
-      for (let z = r.z0 + 4; z < r.z1 - 4; z++) {
-        const t = (z - r.z0 - 4) / Math.max(1, r.z1 - r.z0 - 8);
-        const half = Math.round(2 + 3 * Math.sin(Math.PI * t));
-        fu.f.fill(Math.round(bx - half), fu.lv.floorTop + 1, z, Math.round(bx + half), fu.lv.floorTop + 2, z + 1, M.HULL);
-        fu.f.set(Math.round(bx - half), fu.lv.floorTop + 2, z, M.HULL);
-        fu.f.set(Math.round(bx + half) - 1, fu.lv.floorTop + 2, z, M.HULL);
-        fu.f.set(Math.round(bx - half), fu.lv.floorTop + 3, z, M.HULL);
-        fu.f.set(Math.round(bx + half) - 1, fu.lv.floorTop + 3, z, M.HULL);
-      }
-      fu.reserve(bx - 7, r.z0 + 2, bx + 7, r.z1 - 2);
-      fu.lineWall(r, 'WORKBENCH', 'left', 9, 3);
-      fu.lineWall(r, 'CRATE', 'right', 5, 3);
-      fu.roomLights(r, 'HANGING_LAMP', false, 16);
+    case 'laundromat': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.LINOLEUM);
+      fu.lineWall(r, 'WASHER_ROW', 'back', 10, 2);
+      fu.lineWall(r, 'WASHER_ROW', 'left', 10, 3);
+      fu.p('BENCH', cx, cz, 0);
+      fu.p('VENDING_MACHINE', r.x1 - 3, r.z1 - 3, Math.PI, 2);
+      fu.lights(r, 'NEON_TUBE_CEILING', 9, 7);
       break;
     }
-    case 'clerks_unused' as never:
+    case 'apartment': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.FLOOR_WORN);
+      fu.p('SOFA_OLD', cx, cz + 3, Math.PI, 1);
+      fu.p('TV_OLD', cx, r.z0 + 2, 0);
+      fu.againstWall(r, 'KITCHENETTE', 'back', r.x0 + 6);
+      fu.p('BED', r.x1 - 5, r.z1 - 6, Math.PI);
+      fu.lights(r, 'BARE_BULB', 10);
       break;
-    default:
-      fu.roomLights(r, 'HANGING_LAMP', false);
+    }
+    // ------------------------------------------------------------------ police
+    case 'police_front': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.LINOLEUM);
+      fu.p('POLICE_DESK', cx, cz + 2, Math.PI);
+      fu.lineWall(r, 'BENCH', 'left', 7, 3);
+      fu.lights(r, 'CEILING_LIGHT', 10);
+      break;
+    }
+    case 'cells': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.CONCRETE);
+      for (let x = r.x0 + 4; x < r.x1 - 2; x += 8) fu.p('CELL_BARS', x, cz, 0, 0, true);
+      fu.lineWall(r, 'BUNK_BED', 'back', 8, 2);
+      fu.lights(r, 'NEON_TUBE_CEILING', 9, 7);
+      break;
+    }
+    case 'lobby': {
+      fu.floor(r.x0, r.z0, r.x1, r.z1, M.TERRAZZO_DARK);
+      fu.p('RECEPTION_DESK', cx, cz + 2, Math.PI);
+      fu.p('PLANT_BIG', r.x0 + 3, r.z0 + 3, 0);
+      fu.p('PLANT_BIG', r.x1 - 3, r.z0 + 3, 0);
+      fu.p('SOFA', r.x0 + 5, cz, HALF_PI, 4);
+      fu.lights(r, 'CEILING_LIGHT', 10);
+      fu.art(r, 2, ['WALL_ART'], 9);
+      break;
+    }
+    default: {
+      fu.lights(r, 'CEILING_LIGHT', 12);
+      void bv;
+    }
   }
 }

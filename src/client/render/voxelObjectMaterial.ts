@@ -132,11 +132,11 @@ vec2 gL = sampleLightVol(vWPos + wn * 0.12);
 gL = max(gL, vInstLight.xy);
 float aoF = 0.42 + 0.58 * (vAO / 3.0);
 reflectedLight.directDiffuse *= mix(aoF, 1.0, 0.5) * smoothstep(0.02, 0.3, gL.x);
-reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn) * aoF;
+reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn, vWPos) * aoF;
 totalEmissiveRadiance += gEm;
 vec3 vdir = normalize(cameraPosition - vWPos);
 float fres = pow(1.0 - max(dot(vdir, wn), 0.0), 3.0);
-reflectedLight.indirectDiffuse += gSpec * (0.2 + fres) * (uSkyAmb * gL.x + uLampCol * gL.y * 0.8) * 0.45;`,
+reflectedLight.indirectDiffuse += gSpec * (0.2 + fres) * (uSkyAmb * gL.x + lampColorAt(vWPos) * gL.y * 0.8) * 0.45;`,
       )
       .replace('#include <fog_fragment>', opts.noFog ? '' : 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vWPos);');
   };

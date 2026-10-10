@@ -4,13 +4,14 @@ import { generateCity } from '../../shared/city/gen/city';
 import { buildCityNav } from '../../shared/city/navBuild';
 import { NavGrid } from '../../shared/nav';
 import { VoxelWorld } from '../../shared/voxel';
-import { computeLightVolume, type LightVolume } from '../render/lightVolume';
+import { computeLightVolume, computeTintVolume, type LightVolume, type TintVolume } from '../render/lightVolume';
 import { meshRegions, type RegionMesh } from '../render/worldMesh';
 
 export interface WorldData {
   world: VoxelWorld;
   regions: RegionMesh[];
   light: LightVolume;
+  tint: TintVolume;
   nav: NavGrid;
   props: PropPlacement[];
   lights: LightSource[];
@@ -66,6 +67,7 @@ export function loadWorld(): Promise<WorldData> {
           world,
           regions: m.regions,
           light: m.light,
+          tint: m.tint,
           nav,
           props: m.props,
           lights: m.lights,
@@ -92,6 +94,7 @@ function loadOnMainThread(): WorldData {
   const t0 = performance.now();
   const city = generateCity();
   const light = computeLightVolume(city.world, city.ctx.lights);
+  const tint = computeTintVolume(city.world, city.ctx.lights);
   const nav = buildCityNav(city);
   const regions = meshRegions(city.world);
   progress('Londres est prête.', 1);
@@ -99,6 +102,7 @@ function loadOnMainThread(): WorldData {
     world: city.world,
     regions,
     light,
+    tint,
     nav,
     props: city.ctx.props,
     lights: city.ctx.lights,

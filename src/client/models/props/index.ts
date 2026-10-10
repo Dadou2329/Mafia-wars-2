@@ -1,38 +1,28 @@
 // Registre des modèles d'accessoires : PropKind → fabrique de VoxelModel (+ variantes).
+// Les modèles sont répartis par familles (rue, intérieurs, commerces et industrie).
 
 import { PROP_DEFS, type PropKind } from '../../../shared/city/props';
-import { VoxelModel, jitter } from '../voxelModel';
-import { C } from './palette';
-import * as core from './core';
-import { EXTRA_MODELS } from './extra';
+import { SLOT, VoxelModel, jitter } from '../voxelModel';
 
 export interface PropModelEntry {
   variants: number;
   make: (variant: number) => VoxelModel;
 }
 
-const REGISTRY: Partial<Record<PropKind, PropModelEntry>> = {
-  LAMP_POST: { variants: 1, make: () => core.lampPost() },
-  LAMP_WALL: { variants: 1, make: () => core.lampWall() },
-  CHAIR: { variants: 4, make: (v) => core.chair(v) },
-  TABLE_ROUND: { variants: 3, make: (v) => core.tableRound(v) },
-  BARREL: { variants: 3, make: (v) => core.barrel(v) },
-  CRATE: { variants: 3, make: (v) => core.crate(v, 14) },
-  CRATE_SMALL: { variants: 2, make: (v) => core.crate(v, 9) },
-  BENCH: { variants: 1, make: () => core.bench() },
-  HANGING_LAMP: { variants: 1, make: () => core.hangingLamp() },
-  CHANDELIER: { variants: 1, make: () => core.chandelier() },
-  DESK_BOSS: { variants: 1, make: () => core.deskBoss() },
-  BOSS_CHAIR: { variants: 1, make: () => core.bossChair() },
-  BOTTLE_SHELF: { variants: 3, make: (v) => core.bottleShelf(v) },
-  ...EXTRA_MODELS,
-};
+/** Familles de modèles enregistrées (voir les fichiers de ce dossier). */
+const REGISTRY: Partial<Record<PropKind, PropModelEntry>> = {};
 
-/** Modèle de secours : un bloc aux dimensions de l'encombrement. */
+export function registerModels(entries: Partial<Record<PropKind, PropModelEntry>>): void {
+  Object.assign(REGISTRY, entries);
+}
+
+/** Modèle de secours : un bloc aux dimensions de l'encombrement (lumineux si la lampe en a une). */
 function placeholder(kind: PropKind): VoxelModel {
-  const s = PROP_DEFS[kind].size;
-  const m = VoxelModel.meters(s[0], s[1], s[2]);
-  m.box(0, 0, 0, m.sx, m.sy, m.sz, C.walnut);
+  const def = PROP_DEFS[kind] as { size: [number, number, number]; light?: unknown };
+  const s = def.size;
+  const m = VoxelModel.meters(Math.max(0.1, s[0]), Math.max(0.1, s[1]), Math.max(0.1, s[2]));
+  m.box(0, 0, 0, m.sx, m.sy, m.sz, 0x5a5f68);
+  if (def.light) m.box(0, Math.max(0, m.sy - 2), 0, m.sx, m.sy, m.sz, SLOT.GLOW);
   return jitter(m, 0.08, 5);
 }
 

@@ -40,7 +40,7 @@ export function startCharGallery(root: HTMLElement): void {
   camera.lookAt(0, 1.0, 0);
   const base = (id: number, kind: CharKind, faction: number, x: number, z: number, extra: Partial<CharView> = {}): CharView => ({
     id, kind, faction, look: id * 13 + 5, gang: 2, x, y: 0, z, yaw: 0, pitch: 0, vx: 0, vz: 0, anim: Anim.IDLE,
-    aiming: false, weapon: Weapon.REVOLVER, shotAt: -10, hitAt: -10, meleeAt: -10, interactAt: -10, deathAt: -10, ...extra,
+    aiming: false, weapon: Weapon.PISTOL, shotAt: -10, hitAt: -10, meleeAt: -10, interactAt: -10, deathAt: -10, ...extra,
   });
   const scene1 = (): CharView[] => [
     base(1, CharKind.BOSS_DADOU, 1, -3.0, 0),
@@ -66,7 +66,7 @@ export function startCharGallery(root: HTMLElement): void {
       views = scene1();
       if (mode === 'walk') views.forEach((v, i) => { v.vz = 1.4; v.anim = Anim.WALK; v.yaw = 0; api.t = 0.31 * (i + 1); });
       if (mode === 'run') views.forEach((v) => { v.vz = 5.5; v.anim = Anim.RUN; });
-      if (mode === 'aim') views.forEach((v, i) => { v.aiming = true; v.weapon = [Weapon.REVOLVER, Weapon.RIFLE, Weapon.SHOTGUN][i % 3]; v.pitch = 0.1; });
+      if (mode === 'aim') views.forEach((v, i) => { v.aiming = true; v.weapon = [Weapon.PISTOL, Weapon.RIFLE, Weapon.SHOTGUN][i % 3]; v.pitch = 0.1; });
       if (mode === 'dead') views.forEach((v) => { v.anim = Anim.DEAD; v.deathAt = 0; });
       if (mode === 'side') views.forEach((v) => { v.yaw = Math.PI / 2; });
       if (mode === 'back') views.forEach((v) => { v.yaw = Math.PI; });

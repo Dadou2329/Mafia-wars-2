@@ -22,7 +22,7 @@ import { audio } from '../audio/AudioEngine';
 import type { SfxName } from '../audio/types';
 import { CharacterRenderer, type CharView } from '../characters/characterRenderer';
 import { Atmosphere } from '../render/atmosphere';
-import { createLightTexture, createMaterialTexture, envUniforms } from '../render/env';
+import { createLightTexture, createMaterialTexture, createTintTexture, envUniforms } from '../render/env';
 import { createOuterGround } from '../render/outer';
 import { PropRenderer } from '../render/propRenderer';
 import { createWater } from '../render/water';
@@ -156,6 +156,7 @@ export class GameClient {
     this.camera = new THREE.PerspectiveCamera(settings.fov, window.innerWidth / window.innerHeight, 0.08, 520);
     createMaterialTexture();
     createLightTexture(world.light);
+    createTintTexture(world.tint);
     const worldGroup = buildWorldGroup(world.regions, createWorldMaterial());
     this.scene.add(worldGroup);
     // centres des régions pour la distance d'affichage
@@ -236,7 +237,7 @@ export class GameClient {
       vz: 0,
       anim: Anim.IDLE,
       aiming: false,
-      weapon: Weapon.REVOLVER,
+      weapon: Weapon.PISTOL,
       shotAt: -10,
       hitAt: -10,
       meleeAt: -10,
@@ -831,7 +832,7 @@ export class GameClient {
     }
     if (input.hit('reload')) w.startReload(now);
     const def = WEAPONS[w.current];
-    const trigger = def.ranged ? input.hit('fire') || (w.current === Weapon.REVOLVER ? false : false) : input.hit('fire');
+    const trigger = def.ranged ? input.hit('fire') || (w.current === Weapon.PISTOL ? false : false) : input.hit('fire');
     if (!trigger) return;
     if (def.ranged) {
       if ((w.mag.get(w.current) ?? 0) <= 0) {

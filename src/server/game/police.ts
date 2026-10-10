@@ -55,7 +55,7 @@ export function updatePolice(g: Game, dt: number): void {
     const tgt = ai.target >= 0 ? g.ents.get(ai.target) : undefined;
     let heat = 0;
     if (tgt?.role === 'boss' && tgt.slot) heat = g.factions[tgt.slot].heat;
-    const want = heat >= 2 || (tgt && tgt.role !== 'boss') ? Weapon.REVOLVER : Weapon.CLUB;
+    const want = heat >= 2 || (tgt && tgt.role !== 'boss') ? Weapon.PISTOL : Weapon.CLUB;
     if (e.weapon !== want) {
       e.weapon = want;
       e.ammo = 6;

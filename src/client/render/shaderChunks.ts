@@ -2,16 +2,21 @@
 
 export const COMMON_UNIFORMS_GLSL = /* glsl */ `
 uniform highp sampler3D uLightTex;
+uniform highp sampler3D uTintTex;
 uniform vec3 uLightOrigin;
 uniform vec3 uLightSize;
+uniform vec3 uTintOrigin;
+uniform vec3 uTintSize;
 uniform vec3 uSkyAmb;
 uniform vec3 uLampCol;
+uniform float uLampPower;
 uniform float uNight;
 uniform float uTime;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uFogHeightK;
 uniform float uLampBoost;
+uniform float uWet;
 `;
 
 export const NOISE_GLSL = /* glsl */ `
@@ -49,11 +54,18 @@ vec2 sampleLightVol(vec3 p) {
   if (uvw.y >= 1.0) return vec2(1.0, 0.0);
   return texture(uLightTex, clamp(uvw, vec3(0.0005), vec3(0.9995))).rg;
 }
-// Éclairage ambiant : ciel + lampes. n = normale monde.
-vec3 ambientLight(vec2 L, vec3 n) {
+// Couleur des lampes à cet endroit (néons roses, cyan, réverbères…), intensité comprise.
+vec3 lampColorAt(vec3 p) {
+  vec3 t = texture(uTintTex, clamp((p - uTintOrigin) / uTintSize, vec3(0.0005), vec3(0.9995))).rgb;
+  float tw = max(t.r, max(t.g, t.b));
+  vec3 c = tw > 0.004 ? t / tw : uLampCol;
+  return c * uLampPower;
+}
+// Éclairage ambiant : ciel + lampes. n = normale monde, p = position monde.
+vec3 ambientLight(vec2 L, vec3 n, vec3 p) {
   float sky = L.x * L.x;
   float lamp = L.y * (0.55 + 0.45 * L.y);
-  return uSkyAmb * sky * (0.72 + 0.28 * n.y) + uLampCol * lamp * uLampBoost;
+  return uSkyAmb * sky * (0.72 + 0.28 * n.y) + lampColorAt(p) * lamp * uLampBoost;
 }
 vec3 applyHeightFog(vec3 col, vec3 wpos) {
   vec3 d = wpos - cameraPosition;
@@ -249,6 +261,161 @@ float stainedLead(vec2 uv) {
   vec2 f = fract(uv * 6.0);
   return 1.0 - step(0.08, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
 }
+// ----------------------------------------------------------------- New York 2085
+vec3 patAsphalt(vec2 uv, vec3 c1, vec3 c2, float sc) {
+  float n = vnoise(uv * 9.0) * 0.45 + vnoise(uv * 31.0) * 0.3 + h12(floor(uv * 40.0)) * 0.25;
+  vec3 col = mix(c2, c1, n);
+  float cr = abs(vnoise(uv * 1.3 + 3.1) - 0.5);
+  float crack = 1.0 - smoothstep(0.0, 0.01, cr);
+  col = mix(col, c2 * 0.55, crack * (sc > 0.5 ? 0.75 : 0.45));
+  float patchy = smoothstep(0.72, 0.76, vnoise(uv * 0.33 + 7.0));
+  col = mix(col, col * 1.18, patchy * 0.6);
+  // taches d'huile
+  col *= 1.0 - smoothstep(0.78, 0.86, vnoise(uv * 0.9 + 11.0)) * 0.25;
+  return col;
+}
+vec3 patConcrete(vec2 uv, vec3 c1, vec3 c2, float sc) {
+  vec2 ps = sc == 1.0 ? vec2(0.5, 0.5) : vec2(1.5, 0.75);
+  vec2 f = fract(uv / ps);
+  float e = min(min(f.x, 1.0 - f.x) * ps.x, min(f.y, 1.0 - f.y) * ps.y);
+  float joint = 1.0 - smoothstep(0.004, 0.012, e);
+  vec3 col = c1 * (0.86 + 0.18 * fbm(uv * 2.2));
+  vec2 g = (fract(uv / ps * 2.0) - 0.5) * ps * 0.5;
+  float hole = 1.0 - smoothstep(0.018, 0.03, length(g));
+  return mix(col, c2 * 0.75, max(joint * 0.8, hole * 0.45 * step(sc, 0.5)));
+}
+vec3 patSidewalk(vec2 uv, vec3 c1, vec3 c2) {
+  vec2 f = fract(uv / 1.5);
+  float e = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)) * 1.5;
+  float joint = 1.0 - smoothstep(0.006, 0.016, e);
+  vec2 id = floor(uv / 1.5);
+  vec3 col = c1 * (0.9 + 0.12 * h12(id)) * (0.92 + 0.1 * vnoise(uv * 6.0));
+  // chewing-gums écrasés
+  vec2 gq = floor(uv * 6.0);
+  float gum = step(0.985, h12(gq)) * (1.0 - smoothstep(0.1, 0.16, length(fract(uv * 6.0) - 0.5)));
+  col = mix(col, c2 * 0.6, gum * 0.8);
+  return mix(col, c2, joint);
+}
+vec3 patTile(vec2 uv, vec3 c1, vec3 c2, float sc) {
+  vec2 ts = sc == 0.0 ? vec2(0.15, 0.075) : sc == 1.0 ? vec2(0.3, 0.3) : vec2(0.6, 0.6);
+  vec2 c = uv / ts;
+  if (sc == 0.0) c.x += mod(floor(c.y), 2.0) * 0.5;
+  vec2 f = fract(c);
+  float e = min(min(f.x, 1.0 - f.x) * ts.x, min(f.y, 1.0 - f.y) * ts.y);
+  float grout = 1.0 - smoothstep(0.003, 0.007, e);
+  vec3 col = c1 * (0.93 + 0.09 * h12(floor(c)));
+  // bombé des carreaux de métro
+  if (sc == 0.0) col *= 0.94 + 0.1 * (1.0 - abs(f.y - 0.5) * 2.0);
+  return mix(col, c2, grout);
+}
+vec3 patMetalPanel(vec2 uv, vec3 c1, vec3 c2) {
+  vec2 ps = vec2(1.0, 2.0);
+  vec2 f = fract(uv / ps);
+  float e = min(min(f.x, 1.0 - f.x) * ps.x, min(f.y, 1.0 - f.y) * ps.y);
+  float seam = 1.0 - smoothstep(0.006, 0.014, e);
+  vec3 col = c1 * (0.9 + 0.12 * h12(floor(uv / ps))) * (0.95 + 0.06 * vnoise(uv * vec2(2.0, 40.0)));
+  vec2 r = fract(uv / 0.25) - 0.5;
+  float riv = (1.0 - smoothstep(0.08, 0.12, length(r))) * step(e, 0.06);
+  col = mix(col, c2, seam);
+  return col + riv * 0.06;
+}
+vec3 patGrate(vec2 uv, vec3 c1, vec3 c2) {
+  vec2 f = fract(uv * 12.0);
+  float bar = step(f.x, 0.3) + step(f.y, 0.3);
+  return mix(c2, c1, clamp(bar, 0.0, 1.0));
+}
+vec3 patRoadPaint(vec2 uv, vec3 c1, vec3 c2) {
+  float wear = smoothstep(0.55, 0.75, vnoise(uv * 7.0) * 0.6 + vnoise(uv * 23.0) * 0.4);
+  return mix(c1 * (0.92 + 0.08 * vnoise(uv * 40.0)), c2, wear * 0.7);
+}
+vec3 patTerrazzo(vec2 uv, vec3 c1, vec3 c2) {
+  vec2 q = floor(uv * 22.0);
+  float r = h12(q);
+  vec3 chip = r < 0.08 ? c2 : r < 0.1 ? vec3(0.62, 0.42, 0.25) : r < 0.12 ? vec3(0.3, 0.42, 0.5) : c1;
+  float inChip = 1.0 - smoothstep(0.25, 0.4, length(fract(uv * 22.0) - 0.5));
+  vec3 col = mix(c1, chip, inChip);
+  vec2 f = fract(uv / 1.2);
+  float joint = 1.0 - smoothstep(0.0, 0.006, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)) * 1.2);
+  return mix(col, c2 * 0.8, joint * 0.6);
+}
+vec3 patGraffiti(vec2 uv, vec3 c1, vec3 c2, float wy) {
+  vec3 col = patBrick(uv, c1, c2);
+  if (wy > 3.6) return col;
+  float n = fbm(uv * 0.55 + 13.0);
+  float tag = smoothstep(0.56, 0.6, n) * (1.0 - smoothstep(0.7, 0.74, n));
+  float fill = smoothstep(0.6, 0.64, n);
+  float hue = h12(floor(uv * 0.35));
+  vec3 paint = hue < 0.25 ? vec3(1.0, 0.18, 0.62) : hue < 0.5 ? vec3(0.15, 0.85, 1.0) : hue < 0.75 ? vec3(1.0, 0.82, 0.1) : vec3(0.35, 1.0, 0.35);
+  col = mix(col, paint * 0.8, fill * 0.75);
+  col = mix(col, vec3(0.04), tag * 0.9);
+  return col;
+}
+vec3 patSlats(vec2 uv, vec3 c1, vec3 c2) {
+  float f = fract(uv.x * 10.0);
+  float gap = 1.0 - smoothstep(0.0, 0.12, min(f, 1.0 - f));
+  return mix(c1 * (0.9 + 0.15 * h12(vec2(floor(uv.x * 10.0), 2.0))), c2, gap);
+}
+// grille hexagonale : renvoie la distance au bord de l'alvéole (0 = bord)
+float hexEdge(vec2 p) {
+  p *= 2.2;
+  vec2 r = vec2(1.0, 1.732);
+  vec2 h = r * 0.5;
+  vec2 a = mod(p, r) - h;
+  vec2 b = mod(p - h, r) - h;
+  vec2 g = dot(a, a) < dot(b, b) ? a : b;
+  vec2 q = abs(g);
+  return 0.5 - max(dot(q, normalize(vec2(1.0, 1.732))), q.x);
+}
+vec3 patHex(vec2 uv, vec3 c1, vec3 c2, out float edge) {
+  float e = hexEdge(uv);
+  edge = 1.0 - smoothstep(0.02, 0.06, e);
+  return mix(c1 * (0.92 + 0.1 * vnoise(uv * 3.0)), c2, edge * 0.8);
+}
+vec3 patSolar(vec2 uv, vec3 c1, vec3 c2) {
+  vec2 f = fract(uv * vec2(6.0, 6.0));
+  float grid = 1.0 - smoothstep(0.0, 0.06, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
+  return mix(c1 * (0.9 + 0.2 * f.y), c2, grid * 0.7);
+}
+// écran LED : 0 = vidéo, 1 = publicités, 2 = bandeau défilant
+vec3 ledScreen(vec2 uv, float sc, vec3 seed) {
+  float t = uTime;
+  vec2 px = floor(uv * 20.0) / 20.0;
+  vec3 col;
+  float id = h13(floor(seed / 6.0));
+  if (sc == 2.0) {
+    // texte défilant : blocs de « lettres »
+    float x = px.x * 4.0 + t * 3.0;
+    float ch = floor(x);
+    float fy = fract(px.y * 1.2);
+    float on = step(0.35, h12(vec2(ch, floor(fy * 5.0)))) * step(0.15, fy) * step(fy, 0.85) * step(0.12, fract(x));
+    vec3 hue = mix(vec3(1.0, 0.75, 0.15), vec3(1.0, 0.2, 0.25), step(0.5, h12(vec2(floor(x / 12.0), 3.0))));
+    col = hue * on;
+  } else if (sc == 1.0) {
+    // publicités : changent toutes les 6 s, aplats + bandes + logo
+    float slot = floor(t / 6.0 + id * 9.0);
+    float r = h12(vec2(slot, id));
+    vec3 a = 0.5 + 0.5 * cos(6.2832 * (r + vec3(0.0, 0.33, 0.67)));
+    vec3 b = 0.5 + 0.5 * cos(6.2832 * (r + 0.4 + vec3(0.0, 0.33, 0.67)));
+    vec2 q = fract(uv / vec2(6.0, 4.0));
+    float band = step(0.62, q.y) * step(q.y, 0.8);
+    float circle = 1.0 - smoothstep(0.18, 0.2, length((q - vec2(0.3, 0.38)) * vec2(1.5, 1.0)));
+    float bars = step(0.5, fract(q.x * 14.0 + t * 0.6)) * step(q.y, 0.25);
+    col = mix(a * 0.55, b, band) ;
+    col = mix(col, vec3(1.0), circle * 0.85);
+    col = mix(col, b * 1.2, bars * 0.6);
+  } else {
+    // vidéo : nappes de couleur qui ondulent
+    vec2 q = px * 0.35 + vec2(t * 0.07, -t * 0.05) + id * 5.0;
+    float n1 = fbm(q * 1.7);
+    float n2 = fbm(q * 2.3 + 4.0 + t * 0.1);
+    col = 0.5 + 0.5 * cos(6.2832 * (n1 * 1.4 + n2 * 0.6 + vec3(0.0, 0.25, 0.55) + t * 0.03));
+    col *= 0.55 + 0.6 * n2;
+  }
+  // grille de pixels
+  vec2 f = fract(uv * 20.0);
+  float pix = smoothstep(0.0, 0.18, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
+  return col * (0.35 + 0.65 * pix);
+}
 `;
 
 /** Couleur d'un matériau voxel : renvoie l'albédo (linéaire) et remplit émission/spéculaire. */
@@ -338,6 +505,63 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, out vec3 emissive, out fl
     return srgb2lin(col) * 0.5;
   }
   else if (pat == 29) col = mix(c1, c2, step(0.5, fract((an.x > 0.5 ? wpos.z : wpos.x) * 2.0)));
+  else if (pat == 30) col = patAsphalt(uv, c1, c2, sc);
+  else if (pat == 31) col = patConcrete(uv, c1, c2, sc);
+  else if (pat == 32) col = patTile(uv, c1, c2, sc);
+  else if (pat == 33) col = patMetalPanel(uv, c1, c2);
+  else if (pat == 34) {
+    // mur-rideau : meneaux, allèges, bureaux éclairés la nuit
+    vec2 cell = vec2(1.5, 3.5);
+    vec2 cq = uv / cell;
+    vec2 cid = floor(cq);
+    vec2 cf = fract(cq);
+    float mull = 1.0 - smoothstep(0.0, 0.035, min(cf.x, 1.0 - cf.x));
+    float spand = step(cf.y, 0.2);
+    vec3 refl = mix(c1, uSkyAmb * 0.9 + c1 * 0.5, 0.35 + 0.35 * vnoise(uv * 0.15));
+    col = mix(refl, c2, max(mull, spand * 0.85));
+    if (!wall) col = c2;
+    float lit = step(0.42, h12(cid + floor(wpos.xz * 0.05) * 7.3)) * (1.0 - mull) * (1.0 - spand);
+    float blinds = step(0.75, h12(cid + 3.3));
+    emissive = srgb2lin(t2.rgb) * lit * (0.08 + 1.1 * uNight) * (1.0 - blinds * 0.6) * (0.75 + 0.5 * h12(cid + 1.1));
+    spec = mix(spec, 0.25, max(mull, spand));
+    return srgb2lin(col);
+  }
+  else if (pat == 35) {
+    // néon : tube saturé, scintillement discret, rares clignotements
+    float cluster = h13(floor(wpos * 1.5));
+    float blink = step(0.996, h13(vec3(floor(uTime * 7.0), cluster * 91.0, 3.0)));
+    float fl = 0.92 + 0.08 * sin(uTime * 52.0 + cluster * 40.0);
+    emissive = srgb2lin(t2.rgb) * (2.4 + 1.6 * uNight) * fl * (1.0 - blink * 0.85);
+    return srgb2lin(c1) * 0.6;
+  }
+  else if (pat == 36) {
+    vec3 sc3 = ledScreen(uv, sc, vox);
+    emissive = srgb2lin(sc3) * (1.1 + 1.3 * uNight);
+    return srgb2lin(c1);
+  }
+  else if (pat == 37) col = patGrate(uv, c1, c2);
+  else if (pat == 38) col = patRoadPaint(uv, c1, c2);
+  else if (pat == 39) {
+    float ph = h13(floor(wpos * 0.5)) * 6.28;
+    float pulse = emode == 6 ? 0.75 + 0.35 * sin(uTime * 1.6 + ph) : 1.0;
+    emissive = srgb2lin(t2.rgb) * (1.4 + 1.2 * uNight) * pulse;
+    return srgb2lin(c1) * 0.7;
+  }
+  else if (pat == 40) col = patTerrazzo(uv, c1, c2);
+  else if (pat == 41) col = c1 * (0.85 + 0.25 * h12(floor(uv * 60.0))) + c2 * 0.05 * step(0.97, h12(floor(uv * 30.0)));
+  else if (pat == 42) col = patGraffiti(uv, c1, c2, wpos.y);
+  else if (pat == 43) col = patSlats(wall ? uv : uv.yx, c1, c2);
+  else if (pat == 44) {
+    float edge;
+    col = patHex(uv, c1, c2, edge);
+    if (emode == 6) {
+      float ph = h12(floor(uv * 0.5)) * 6.28;
+      emissive = srgb2lin(t2.rgb) * edge * (0.35 + 0.3 * sin(uTime * 1.3 + ph)) * (0.4 + 0.8 * uNight);
+      emode = 0;
+    }
+  }
+  else if (pat == 45) col = patSolar(uv, c1, c2);
+  else if (pat == 46) col = patSidewalk(uv, c1, c2);
   // variation par voxel
   col *= 1.0 + (h13(vox) - 0.5) * noiseAmt * 0.38;
   // salissures extérieures (suie, éclaboussures)
@@ -353,6 +577,13 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, out vec3 emissive, out fl
     col *= 1.0 - fbm(uv * 0.9) * grime * 0.25;
   }
   if (emode == 1) emissive += srgb2lin(t2.rgb) * 1.6;
+  else if (emode == 6) emissive += srgb2lin(t2.rgb) * (0.9 + 0.4 * sin(uTime * 1.6 + h13(floor(wpos)) * 6.28));
+  // pluie : surfaces mouillées, flaques
+  if (t3.a > 0.5 && uWet > 0.0 && n.y > 0.5 && L.x > 0.3) {
+    float puddle = smoothstep(0.52, 0.66, fbm(uv * 0.45 + 31.0)) * uWet;
+    col *= 1.0 - 0.32 * uWet - 0.3 * puddle;
+    spec = max(spec, 0.3 * uWet + 0.75 * puddle);
+  }
   return srgb2lin(clamp(col, 0.0, 1.0));
 }
 `;

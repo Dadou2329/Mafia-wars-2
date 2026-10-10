@@ -76,7 +76,7 @@ export async function renderPortraits(width = 360, height = 480): Promise<Portra
       vz: 0,
       anim: Anim.IDLE,
       aiming: false,
-      weapon: Weapon.REVOLVER,
+      weapon: Weapon.PISTOL,
       shotAt: -10,
       hitAt: -10,
       meleeAt: -10,

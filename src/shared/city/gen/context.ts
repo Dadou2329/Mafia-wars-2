@@ -3,7 +3,7 @@
 
 import { M } from '../../materials';
 import { GROUND_VY, INV_VOXEL, VOXEL, VoxelWorld } from '../../voxel';
-import { PROP_DEFS, PROP_INDEX, type PropKind } from '../props';
+import { NEON_COLORS, PROP_DEFS, PROP_INDEX, type PropDef, type PropKind } from '../props';
 import type { BuildingDef, Side } from '../plan';
 import { Rng } from '../../util';
 import type { PortalDef } from '../../nav';
@@ -28,6 +28,8 @@ export interface LightSource {
   z: number;
   intensity: number;
   radius: number;
+  /** Couleur de la lumière (sRGB), blanc chaud par défaut. */
+  color?: number;
 }
 
 export interface Pt {
@@ -50,34 +52,95 @@ export interface DoorInfo {
 export interface RoomInfo {
   kind: string;
   rect: [number, number, number, number]; // m, monde
+  /** Altitude du sol de la pièce (m). */
+  y: number;
+}
+
+/** Volume intérieur d'un étage (zone de capture). */
+export interface ZoneInfo {
+  rect: [number, number, number, number];
+  y0: number; // m
+  y1: number; // m
+}
+
+/** Arrêt d'ascenseur : point devant la porte, à l'étage desservi. */
+export interface ElevatorStop {
+  x: number;
+  z: number;
+  y: number;
+  yaw: number; // vers la porte
+  label: string;
 }
 
 export interface BuildingInfo {
   id: number;
   def: BuildingDef;
   footprint: [number, number, number, number]; // m
-  floorY: number; // m, altitude du plancher
+  floorY: number; // m, altitude du rez-de-chaussée
+  /** Étages accessibles (altitude du sol et du plafond, m). */
+  floors: { y: number; ceil: number }[];
+  /** Toit accessible (altitude, m) ou null. */
+  roofY: number | null;
   doors: DoorInfo[];
   rooms: RoomInfo[];
-  /** Zone de capture : salles intérieures accessibles (m). */
-  zone: [number, number, number, number][];
+  /** Zone de capture : volumes intérieurs accessibles. */
+  zone: ZoneInfo[];
   center: Pt;
-  /** Points de défense intérieurs. */
+  /** Points de défense intérieurs (tous étages). */
   defend: Pt[];
+  /** Points de tir sur le toit. */
+  roofPts: Pt[];
   /** Points de garde extérieurs, autour de l'entrée. */
   guardOut: Pt[];
-  /** QG : bureau, comptoir de recrutement, armurerie, points d'apparition. */
+  /** QG : bureau, recrutement, armurerie, garage, points d'apparition. */
   desk?: Pt & { yaw: number };
   deskSeat?: Pt;
   recruit?: Pt;
   armory?: Pt;
+  garage?: Pt & { yaw: number };
   spawn: Pt[];
+  /** Ascenseur (tours) : arrêts. */
+  elevator?: ElevatorStop[];
+  /** Coffre / cible de braquage. */
+  vault?: Pt;
   /** Panneau d'enseigne (texte) : position et orientation. */
   sign?: { x: number; y: number; z: number; yaw: number; w: number; h: number };
-  /** Plaque « Bureau de … » sur la porte du bureau. */
+  /** Plaque « Bureau de … ». */
   plaque?: { x: number; y: number; z: number; yaw: number };
   /** Hauteur totale (m) pour la carte. */
   height: number;
+}
+
+/** Écran géant (contenu dessiné par le client : publicités, propagande des parrains). */
+export interface ScreenInfo {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  w: number;
+  h: number;
+  /** 'ad' publicité, 'boss' propagande du maître du quartier, 'news' actualités, 'ticker' bandeau. */
+  kind: 'ad' | 'boss' | 'news' | 'ticker';
+  district: string;
+  seed: number;
+}
+
+/** Hologramme (silhouette animée, additive). */
+export interface HoloInfo {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  scale: number;
+  kind: 'koi' | 'dancer' | 'logo' | 'dragon' | 'city' | 'ring' | 'bottle' | 'face';
+  color: number;
+}
+
+export interface SteamInfo {
+  x: number;
+  y: number;
+  z: number;
+  big: boolean;
 }
 
 export class GenContext {
@@ -87,10 +150,12 @@ export class GenContext {
   readonly buildings: BuildingInfo[] = [];
   /** Empreintes au sol des bâtiments (m) pour éviter d'y poser des objets de rue. */
   readonly footprints: [number, number, number, number][] = [];
-  /** Ascenseurs et autres liens de navigation. */
+  /** Ascenseurs, rames de métro et autres liens de navigation. */
   readonly portals: PortalDef[] = [];
-  /** Cheminées fumantes (pour les particules côté client). */
-  readonly smokes: { x: number; y: number; z: number; big: boolean }[] = [];
+  /** Vapeur des bouches d'égout et fumées. */
+  readonly smokes: SteamInfo[] = [];
+  readonly screens: ScreenInfo[] = [];
+  readonly holos: HoloInfo[] = [];
   readonly rng: Rng;
 
   constructor(world: VoxelWorld, seed: number) {
@@ -100,7 +165,7 @@ export class GenContext {
 
   /** Ajoute un accessoire (coordonnées monde en mètres) et écrit sa collision dans la grille. */
   prop(kind: PropKind, x: number, y: number, z: number, yaw = 0, variant = 0, building = -1, scale?: number): void {
-    const def = PROP_DEFS[kind];
+    const def = PROP_DEFS[kind] as PropDef;
     this.props.push({ kind: PROP_INDEX[kind], x, y, z, yaw, variant, building, scale });
     if (def.collide !== 'none') {
       const s = scale ?? 1;
@@ -108,7 +173,7 @@ export class GenContext {
       const q = Math.round(yaw / (Math.PI / 2)) & 3;
       const w = (q & 1 ? def.size[2] : def.size[0]) * s;
       const d = (q & 1 ? def.size[0] : def.size[2]) * s;
-      const h = ((def as { collideH?: number }).collideH ?? def.size[1]) * s;
+      const h = (def.collideH ?? def.size[1]) * s;
       const mat = def.collide === 'cover' ? M.COVER : M.COLLIDE;
       // on réduit légèrement l'encombrement pour ne pas bloquer les passages étroits
       const x0 = Math.round((x - w / 2 + 0.06) * INV_VOXEL);
@@ -122,22 +187,24 @@ export class GenContext {
           for (let vx = Math.min(x0, x1 - 1); vx < Math.max(x1, x0 + 1); vx++)
             if (this.world.get(vx, vy, vz) === 0) this.world.set(vx, vy, vz, mat);
     }
-    const light = (def as { light?: { y: number; z?: number; intensity: number; radius: number } }).light;
+    const light = def.light;
     if (light) {
       const s = scale ?? 1;
       const lz = (light.z ?? 0) * s;
+      const color = def.neonVariant ? NEON_COLORS[variant % NEON_COLORS.length] : light.color;
       this.lights.push({
         x: x + Math.sin(yaw) * lz,
         y: y + light.y * s,
         z: z + Math.cos(yaw) * lz,
         intensity: light.intensity,
         radius: light.radius,
+        color,
       });
     }
   }
 
-  light(x: number, y: number, z: number, intensity: number, radius: number): void {
-    this.lights.push({ x, y, z, intensity, radius });
+  light(x: number, y: number, z: number, intensity: number, radius: number, color?: number): void {
+    this.lights.push({ x, y, z, intensity, radius, color });
   }
 
   /** Vrai si le point (m) est dans l'empreinte d'un bâtiment (avec marge). */

@@ -200,7 +200,8 @@ export class Atmosphere {
     const ambNight = new THREE.Color(0.075, 0.085, 0.13);
     e.uSkyAmb.value.copy(ambDay).lerp(ambNight, night);
     e.uSkyAmb.value.lerp(new THREE.Color(0.4, 0.3, 0.3), dusk * 0.3);
-    e.uLampCol.value.setRGB(1.0, 0.58, 0.26).multiplyScalar(lerp(0.75, 1.9, night));
+    e.uLampCol.value.setRGB(1.0, 0.72, 0.45);
+    e.uLampPower.value = lerp(0.75, 1.9, night);
     e.uFogColor.value.copy(horizon).lerp(new THREE.Color(0x2a2c30), 0.15 * (1 - night));
     e.uFogDensity.value = lerp(0.0095, 0.0175, night);
     void dt;

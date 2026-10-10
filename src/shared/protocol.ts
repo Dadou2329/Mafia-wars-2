@@ -17,8 +17,10 @@ export interface MatchSettings {
   timeLimit: number;
   /** 'cycle' (jour/nuit), 'night' (nuit permanente), 'dusk' (crépuscule permanent). */
   daytime: 'cycle' | 'night' | 'dusk';
-  /** Commencer par la mission d'introduction. */
-  tutorial: boolean;
+  /** Météo : 'variable' (pluie de temps en temps), 'rain' (pluie permanente), 'clear' (temps sec). */
+  weather: 'variable' | 'rain' | 'clear';
+  /** Conseils contextuels pour débuter (aucune quête). */
+  tips: boolean;
 }
 
 export interface RoomState {
@@ -72,6 +74,11 @@ export interface PublicState {
   battles: { x: number; z: number; intensity: number }[];
   /** Événement aléatoire public en cours (cargaison, descente de police, brouillard). */
   event?: { kind: string; x: number; z: number; until: number } | null;
+  /** QG actuel et palier de chaque parrain. */
+  hq: Record<Slot, number>;
+  tier: Record<Slot, number>;
+  /** Pluie : 0 (sec) à 1. */
+  rain: number;
 }
 
 export interface LieutenantStatus {
@@ -108,6 +115,10 @@ export interface PrivateState {
   deaths: number;
   captured: number;
   nextLtPrice: number;
+  maxLt: number;
+  /** Palier du logement (1 planque … 5 tour) et bâtiment du QG actuel. */
+  tier: number;
+  hq: number;
   /** Ennemis repérés (positions approximatives pour la carte). */
   spotted: { x: number; z: number; n: number }[];
 }
@@ -159,6 +170,8 @@ export type ClientAction =
   | { a: 'buyWeapon'; w: Weapon }
   | { a: 'buyAmmo' }
   | { a: 'buyBuilding'; b: number }
+  /** Emménager dans le logement suivant de l'échelle (le QG s'y installe). */
+  | { a: 'moveIn'; b: number }
   | { a: 'quick'; cmd: 'follow' | 'attack' | 'defend' | 'retreat'; target?: number; building?: number; x?: number; z?: number }
   | { a: 'customize'; custom: Record<string, unknown> }
   | { a: 'interact'; what: string }

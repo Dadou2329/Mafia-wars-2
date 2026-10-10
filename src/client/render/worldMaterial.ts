@@ -55,11 +55,14 @@ diffuseColor.rgb = voxelMaterial(vMat, vWPos, wn, gL, gEmissive, gSpec);`,
         `#include <lights_fragment_end>
 float aoF = 0.34 + 0.66 * (vAO / 3.0);
 reflectedLight.directDiffuse *= mix(aoF, 1.0, 0.45) * smoothstep(0.02, 0.32, gL.x);
-reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn) * aoF;
+reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn, vWPos) * aoF;
 totalEmissiveRadiance += gEmissive;
 vec3 vdir = normalize(cameraPosition - vWPos);
 float fres = pow(1.0 - max(dot(vdir, wn), 0.0), 4.0);
-reflectedLight.indirectDiffuse += gSpec * (0.15 + fres) * (uSkyAmb * gL.x * 0.8 + uLampCol * gL.y * 0.7) * 0.5;`,
+vec3 lampC = lampColorAt(vWPos);
+reflectedLight.indirectDiffuse += gSpec * (0.15 + fres) * (uSkyAmb * gL.x * 0.8 + lampC * gL.y * 0.7) * 0.5;
+// chaussée mouillée : reflets colorés des néons et des réverbères
+if (wn.y > 0.5) reflectedLight.indirectDiffuse += gSpec * uWet * lampC * gL.y * gL.y * (0.35 + 1.4 * fres);`,
       )
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vWPos);');
   };

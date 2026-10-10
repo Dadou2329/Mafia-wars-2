@@ -1,36 +1,65 @@
-// Règles du jeu : économie, recrutement, améliorations, points de vie…
+// Règles du jeu : économie, recrutement, paliers de l'ascension, améliorations, points de vie…
 
 import { Weapon } from './characters';
 
 export const TICK_RATE = 20;
 export const TICK_DT = 1 / TICK_RATE;
 
-export const START_MONEY = 500;
-export const START_GANGSTERS = 5;
-export const MAX_GANGSTERS = 120;
+export const START_MONEY = 600;
+export const START_GANGSTERS = 4;
 export const RECRUIT_BUNDLES = [
-  { n: 1, price: 60 },
-  { n: 5, price: 280 },
-  { n: 10, price: 520 },
+  { n: 1, price: 80 },
+  { n: 5, price: 380 },
+  { n: 10, price: 700 },
 ];
-export const LIEUTENANT_PRICES = [0, 250, 400, 600, 850, 1100];
-export const MAX_LIEUTENANTS = 6;
-export const DISTRICT_BONUS = 20; // £/min par quartier contrôlé
-export const HQ_CAPTURE_MIN_DISTRICTS = 3;
+export const LIEUTENANT_PRICES = [0, 400, 700, 1000, 1400, 1800, 2300, 2900];
+export const DISTRICT_BONUS = 40; // $/min par quartier contrôlé
+/** Quartiers à contrôler pour pouvoir prendre le QG adverse (sur 7). */
+export const HQ_CAPTURE_MIN_DISTRICTS = 4;
 export const INCOME_PERIOD = 5; // s
 
+/** Paliers de l'ascension : effectifs, lieutenants, bonus de revenus, gardes d'élite. */
+export interface TierDef {
+  tier: number;
+  name: string;
+  maxMen: number;
+  maxLt: number;
+  incomeMul: number;
+  guards: number;
+  /** Quartiers à contrôler pour emménager. */
+  districts: number;
+  /** Avantages affichés (français). */
+  perks: string[];
+}
+
+export const TIERS: TierDef[] = [
+  { tier: 1, name: 'Planque', maxMen: 40, maxLt: 2, incomeMul: 1, guards: 0, districts: 0, perks: ['40 hommes', '2 lieutenants'] },
+  { tier: 2, name: 'Garage', maxMen: 70, maxLt: 3, incomeMul: 1.05, guards: 0, districts: 0, perks: ['70 hommes', '3 lieutenants', 'Véhicules au garage', 'Revenus +5 %'] },
+  { tier: 3, name: 'Loft', maxMen: 100, maxLt: 4, incomeMul: 1.1, guards: 2, districts: 1, perks: ['100 hommes', '4 lieutenants', 'Ordres depuis le téléphone', '2 gardes', 'Revenus +10 %'] },
+  { tier: 4, name: 'Penthouse', maxMen: 140, maxLt: 6, incomeMul: 1.2, guards: 4, districts: 2, perks: ['140 hommes', '6 lieutenants', 'Drones', 'Aéronef (ADAV)', '4 gardes d’élite', 'Revenus +20 %'] },
+  { tier: 5, name: 'Tour', maxMen: 180, maxLt: 8, incomeMul: 1.35, guards: 8, districts: 3, perks: ['180 hommes', '8 lieutenants', 'Tourelles', '8 gardes d’élite', 'Revenus +35 %'] },
+];
+
+export function tierDef(t: number): TierDef {
+  return TIERS[Math.max(0, Math.min(TIERS.length - 1, t - 1))];
+}
+
+export const MAX_GANGSTERS = 180;
+export const MAX_LIEUTENANTS = 8;
+
 export const HP = {
-  boss: 150,
-  gangster: 70,
-  lieutenant: 130,
-  thug: 60,
-  police: 90,
-  guard: 110,
+  boss: 160,
+  gangster: 75,
+  lieutenant: 140,
+  thug: 65,
+  police: 100,
+  guard: 120,
+  turret: 180,
 };
 
 export const RESPAWN_TIME = 8;
 export const RESPAWN_PENALTY = 0.1;
-export const RESPAWN_PENALTY_MAX = 150;
+export const RESPAWN_PENALTY_MAX = 300;
 export const LIEUTENANT_RECOVERY = 45; // s
 
 export const SPEED = {
@@ -51,32 +80,58 @@ export interface UpgradeDef {
   price: number;
   category: 'gang' | 'hq';
   requires?: string;
+  /** Palier minimal du logement. */
+  tier?: number;
 }
 
 export const UPGRADES: UpgradeDef[] = [
-  { id: 'revolvers', name: 'Revolvers pour tous', desc: 'Tous vos gangsters reçoivent un revolver Webley.', price: 350, category: 'gang' },
-  { id: 'shotguns', name: 'Fusils de chasse', desc: 'Un gangster sur trois porte un fusil de chasse.', price: 600, category: 'gang', requires: 'revolvers' },
-  { id: 'rifles', name: 'Carabines Martini-Henry', desc: 'Un gangster sur quatre porte une carabine de précision.', price: 900, category: 'gang', requires: 'revolvers' },
-  { id: 'vests', name: 'Gilets matelassés', desc: '+35 % de points de vie pour tous vos hommes.', price: 500, category: 'gang' },
-  { id: 'training', name: 'Entraînement au tir', desc: '+20 % de précision pour tous vos hommes.', price: 550, category: 'gang' },
-  { id: 'guards', name: 'Gardes du QG', desc: 'Quatre gardes d’élite protègent votre quartier général en permanence.', price: 400, category: 'hq' },
-  { id: 'office', name: 'Bureau de prestige', desc: 'Mobilier luxueux et trophées. +10 % sur tous vos revenus.', price: 450, category: 'hq' },
-  { id: 'telegraph', name: 'Télégraphe', desc: 'Donnez vos ordres depuis la carte (touche M), où que vous soyez.', price: 500, category: 'hq' },
-  { id: 'armory', name: 'Armurerie', desc: 'Achetez des armes au QG et faites le plein de munitions.', price: 300, category: 'hq' },
-  { id: 'facade', name: 'Façade prestigieuse', desc: 'Drapeaux et lanternes à vos couleurs. +5 £/min par quartier contrôlé.', price: 600, category: 'hq' },
+  { id: 'pistols', name: 'Pistolets pour tous', desc: 'Chacun de vos gangsters reçoit un pistolet Vektor.', price: 400, category: 'gang' },
+  { id: 'smgs', name: 'Pistolets-mitrailleurs', desc: 'Un gangster sur trois porte un pistolet-mitrailleur Wasp.', price: 800, category: 'gang', requires: 'pistols' },
+  { id: 'rifles', name: 'Fusils à rail', desc: 'Un gangster sur quatre porte un fusil à rail Longbow.', price: 1200, category: 'gang', requires: 'pistols' },
+  { id: 'vests', name: 'Gilets en graphène', desc: '+35 % de points de vie pour tous vos hommes.', price: 700, category: 'gang' },
+  { id: 'training', name: 'Implants de visée', desc: '+20 % de précision pour tous vos hommes.', price: 750, category: 'gang' },
+  { id: 'hackers', name: 'Hackers de la bande', desc: 'Vos lieutenants et vous piratez les systèmes de sécurité deux fois plus vite.', price: 900, category: 'gang' },
+  { id: 'crypto', name: 'Liaison cryptée', desc: 'Donnez vos ordres depuis la carte (touche M) et le téléphone, où que vous soyez.', price: 600, category: 'hq' },
+  { id: 'armory', name: 'Armurerie', desc: 'Achetez des armes et des munitions dans votre QG.', price: 350, category: 'hq' },
+  { id: 'drones', name: 'Drones de reconnaissance', desc: 'Envoyez un drone sur un quartier : les ennemis y apparaissent sur vos cartes.', price: 1500, category: 'hq', tier: 3 },
 ];
 
 export const UPGRADE_BY_ID: Record<string, UpgradeDef> = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
 
 /** Armes que le parrain peut acheter à l'armurerie. */
 export const BOSS_SHOP: { weapon: Weapon; price: number }[] = [
-  { weapon: Weapon.SHOTGUN, price: 220 },
-  { weapon: Weapon.RIFLE, price: 320 },
-  { weapon: Weapon.KNIFE, price: 40 },
-  { weapon: Weapon.CLUB, price: 25 },
+  { weapon: Weapon.SMG, price: 380 },
+  { weapon: Weapon.SHOTGUN, price: 320 },
+  { weapon: Weapon.RIFLE, price: 520 },
+  { weapon: Weapon.KNIFE, price: 60 },
+  { weapon: Weapon.CLUB, price: 45 },
 ];
 
-export const AMMO_PRICE = 30;
+export const AMMO_PRICE = 50;
+
+/** Véhicules achetables (au garage, à partir du palier indiqué). */
+export interface VehicleDef {
+  id: number;
+  key: string;
+  name: string;
+  price: number;
+  tier: number;
+  seats: number;
+  hp: number;
+  /** Vitesse maximale (m/s), accélération (m/s²). */
+  speed: number;
+  accel: number;
+  flying?: boolean;
+  desc: string;
+}
+
+export const VEHICLES: VehicleDef[] = [
+  { id: 0, key: 'moto', name: 'Moto de récup', price: 0, tier: 1, seats: 1, hp: 120, speed: 22, accel: 11, desc: 'Une vieille moto électrique rafistolée. Rapide et nerveuse.' },
+  { id: 1, key: 'berline', name: 'Berline Nimbus', price: 900, tier: 2, seats: 4, hp: 260, speed: 24, accel: 8, desc: 'Une berline électrique sobre, quatre places.' },
+  { id: 2, key: 'sport', name: 'Bolide Stingray', price: 2600, tier: 3, seats: 2, hp: 220, speed: 34, accel: 14, desc: 'Un coupé de sport à propulsion magnétique.' },
+  { id: 3, key: 'fourgon', name: 'Fourgon blindé Rhino', price: 3400, tier: 3, seats: 8, hp: 600, speed: 18, accel: 5, desc: 'Blindé, lent, il transporte toute une escouade.' },
+  { id: 4, key: 'adav', name: 'Aéronef Corvus (ADAV)', price: 12000, tier: 4, seats: 4, hp: 420, speed: 26, accel: 7, flying: true, desc: 'Un aéronef à décollage vertical : il se pose sur les toits.' },
+];
 
 /** Noms affichés des mafias. */
 export const MAFIA_NAME = { dadou: 'La Mafia de Dadou', even: 'La Mafia d’Even' } as const;
@@ -84,7 +139,18 @@ export const BOSS_NAME = { dadou: 'Dadou', even: 'Even' } as const;
 /** « de Dadou » / « d’Even » (élision). */
 export const DE_BOSS = { dadou: 'de Dadou', even: 'd’Even' } as const;
 
-export type OrderType = 'attack_district' | 'attack_building' | 'defend_district' | 'defend_building' | 'patrol' | 'follow' | 'reinforce' | 'retreat' | 'hold';
+export type OrderType =
+  | 'attack_district'
+  | 'attack_building'
+  | 'defend_district'
+  | 'defend_building'
+  | 'patrol'
+  | 'follow'
+  | 'reinforce'
+  | 'retreat'
+  | 'hold'
+  | 'roof'
+  | 'subway';
 
 export const ORDER_LABEL: Record<OrderType, string> = {
   attack_district: 'Attaquer le quartier',
@@ -96,6 +162,8 @@ export const ORDER_LABEL: Record<OrderType, string> = {
   reinforce: 'Renforcer',
   retreat: 'Se replier',
   hold: 'Tenir la position',
+  roof: 'Tenir le toit',
+  subway: 'Attaquer par le métro',
 };
 
 /** Libellé d'état des missions (affiché dans les rapports). */
@@ -109,6 +177,9 @@ export const ORDER_STATUS: Record<OrderType, string> = {
   reinforce: 'RENFORTS',
   retreat: 'REPLI',
   hold: 'POSITION TENUE',
+  roof: 'TOIT TENU',
+  subway: 'ATTAQUE SOUTERRAINE',
 };
 
-export const NEWSPAPER = 'LA GAZETTE DE LONDRES';
+/** Le journal holographique de la ville. */
+export const NEWSPAPER = 'LE FLASH DE NEW YORK';

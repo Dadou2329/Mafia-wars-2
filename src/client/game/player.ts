@@ -43,7 +43,7 @@ export class PlayerController {
   private bob = 0;
   stepDist = 0;
   onStep: ((surface: number) => void) | null = null;
-  weapon: Weapon = Weapon.REVOLVER;
+  weapon: Weapon = Weapon.PISTOL;
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;

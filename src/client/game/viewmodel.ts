@@ -88,7 +88,7 @@ const POLE_L: V3 = [-0.5, -1, 0.1];
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 const RIGS: Record<Weapon, RigDef> = {
-  [Weapon.REVOLVER]: {
+  [Weapon.PISTOL]: {
     meta: VM.REVOLVER,
     hip: { pos: [0.135, -0.12, -0.38], rot: [0.03, 0.34, 0.22] },
     ads: { pos: [0, -VM.REVOLVER.sightY, -0.44], rot: [0, 0, 0] },
@@ -209,7 +209,7 @@ function sampleKeys(keys: Key[], t: number, out: number[]): void {
 const RELOAD_KEYS: Partial<Record<Weapon, Key[]>> = {
   // Webley : on incline le revolver, on bascule le canon, canon en l'air (les douilles
   // tombent), on présente les chambres, on recharge, on referme d'un coup sec.
-  [Weapon.REVOLVER]: [
+  [Weapon.PISTOL]: [
     [0, 0, 0, 0, 0, 0, 0, 0],
     [0.1, -0.06, 0.035, 0.0, 0.25, 0.45, -0.25, 0, 'io'],
     [0.16, -0.06, 0.035, 0.0, 0.2, 0.47, -0.27, -1.25, 'out'],
@@ -326,8 +326,8 @@ export class Viewmodel {
   private casingGeo: Record<'pistol' | 'rifle' | 'shell', THREE.BufferGeometry>;
   private casings: Casing[] = [];
   private look = '';
-  private shown: Weapon = Weapon.REVOLVER;
-  private target: Weapon = Weapon.REVOLVER;
+  private shown: Weapon = Weapon.PISTOL;
+  private target: Weapon = Weapon.PISTOL;
   private weaponsRef: WeaponSystem | null = null;
   // --- animation
   private t = 0;
@@ -411,7 +411,7 @@ export class Viewmodel {
       const rims = this.mesh(meshModel(r.rims));
       rims.visible = false;
       moving.add(rims);
-      this.rigs.set(Weapon.REVOLVER, this.makeRig(RIGS[Weapon.REVOLVER], [frame, grip], moving, rims));
+      this.rigs.set(Weapon.PISTOL, this.makeRig(RIGS[Weapon.PISTOL], [frame, grip], moving, rims));
     }
     {
       const s = VM.shotgunModels();
@@ -512,7 +512,7 @@ export class Viewmodel {
 
   kick(n: number): void {
     const w = this.shown;
-    const k = w === Weapon.REVOLVER ? 1 : 1.25;
+    const k = w === Weapon.PISTOL ? 1 : 1.25;
     // impulsions : la crête du ressort vaut ≈ 0,6 × n (recul arrière et relevé du canon)
     this.kickPos.v += 30 * n;
     this.kickRot.v += 16 * n * k;
@@ -714,7 +714,7 @@ export class Viewmodel {
       ry += ko[4];
       rz += ko[5];
       // petites secousses quand on glisse les cartouches
-      const loads = w === Weapon.REVOLVER ? [0.48, 0.53, 0.58, 0.63, 0.68, 0.73] : w === Weapon.SHOTGUN ? [0.45, 0.6] : [0.5];
+      const loads = w === Weapon.PISTOL ? [0.48, 0.53, 0.58, 0.63, 0.68, 0.73] : w === Weapon.SHOTGUN ? [0.45, 0.6] : [0.5];
       for (const lt of loads) {
         const d = (reloadT - lt) / 0.035;
         if (d > -1 && d < 1) {
@@ -834,7 +834,7 @@ export class Viewmodel {
         fn();
       }
     };
-    if (w === Weapon.REVOLVER) {
+    if (w === Weapon.PISTOL) {
       if (rig.rims) rig.rims.visible = reloadT >= 0 && ang < -0.15 && (reloadT < 0.31 || reloadT > 0.47);
       if (reloadT >= 0) {
         fire('eject', 0.31, () => {

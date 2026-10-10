@@ -118,8 +118,8 @@ export class Game {
       earned: 0,
       income: 0,
       upgrades: new Set(),
-      weapons: new Set([Weapon.FISTS, Weapon.REVOLVER]),
-      ammo: new Map([[Weapon.REVOLVER, 36]]),
+      weapons: new Set([Weapon.FISTS, Weapon.PISTOL]),
+      ammo: new Map([[Weapon.PISTOL, 36]]),
       lieutenants: [],
       ltNames: [...LIEUTENANT_NAMES[slot]],
       heat: 0,
@@ -167,7 +167,7 @@ export class Game {
         z: sp.z,
         name: BOSS_NAME[slot],
         hp: HP.boss,
-        weapon: Weapon.REVOLVER,
+        weapon: Weapon.PISTOL,
       });
       boss.yaw = hq.desk ? hq.desk.yaw + Math.PI : 0;
       // barman recruteur
@@ -193,7 +193,7 @@ export class Game {
         const pts = [...info.defend].sort(() => this.rng.next() - 0.5);
         for (let i = 0; i < b.guards; i++) {
           const p = pts[i % Math.max(1, pts.length)] ?? info.center;
-          const w = this.rng.pick([Weapon.REVOLVER, Weapon.REVOLVER, Weapon.CLUB, Weapon.KNIFE, Weapon.SHOTGUN]);
+          const w = this.rng.pick([Weapon.PISTOL, Weapon.PISTOL, Weapon.CLUB, Weapon.KNIFE, Weapon.SHOTGUN]);
           const e = this.addEnt({
             kind: CharKind.THUG,
             role: 'thug',
@@ -349,8 +349,8 @@ export class Game {
     const r = this.rng.next();
     if (f.upgrades.has('rifles') && r < 0.25) return Weapon.RIFLE;
     if (f.upgrades.has('shotguns') && r < (f.upgrades.has('rifles') ? 0.55 : 0.33)) return Weapon.SHOTGUN;
-    if (f.upgrades.has('revolvers')) return Weapon.REVOLVER;
-    return r < 0.5 ? Weapon.REVOLVER : r < 0.8 ? Weapon.CLUB : Weapon.KNIFE;
+    if (f.upgrades.has('revolvers')) return Weapon.PISTOL;
+    return r < 0.5 ? Weapon.PISTOL : r < 0.8 ? Weapon.CLUB : Weapon.KNIFE;
   }
 
   gangHp(slot: Slot, base: number): number {
@@ -427,7 +427,7 @@ export class Game {
       x: p.x,
       z: p.z,
       hp: this.gangHp(slot, HP.lieutenant),
-      weapon: f.upgrades.has('rifles') ? Weapon.RIFLE : Weapon.REVOLVER,
+      weapon: f.upgrades.has('rifles') ? Weapon.RIFLE : Weapon.PISTOL,
       name,
       mode: 'squad',
     });
@@ -976,7 +976,7 @@ export class Game {
     for (const e of this.ents.values()) {
       if (e.slot !== slot || !e.alive) continue;
       if (e.role === 'gangster' && (id === 'revolvers' || id === 'shotguns' || id === 'rifles')) {
-        if (id === 'revolvers' && (e.weapon === Weapon.CLUB || e.weapon === Weapon.KNIFE)) e.weapon = Weapon.REVOLVER;
+        if (id === 'revolvers' && (e.weapon === Weapon.CLUB || e.weapon === Weapon.KNIFE)) e.weapon = Weapon.PISTOL;
         else if (id !== 'revolvers' && this.rng.chance(id === 'rifles' ? 0.25 : 0.33)) e.weapon = id === 'rifles' ? Weapon.RIFLE : Weapon.SHOTGUN;
         e.ammo = WEAPONS[e.weapon].magazine;
       }
@@ -1291,7 +1291,7 @@ export class Game {
         const hq = this.hq(slot);
         for (let i = guards; i < 4; i++) {
           const p = hq.guardOut[i % hq.guardOut.length];
-          const g = this.addEnt({ kind: CharKind.GANGSTER, role: 'guard', faction: f.faction, slot, x: p.x, z: p.z, hp: HP.guard, weapon: f.upgrades.has('shotguns') ? Weapon.SHOTGUN : Weapon.REVOLVER, mode: 'guard' });
+          const g = this.addEnt({ kind: CharKind.GANGSTER, role: 'guard', faction: f.faction, slot, x: p.x, z: p.z, hp: HP.guard, weapon: f.upgrades.has('shotguns') ? Weapon.SHOTGUN : Weapon.PISTOL, mode: 'guard' });
           g.ai!.post = { x: p.x, z: p.z };
           g.ai!.leash = 22;
           g.ai!.home = hq.id;
@@ -1442,7 +1442,7 @@ export class Game {
         const route = BUILDINGS.filter((bb) => bb.district === d.id).map((bb) => this.building(bb.id).doors[0].out);
         for (let i = 0; i < 4; i++) {
           const p = yard.doors[0].out;
-          const e = this.addEnt({ kind: CharKind.POLICE, role: 'police', faction: Faction.POLICE, x: p.x + this.rng.range(-2, 2), z: p.z + this.rng.range(-2, 2), hp: HP.police, weapon: Weapon.REVOLVER, mode: 'patrol' });
+          const e = this.addEnt({ kind: CharKind.POLICE, role: 'police', faction: Faction.POLICE, x: p.x + this.rng.range(-2, 2), z: p.z + this.rng.range(-2, 2), hp: HP.police, weapon: Weapon.PISTOL, mode: 'patrol' });
           e.ai!.patrol = [...route].sort(() => this.rng.next() - 0.5);
           e.ai!.patrolI = 0;
           e.ai!.leash = 50;

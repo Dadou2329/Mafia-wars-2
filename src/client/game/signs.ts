@@ -61,7 +61,7 @@ function signMaterial(map: THREE.Texture): THREE.MeshLambertMaterial {
 vec3 sn = normalize(vSWNrm);
 vec2 sL = sampleLightVol(vSWPos + sn * 0.3);
 reflectedLight.directDiffuse *= smoothstep(0.02, 0.3, sL.x);
-reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(sL, sn);`,
+reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(sL, sn, vSWPos);`,
       )
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vSWPos);');
   };
