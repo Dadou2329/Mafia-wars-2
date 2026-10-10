@@ -141,7 +141,7 @@ function buildHideout(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.p('LAPTOP_TABLE', tx, tz, Math.PI, 0, true);
   fu.p('CHAIR_PLASTIC', tx, tz - 3, 0, 0, true);
   fu.mark('desk', tx, tz, 0);
-  fu.mark('deskSeat', tx, tz - 3.5);
+  fu.mark('deskSeat', tx, tz - 5.5);
   fu.wall(apt, 'PORTRAIT_BOSS', 'left', apt.z0 + 10, 7, boss === 'dadou' ? 1 : 2);
   fu.wall(apt, 'NEON_ART', 'back', acx + 6, 8, pal.neonVariant);
   fu.p('TRASH_PILE', apt.x1 - 4, apt.z1 - 3, 0, 0, true);
@@ -358,7 +358,7 @@ function buildLoft(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.p('COMMAND_DESK', dx, dz, 0, 0, true);
   fu.p('BOSS_CHAIR', dx, dz + 3.5, Math.PI, 0, true);
   fu.mark('desk', dx, dz, Math.PI);
-  fu.mark('deskSeat', dx, dz + 4);
+  fu.mark('deskSeat', dx, dz + 7);
   fu.wall(loft, 'PORTRAIT_BOSS', 'right', loft.z0 + 16, 7, boss === 'dadou' ? 1 : 2);
   fu.p('BED', loft.x1 - 8, loft.z1 - 5, Math.PI, pal.sofa);
   fu.f.fill(loft.x1 - 18, l1.floorTop, loft.z1 - 12, loft.x1 - 17, l1.floorTop + 9, loft.z1, M.GLASS_CLEAR);

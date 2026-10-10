@@ -43,6 +43,14 @@ for (const slot of ['dadou', 'even'] as const) {
   for (const r of RESIDENCES[slot]) {
     const info = w.byId.get(r.id)!;
     check(`${r.name} : bureau, fauteuil, rabatteur, armurerie`, !!(info.desk && info.deskSeat && info.recruit && info.armory), JSON.stringify({ desk: !!info.desk, seat: !!info.deskSeat, rec: !!info.recruit, arm: !!info.armory }));
+    if (info.deskSeat && info.desk) {
+      // le parrain apparaît là : rien d'encombrant (meuble, chaise) à hauteur d'homme, et il regarde son bureau
+      const s = info.deskSeat;
+      const y0 = s.y ?? info.floorY;
+      let free = true;
+      for (let dy = 0.1; dy < 1.7; dy += 0.25) for (const [ox, oz] of [[0, 0], [0.25, 0], [-0.25, 0], [0, 0.25], [0, -0.25]]) if (w.city.world.solidAt(s.x + ox, y0 + dy, s.z + oz)) free = false;
+      check(`${r.name} : la place du parrain au bureau est dégagée`, free);
+    }
   }
 }
 const towers = w.buildings.filter((b) => b.floors.length >= 3);

@@ -273,49 +273,9 @@ export class CityMap {
       c.fillStyle = 'rgba(170,210,255,0.7)';
       c.fillText(b.name, ((b.rect[0] + b.rect[2]) / 2) * S, b.rect[1] * S - 10);
     }
-    // cartouche (sur la couche d'habillage)
+    // habillage de la carte stratégique (pas sur la mini-carte) : l'échelle
     c = this.decor.getContext('2d')!;
     c.textAlign = 'center';
-    const cw = 360;
-    const ch = 86;
-    const cx = this.w - cw - 28;
-    const cy = this.d - ch - 24;
-    c.fillStyle = 'rgba(6,10,18,0.88)';
-    c.fillRect(cx, cy, cw, ch);
-    c.strokeStyle = 'rgba(60,220,255,0.7)';
-    c.lineWidth = 2;
-    c.strokeRect(cx, cy, cw, ch);
-    c.strokeStyle = 'rgba(255,60,200,0.5)';
-    c.lineWidth = 1;
-    c.strokeRect(cx + 5, cy + 5, cw - 10, ch - 10);
-    c.fillStyle = '#d8f4ff';
-    c.font = `900 30px ${MAP_FONT_TITLE}`;
-    c.fillText('NEW YORK · 2085', cx + cw / 2, cy + 32);
-    c.fillStyle = 'rgba(160,210,240,0.85)';
-    c.font = `600 18px ${MAP_FONT}`;
-    c.fillText('Carte tactique de la guerre des gangs', cx + cw / 2, cy + 62);
-    // nord
-    const rx = 64;
-    const ry = this.d - 86;
-    c.save();
-    c.translate(rx, ry);
-    c.strokeStyle = 'rgba(60,220,255,0.8)';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.arc(0, 0, 30, 0, Math.PI * 2);
-    c.stroke();
-    c.fillStyle = 'rgba(60,220,255,0.9)';
-    c.beginPath();
-    c.moveTo(0, -26);
-    c.lineTo(8, 4);
-    c.lineTo(0, -2);
-    c.lineTo(-8, 4);
-    c.closePath();
-    c.fill();
-    c.restore();
-    c.fillStyle = '#d8f4ff';
-    c.font = `700 18px ${MAP_FONT_TITLE}`;
-    c.fillText('N', rx, ry - 44);
     // échelle
     c.fillStyle = 'rgba(60,220,255,0.9)';
     c.fillRect(120, this.d - 38, 20 * S, 3);

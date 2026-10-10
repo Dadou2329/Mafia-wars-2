@@ -75,6 +75,15 @@ export const otherSlot = (s: Slot): Slot => (s === 'dadou' ? 'even' : 'dadou');
 export const slotFaction = (s: Slot): number => (s === 'dadou' ? Faction.DADOU : Faction.EVEN);
 export const factionSlot = (f: number): Slot | null => (f === Faction.DADOU ? 'dadou' : f === Faction.EVEN ? 'even' : null);
 
+/** Orientation du parrain assis à son bureau : il regarde la table de commandement. */
+export function deskFacing(hq: BuildingInfo): number {
+  const seat = hq.deskSeat;
+  const desk = hq.desk;
+  if (!desk) return 0;
+  if (!seat || Math.hypot(desk.x - seat.x, desk.z - seat.z) < 0.05) return desk.yaw + Math.PI;
+  return Math.atan2(desk.x - seat.x, desk.z - seat.z);
+}
+
 export interface Outbox {
   /** Événements pour tout le monde. */
   all: GameEvent[];
@@ -224,7 +233,7 @@ export class Game {
         hp: HP.boss,
         weapon: Weapon.PISTOL,
       });
-      boss.yaw = hq.desk ? hq.desk.yaw + Math.PI : 0;
+      boss.yaw = deskFacing(hq);
       // le rabatteur qui recrute au QG
       const rp = hq.recruit ?? hq.spawn[0] ?? hq.center;
       const bar = this.addEnt({ kind: CharKind.BARMAN, role: 'barman', faction: f.faction, slot, x: rp.x, z: rp.z, y: rp.y ?? hq.floorY, hp: 100, weapon: Weapon.FISTS, mode: 'guard', name: RECRUITER_NAME[slot] });
@@ -1070,7 +1079,7 @@ export class Game {
         const hq = this.hq(slot);
         const sp = hq.deskSeat ?? hq.spawn[0] ?? hq.center;
         const y = this.w.nav.heightAt(sp.x, sp.z, sp.y ?? hq.floorY);
-        this.teleport(slot, sp.x, Number.isFinite(y) ? y : (sp.y ?? hq.floorY), sp.z, hq.desk ? hq.desk.yaw + Math.PI : 0);
+        this.teleport(slot, sp.x, Number.isFinite(y) ? y : (sp.y ?? hq.floorY), sp.z, deskFacing(hq));
         this.notify(slot, `Un taxi volant vous dépose ${aNom(hq.def.name)} (−${formatMoney(TAXI_PRICE)}).`, 'money');
         break;
       }
@@ -1611,7 +1620,7 @@ export class Game {
       if (cost > 0) this.notify(slot, `Le docteur vous a recousu : −${formatMoney(cost)}.`, 'money');
     }
     const y = this.w.nav.heightAt(sp.x, sp.z, sp.y ?? hq.floorY);
-    this.teleport(slot, sp.x, Number.isFinite(y) ? y : hq.floorY, sp.z, hq.desk ? hq.desk.yaw + Math.PI : 0);
+    this.teleport(slot, sp.x, Number.isFinite(y) ? y : hq.floorY, sp.z, deskFacing(hq));
     this.emitTo(slot, { t: 'respawned' });
     this.emitAll({ t: 'spawn', e: this.info(boss) });
   }

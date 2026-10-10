@@ -36,10 +36,11 @@ l'emporte.
 ## 3. La carte (monde voxel)
 
 - Voxel de 0,25 m (inchangé). Monde de **288 m (X, ouest→est) × 240 m (Z, nord→sud)**.
-- Hauteur stockée : de −8 m (sous-sol, métro) à +56 m. Rue à y = 0 (`GROUND_VY = 32`).
+- Hauteur stockée : de −8,5 m (sous-sol, métro) à +63,5 m. Rue à y = 0 (`GROUND_VY = 34`).
 - Les intérieurs s’arrêtent sous 48 m (limite du volume d’éclairage précalculé) ; au-dessus, seules
-  les couronnes et antennes des tours. Les gratte-ciel géants (Empire State, Chrysler, tours de
-  2085) sont des silhouettes d’arrière-plan hors du monde voxel.
+  les couronnes et antennes des tours. L’Empire State et le Chrysler sont des monuments voxel de
+  63 m (non capturables) ; au-delà de la zone jouable, une ligne d’horizon en 3D (Upper Manhattan,
+  Long Island City, Downtown Brooklyn, Jersey City, statue de la Liberté) et la silhouette du ciel.
 
 ### Quartiers (7) — symétrie miroir par rapport à l’axe z = 120
 
@@ -79,9 +80,9 @@ propriété (revenus) mais n’est plus le QG.
 | --- | --- | --- | --- |
 | 1 Planque | Planque de Bushwick (Brooklyn) | Planque d’Astoria (Queens) | 40 hommes, 2 lieutenants |
 | 2 Garage | Garage de Red Hook (Brooklyn) | Dépôt de Long Island City (Queens) | véhicules, 70 hommes, 3 lt |
-| 3 Loft | Loft de Canal Street (Chinatown) | Loft de Lenox Avenue (Harlem) | 100 hommes, 4 lt, +10 % |
-| 4 Penthouse | Penthouse de Battery Park (Wall Street) | Penthouse de Central Park Sud | 140 hommes, 6 lt, +20 %, gardes, drones, ADAV |
-| 5 Tour | Tour Méridien (Times Square sud) | Tour Zénith (Times Square nord) | 180 hommes, 8 lt, +35 %, tourelles |
+| 3 Loft | Loft de Canal Street (Chinatown) | Loft de Lenox Avenue (Harlem) | 100 hommes, 4 lt, +10 %, ordres au téléphone, drones |
+| 4 Penthouse | Penthouse de Wall Street | Penthouse de Central Park Sud | 140 hommes, 6 lt, +20 %, gardes, ADAV |
+| 5 Tour | Tour Méridien (Times Square sud) | Tour Zénith (Times Square nord) | 180 hommes, 8 lt, +35 %, tourelles automatiques |
 
 Conditions : prix + nombre minimal de quartiers contrôlés (paliers 3, 4, 5).
 
