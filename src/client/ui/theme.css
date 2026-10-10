@@ -1,38 +1,57 @@
-/* Thème victorien de MAFIA WARS : Dadou vs Even.
-   Laiton, cuir sombre, parchemin et encre ; rouge pour Dadou, bleu marine pour Even. */
+/* Thème « New York 2085 » de MAFIA WARS II : Dadou vs Even.
+   Verre sombre translucide, filets néon fins, reflets chromés et or ; cramoisi pour Dadou,
+   marine / argent / cyan pour Even. Les noms de variables historiques (laiton, parchemin…) sont
+   conservés car beaucoup de règles s'en servent : ils désignent désormais la palette de 2085. */
 
 :root {
-  --ink: #1e1712;
-  --ink-soft: #3a2e24;
-  --night: #0d0a09;
-  --leather: #1d1512;
-  --leather-2: #2a1f19;
-  --leather-3: #3a2b22;
-  --parchment: #e8dbbb;
-  --parchment-2: #d6c49b;
-  --parchment-dark: #b9a272;
-  --brass: #c9a24a;
-  --brass-hi: #f0d488;
-  --brass-lo: #7a5f24;
-  --gold: #d4a640;
-  --dadou: #9e1b22;
-  --dadou-hi: #c8323a;
-  --dadou-lo: #5c0d12;
-  --even: #1d3461;
-  --even-hi: #3a62a8;
-  --even-lo: #0f1c38;
-  --silver: #c9d1dc;
-  --good: #6fae5b;
-  --bad: #d4544a;
-  --alert: #e8a23a;
-  --text: #efe4cc;
-  --text-dim: #b7a888;
-  --shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
-  --font-title: 'Cinzel', 'Times New Roman', serif;
-  --font-deco: 'Cinzel Decorative', 'Cinzel', serif;
-  --font-body: 'EB Garamond', Georgia, 'Times New Roman', serif;
-  --font-news: 'UnifrakturMaguntia', 'Cinzel', serif;
-  --radius: 6px;
+  /* nuit et verre */
+  --night: #05060d;
+  --night-2: #0a0c19;
+  --glass: rgba(11, 13, 29, 0.84);
+  --glass-2: rgba(18, 21, 44, 0.9);
+  --glass-line: rgba(124, 140, 255, 0.3);
+  --glass-line-hi: rgba(160, 176, 255, 0.62);
+  /* néons */
+  --neon: #7c8cff; /* filet neutre, à mi-chemin des deux camps */
+  --neon-hi: #c3caff;
+  --magenta: #ff3dc8;
+  --violet: #a95cff;
+  --cyan: #4fd8ff;
+  --rival: linear-gradient(90deg, #ff2a4d, #ff3d9e 30%, #b05cff 52%, #4f8dff 76%, #4fd8ff);
+  --scanlines: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0 1px, rgba(0, 0, 0, 0) 1px 3px);
+  /* anciens noms → palette de 2085 */
+  --ink: #e6eaff; /* texte des fiches holographiques (ex-encre sur parchemin) */
+  --ink-soft: #aeb6d8;
+  --leather: #0b0d1c; /* fond des panneaux */
+  --leather-2: #12152b;
+  --leather-3: #1c2040;
+  --parchment: #dfe5ff; /* texte clair des fiches */
+  --parchment-2: #b8c1e6;
+  --parchment-dark: #7d87b4;
+  --brass: #e9b44c; /* or : accents, icônes */
+  --brass-hi: #ffd47a; /* or clair : valeurs, titres secondaires, sélection */
+  --brass-lo: rgba(124, 140, 255, 0.42); /* filets (ex-laiton sombre) */
+  --gold: #f2b84b;
+  --dadou: #c8102e;
+  --dadou-hi: #ff2a4d;
+  --dadou-lo: #5c0a16;
+  --even: #15295a;
+  --even-hi: #4fd8ff;
+  --even-lo: #0a1533;
+  --silver: #cfd8e6;
+  --good: #3ee8a0;
+  --bad: #ff4d5e;
+  --alert: #ffb340;
+  --text: #e8ecfb;
+  --text-dim: #9aa3c7;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.6);
+  /* typographies : Orbitron (titres), Rajdhani (texte et libellés) */
+  --font-title: 'Orbitron', 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  --font-deco: 'Orbitron', 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Rajdhani', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-news: 'Orbitron', 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  --font-ui: 'Rajdhani', 'Segoe UI', system-ui, sans-serif; /* libellés, boutons, onglets */
+  --radius: 4px;
 }
 
 * {
@@ -49,6 +68,7 @@ body {
   background: var(--night);
   color: var(--text);
   font-family: var(--font-body);
+  font-weight: 500;
   font-size: 17px;
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -90,36 +110,45 @@ canvas.game-canvas {
   font-family: var(--font-title);
   letter-spacing: 0.06em;
   margin: 0;
-  color: var(--brass-hi);
-  text-shadow: 0 2px 0 #000, 0 0 18px rgba(212, 166, 64, 0.25);
+  color: #f4f6ff;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.4), 0 0 14px rgba(124, 140, 255, 0.45), 0 2px 0 #000;
 }
 
 .title-xl {
-  font-size: 46px;
+  font-size: 42px;
   font-weight: 900;
 }
 .title-l {
-  font-size: 32px;
-  font-weight: 800;
-}
-.title-m {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 700;
-}
-.title-s {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.title-m {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.title-s {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--neon-hi);
+  text-shadow: 0 0 10px rgba(124, 140, 255, 0.4);
+}
 
+/* filet néon « rivalité » : cramoisi → violet → cyan, losange central */
 .divider {
-  height: 14px;
+  height: 12px;
   margin: 10px auto;
   width: 70%;
   background:
-    radial-gradient(circle at center, var(--brass) 0 3px, transparent 4px) center / 14px 14px no-repeat,
-    linear-gradient(90deg, transparent, var(--brass-lo) 20%, var(--brass) 50%, var(--brass-lo) 80%, transparent) center / 100% 1px no-repeat;
+    radial-gradient(circle, #fff 0 2px, rgba(255, 255, 255, 0.45) 2.6px, transparent 4px) center / 10px 10px no-repeat,
+    linear-gradient(90deg, transparent, #ff2a4d 18%, #b05cff 50%, #4fd8ff 82%, transparent) center / 100% 1px no-repeat;
+  filter: drop-shadow(0 0 4px rgba(176, 92, 255, 0.7));
 }
 
 .dim {
@@ -128,17 +157,22 @@ canvas.game-canvas {
 
 /* ------------------------------------------------------------------ panneaux */
 
+/* verre sombre, filet néon fin, trame d'écran ; coins en équerre cramoisi (haut gauche, Dadou)
+   et cyan (bas droite, Even) */
 .panel {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.18)),
-    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.012) 0 3px, rgba(0, 0, 0, 0.02) 3px 7px),
-    var(--leather);
-  border: 2px solid var(--brass-lo);
-  outline: 1px solid rgba(240, 212, 136, 0.25);
-  outline-offset: -6px;
+    var(--scanlines),
+    linear-gradient(180deg, rgba(124, 140, 255, 0.07), rgba(124, 140, 255, 0) 38%),
+    linear-gradient(180deg, rgba(16, 19, 40, 0.92), rgba(7, 8, 19, 0.94));
+  border: 1px solid var(--glass-line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow), inset 0 0 40px rgba(0, 0, 0, 0.6);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 26px rgba(124, 140, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 40px rgba(0, 0, 0, 0.5);
   padding: 22px 26px;
 }
 
@@ -148,32 +182,37 @@ canvas.game-canvas {
   position: absolute;
   width: 18px;
   height: 18px;
-  border: 2px solid var(--brass);
+  border: 2px solid var(--dadou-hi);
   pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(255, 42, 77, 0.8));
 }
 .panel::before {
-  top: -4px;
-  left: -4px;
+  top: -3px;
+  left: -3px;
   border-right: none;
   border-bottom: none;
 }
 .panel::after {
-  bottom: -4px;
-  right: -4px;
+  bottom: -3px;
+  right: -3px;
   border-left: none;
   border-top: none;
+  border-color: var(--cyan);
+  filter: drop-shadow(0 0 4px rgba(79, 216, 255, 0.8));
 }
 
+/* ex-parchemin : fiche holographique (texte clair sur verre bleuté quadrillé) */
 .parchment {
   position: relative;
   color: var(--ink);
   background:
-    radial-gradient(ellipse at 20% 15%, rgba(255, 255, 255, 0.35), transparent 55%),
-    radial-gradient(ellipse at 85% 90%, rgba(120, 85, 40, 0.25), transparent 60%),
-    linear-gradient(180deg, var(--parchment), var(--parchment-2));
-  border-radius: 4px;
-  box-shadow: var(--shadow), inset 0 0 50px rgba(110, 75, 30, 0.35);
-  border: 1px solid #8a6f42;
+    linear-gradient(rgba(124, 140, 255, 0.05) 1px, transparent 1px) 0 0 / 100% 28px,
+    linear-gradient(90deg, rgba(124, 140, 255, 0.04) 1px, transparent 1px) 0 0 / 28px 100%,
+    radial-gradient(ellipse at 20% 0%, rgba(124, 140, 255, 0.12), transparent 55%),
+    linear-gradient(180deg, rgba(14, 17, 36, 0.96), rgba(8, 10, 22, 0.96));
+  border-radius: 3px;
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(124, 140, 255, 0.22), inset 0 0 50px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.6);
 }
 
 .parchment h1,
@@ -185,77 +224,86 @@ canvas.game-canvas {
 
 /* ------------------------------------------------------------------ boutons */
 
+/* bouton principal : or poli (le luxe de la pègre), arête claire, halo au survol */
 .btn {
   appearance: none;
   border: none;
   cursor: pointer;
-  font-family: var(--font-title);
+  font-family: var(--font-ui);
   font-weight: 700;
   font-size: 17px;
-  letter-spacing: 0.08em;
-  color: #2a1d0c;
-  padding: 11px 26px;
-  border-radius: 4px;
-  background: linear-gradient(180deg, #f6dd94 0%, #d8b05a 45%, #a9822f 55%, #c9a24a 100%);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #1c1204;
+  padding: 10px 26px 11px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #fff1c2 0%, #ffd477 22%, #eaa93c 52%, #c98724 53%, #f2b84b 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
-    0 0 0 1px #4a3610,
-    0 4px 10px rgba(0, 0, 0, 0.5);
-  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -2px 0 rgba(90, 50, 0, 0.45),
+    0 0 0 1px #3d2606,
+    0 4px 12px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 1px 0 rgba(255, 244, 210, 0.6);
   transition: transform 0.08s ease, filter 0.12s ease, box-shadow 0.12s ease;
   white-space: nowrap;
 }
 .btn:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.08) saturate(1.1);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
-    0 0 0 1px #4a3610,
-    0 0 18px rgba(240, 200, 100, 0.45),
-    0 4px 10px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -2px 0 rgba(90, 50, 0, 0.45),
+    0 0 0 1px #3d2606,
+    0 0 20px rgba(255, 196, 90, 0.55),
+    0 4px 12px rgba(0, 0, 0, 0.55);
 }
 .btn:active {
   transform: translateY(1px);
 }
 .btn:disabled,
 .btn.disabled {
-  filter: grayscale(0.9) brightness(0.6);
+  filter: grayscale(0.9) brightness(0.55);
   cursor: not-allowed;
 }
 .btn.big {
-  font-size: 21px;
-  padding: 14px 34px;
+  font-size: 20px;
+  padding: 13px 34px 14px;
 }
 .btn.small {
   font-size: 13px;
   padding: 6px 12px;
+  letter-spacing: 0.08em;
 }
+/* bouton secondaire : verre et filet néon */
 .btn.ghost {
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--brass-hi);
-  text-shadow: none;
-  box-shadow: inset 0 0 0 1px var(--brass-lo);
+  background: linear-gradient(180deg, rgba(124, 140, 255, 0.14), rgba(124, 140, 255, 0.04));
+  color: var(--neon-hi);
+  text-shadow: 0 0 8px rgba(124, 140, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(124, 140, 255, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 .btn.ghost:hover {
-  box-shadow: inset 0 0 0 1px var(--brass), 0 0 12px rgba(240, 200, 100, 0.25);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px var(--neon-hi), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 16px rgba(124, 140, 255, 0.45);
 }
 .btn.dadou {
-  color: #fff3dc;
-  text-shadow: 0 1px 0 #000;
-  background: linear-gradient(180deg, #d8424a 0%, #9e1b22 50%, #6e1016 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 200, 200, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--gold), 0 4px 10px rgba(0, 0, 0, 0.5);
+  color: #fff4f4;
+  text-shadow: 0 1px 0 #000, 0 0 8px rgba(255, 80, 100, 0.6);
+  background: linear-gradient(180deg, #ff5a70 0%, #e0193a 45%, #a80c26 55%, #6e0818 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 210, 210, 0.6), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--gold), 0 0 14px rgba(255, 42, 77, 0.35), 0 4px 12px rgba(0, 0, 0, 0.55);
 }
 .btn.even {
-  color: #eef3fb;
-  text-shadow: 0 1px 0 #000;
-  background: linear-gradient(180deg, #4a72b8 0%, #1d3461 55%, #12224a 100%);
-  box-shadow: inset 0 1px 0 rgba(200, 220, 255, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--silver), 0 4px 10px rgba(0, 0, 0, 0.5);
+  color: #eefaff;
+  text-shadow: 0 1px 0 #000, 0 0 8px rgba(79, 216, 255, 0.6);
+  background: linear-gradient(180deg, #4f86e8 0%, #22489c 45%, #15295a 55%, #0b1838 100%);
+  box-shadow: inset 0 1px 0 rgba(200, 235, 255, 0.55), inset 0 -2px 0 rgba(0, 0, 0, 0.4), 0 0 0 1px var(--silver), 0 0 14px rgba(79, 216, 255, 0.35), 0 4px 12px rgba(0, 0, 0, 0.55);
 }
 .btn.danger {
   color: #fff;
-  background: linear-gradient(180deg, #c0443a, #7e1f18);
+  background: linear-gradient(180deg, #ff5a6a, #c2142c 55%, #7a0a1a);
   text-shadow: 0 1px 0 #000;
+  box-shadow: inset 0 1px 0 rgba(255, 200, 200, 0.5), 0 0 0 1px #2a0006, 0 4px 12px rgba(0, 0, 0, 0.55);
+}
+.btn.danger:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 200, 200, 0.5), 0 0 0 1px #2a0006, 0 0 18px rgba(255, 60, 80, 0.55), 0 4px 12px rgba(0, 0, 0, 0.55);
 }
 
 .menu-list {
@@ -276,9 +324,10 @@ canvas.game-canvas {
 }
 .field label,
 .label {
-  font-family: var(--font-title);
+  font-family: var(--font-ui);
+  font-weight: 700;
   font-size: 13px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
@@ -286,22 +335,31 @@ input[type='text'],
 input[type='number'],
 select {
   font-family: var(--font-body);
+  font-weight: 600;
   font-size: 18px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(4, 5, 14, 0.7);
   color: var(--text);
-  border: 1px solid var(--brass-lo);
+  border: 1px solid rgba(124, 140, 255, 0.4);
   border-radius: 3px;
   outline: none;
+  box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 input[type='text']:focus,
 select:focus {
-  border-color: var(--brass);
-  box-shadow: 0 0 10px rgba(240, 200, 100, 0.3);
+  border-color: var(--cyan);
+  box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(79, 216, 255, 0.35), 0 0 14px rgba(79, 216, 255, 0.35);
+}
+input::placeholder {
+  color: rgba(154, 163, 199, 0.55);
+}
+select option {
+  background: #0c0e1e;
+  color: var(--text);
 }
 input.code-input {
   font-family: var(--font-title);
-  font-size: 34px;
+  font-size: 32px;
   letter-spacing: 0.4em;
   text-align: center;
   text-transform: uppercase;
@@ -310,26 +368,28 @@ input.code-input {
 input[type='range'] {
   appearance: none;
   width: 100%;
-  height: 6px;
-  background: linear-gradient(90deg, var(--brass-lo), var(--brass));
-  border-radius: 3px;
+  height: 4px;
+  background: linear-gradient(90deg, #ff2a4d, #b05cff, #4fd8ff);
+  border-radius: 2px;
   outline: none;
 }
 input[type='range']::-webkit-slider-thumb {
   appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff2c4, var(--brass) 55%, var(--brass-lo));
-  box-shadow: 0 0 0 2px #2a1d0c;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, #ffffff, var(--neon-hi) 45%, var(--neon));
+  box-shadow: 0 0 0 2px #05060d, 0 0 10px rgba(124, 140, 255, 0.8);
   cursor: pointer;
 }
 input[type='range']::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--brass);
-  border: 2px solid #2a1d0c;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--neon-hi);
+  border: 2px solid #05060d;
+  box-shadow: 0 0 10px rgba(124, 140, 255, 0.8);
 }
 
 .toggle {
@@ -345,10 +405,10 @@ input[type='range']::-moz-range-thumb {
   width: 46px;
   height: 24px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid var(--brass-lo);
+  background: rgba(4, 5, 14, 0.75);
+  border: 1px solid rgba(124, 140, 255, 0.45);
   position: relative;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .toggle .knob::after {
   content: '';
@@ -359,16 +419,20 @@ input[type='range']::-moz-range-thumb {
   height: 18px;
   border-radius: 50%;
   background: var(--text-dim);
-  transition: transform 0.15s, background 0.15s;
+  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .toggle input:checked + .knob {
-  background: rgba(201, 162, 74, 0.35);
+  background: rgba(79, 216, 255, 0.18);
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(79, 216, 255, 0.35);
 }
 .toggle input:checked + .knob::after {
   transform: translateX(22px);
-  background: var(--brass-hi);
+  background: #e9fbff;
+  box-shadow: 0 0 8px rgba(79, 216, 255, 0.9);
 }
 
+/* touche du clavier : capsule de verre, lettrage clair */
 .keycap {
   display: inline-flex;
   align-items: center;
@@ -376,13 +440,15 @@ input[type='range']::-moz-range-thumb {
   min-width: 30px;
   height: 28px;
   padding: 0 8px;
-  font-family: var(--font-title);
+  font-family: var(--font-ui);
   font-weight: 700;
-  font-size: 13px;
-  color: #2a1d0c;
-  background: linear-gradient(180deg, #f3e6c4, #cdb98c);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: #f2f5ff;
+  background: linear-gradient(180deg, #2a3058, #151933 60%, #0d1024);
   border-radius: 4px;
-  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 0 1px #6a5530, 0 2px 4px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -3px 0 rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 140, 255, 0.55), 0 2px 5px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 6px rgba(160, 176, 255, 0.5);
   white-space: nowrap;
 }
 
@@ -391,13 +457,13 @@ input[type='range']::-moz-range-thumb {
 .scroll {
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--brass-lo) transparent;
+  scrollbar-color: rgba(124, 140, 255, 0.5) transparent;
 }
 .scroll::-webkit-scrollbar {
   width: 8px;
 }
 .scroll::-webkit-scrollbar-thumb {
-  background: var(--brass-lo);
+  background: rgba(124, 140, 255, 0.45);
   border-radius: 4px;
 }
 
@@ -413,12 +479,12 @@ input[type='range']::-moz-range-thumb {
 }
 .screen.backdrop {
   background:
-    linear-gradient(180deg, rgba(5, 4, 4, 0.15), rgba(5, 4, 4, 0.55)),
+    linear-gradient(180deg, rgba(3, 3, 10, 0.2), rgba(3, 3, 10, 0.55)),
     url('/brand/menu-backdrop.jpg') center / cover no-repeat,
     var(--night);
 }
 .screen.dim-bg {
-  background: rgba(6, 4, 3, 0.72);
+  background: rgba(4, 5, 12, 0.74);
   backdrop-filter: blur(3px);
 }
 

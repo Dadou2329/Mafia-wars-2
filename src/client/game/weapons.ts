@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { CharKind, FLAG, WEAPONS, WEAPON_SLOTS, Weapon } from '../../shared/characters';
+import { VEHICLES } from '../../shared/constants';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import { makeRayHit, type VoxelWorld } from '../../shared/voxel';
 import type { ClientEnt, EntityStore } from './entities';
@@ -13,6 +14,37 @@ export interface ShotResult {
 }
 
 /** Intersection rayon / personnage (cylindre pour le corps, sphère pour la tête). */
+/** Rayon contre la caisse d'un véhicule (boîte orientée). */
+export function rayVehicle(o: THREE.Vector3, d: THREE.Vector3, e: ClientEnt, maxT: number): number {
+  const def = VEHICLES[e.info.gang];
+  if (!def) return -1;
+  const yaw = e.view.yaw;
+  const s = Math.sin(yaw);
+  const c = Math.cos(yaw);
+  // repère local : a le long du cap, b en travers
+  const ox = o.x - e.x;
+  const oz = o.z - e.z;
+  const la = ox * s + oz * c;
+  const lb = ox * c - oz * s;
+  const da = d.x * s + d.z * c;
+  const db = d.x * c - d.z * s;
+  const ly = o.y - e.y;
+  const half = [def.size[2] / 2, def.size[0] / 2];
+  let t0 = 0;
+  let t1 = maxT;
+  const slab = (p: number, dir: number, lo: number, hi: number): boolean => {
+    if (Math.abs(dir) < 1e-6) return p >= lo && p <= hi;
+    let a = (lo - p) / dir;
+    let b = (hi - p) / dir;
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a);
+    t1 = Math.min(t1, b);
+    return t0 <= t1;
+  };
+  if (!slab(la, da, -half[0], half[0]) || !slab(lb, db, -half[1], half[1]) || !slab(ly, d.y, 0.1, def.size[1])) return -1;
+  return t0 > 0 ? t0 : -1;
+}
+
 export function rayCharacter(o: THREE.Vector3, d: THREE.Vector3, e: ClientEnt, maxT: number): { t: number; head: boolean } | null {
   const crouch = (e.flags & FLAG.CROUCH) !== 0;
   const hy = e.y + (crouch ? 1.2 : 1.62);
@@ -130,7 +162,7 @@ export class WeaponSystem {
    * Tir : calcule les impacts depuis l'origine o (caméra) dans la direction d.
    * Renvoie null si l'arme ne peut pas tirer.
    */
-  fire(now: number, o: THREE.Vector3, d: THREE.Vector3, store: EntityStore, selfId: number, spreadMul: number): ShotResult | null {
+  fire(now: number, o: THREE.Vector3, d: THREE.Vector3, store: EntityStore, selfId: number, spreadMul: number, selfVehicle = -1): ShotResult | null {
     const w = this.current;
     const def = WEAPONS[w];
     if (!def.ranged || !this.canFire(now)) return null;
@@ -157,8 +189,18 @@ export class WeaponSystem {
       let bestT = wd;
       let head = false;
       for (const e of store.alive()) {
-        if (e.info.id === selfId || e.info.kind === CharKind.BARMAN) continue;
-        if (Math.abs(e.x - o.x) > bestT + 2 || Math.abs(e.z - o.z) > bestT + 2) continue;
+        if (e.info.id === selfId || e.info.kind === CharKind.BARMAN || e.flags & FLAG.HIDDEN) continue;
+        if (Math.abs(e.x - o.x) > bestT + 4 || Math.abs(e.z - o.z) > bestT + 4) continue;
+        if (e.info.kind === CharKind.VEHICLE) {
+          if (selfVehicle === e.info.id) continue;
+          const t = rayVehicle(o, tmp, e, bestT);
+          if (t > 0) {
+            best = e;
+            bestT = t;
+            head = false;
+          }
+          continue;
+        }
         const r = rayCharacter(o, tmp, e, bestT);
         if (r) {
           best = e;
@@ -184,7 +226,7 @@ export class WeaponSystem {
     const fx = Math.sin(yaw);
     const fz = Math.cos(yaw);
     for (const e of store.alive()) {
-      if (e.info.id === selfId || e.info.kind === CharKind.BARMAN) continue;
+      if (e.info.id === selfId || e.info.kind === CharKind.BARMAN || e.info.kind === CharKind.VEHICLE || e.flags & FLAG.HIDDEN) continue;
       if (e.info.faction === myFaction && e.info.kind !== CharKind.BOSS_DADOU && e.info.kind !== CharKind.BOSS_EVEN) continue;
       const dx = e.x - x;
       const dz = e.z - z;

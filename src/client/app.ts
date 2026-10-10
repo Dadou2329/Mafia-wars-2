@@ -1,14 +1,13 @@
 // Application : enchaînement des écrans (menu, salon, chargement, partie, victoire).
 
-import '@fontsource/cinzel/latin-400.css';
-import '@fontsource/cinzel/latin-700.css';
-import '@fontsource/cinzel/latin-900.css';
-import '@fontsource/cinzel-decorative/latin-700.css';
-import '@fontsource/cinzel-decorative/latin-900.css';
-import '@fontsource/eb-garamond/latin-400.css';
-import '@fontsource/eb-garamond/latin-400-italic.css';
-import '@fontsource/eb-garamond/latin-600.css';
-import '@fontsource/unifrakturmaguntia/latin-400.css';
+import '@fontsource/orbitron/latin-400.css';
+import '@fontsource/orbitron/latin-500.css';
+import '@fontsource/orbitron/latin-700.css';
+import '@fontsource/orbitron/latin-900.css';
+import '@fontsource/rajdhani/latin-400.css';
+import '@fontsource/rajdhani/latin-500.css';
+import '@fontsource/rajdhani/latin-600.css';
+import '@fontsource/rajdhani/latin-700.css';
 import './ui/theme.css';
 import './ui/screens.css';
 import './ui/hud.css';
@@ -170,7 +169,7 @@ export class App implements AppApi {
       await this.worldReady;
     }
     const ls = loadingScreen();
-    ls.set('Les réverbères s’allument…', 1);
+    ls.set('Les néons s’allument…', 1);
     this.setScreen('loading', ls.el);
     await new Promise((r) => setTimeout(r, 30));
     this.game = new GameClient(this, this.world!, init);

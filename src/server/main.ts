@@ -92,7 +92,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<v
       res.writeHead(200, { 'Content-Type': MIME['.html'] }).end(data);
     } catch {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Serveur MAFIA WARS : Dadou vs Even en marche.\nLe client n’est pas compilé : lancez « npm run build » ou utilisez « npm run dev ».');
+      res.end('Serveur MAFIA WARS II : Dadou vs Even en marche.\nLe client n’est pas compilé : lancez « npm run build » ou utilisez « npm run dev ».');
     }
   }
 }
@@ -273,7 +273,7 @@ http.on('error', (e: NodeJS.ErrnoException) => {
 
 getWorld();
 http.listen(PORT, HOST, () => {
-  console.log(`\n  MAFIA WARS : Dadou vs Even — serveur prêt sur le port ${PORT}`);
+  console.log(`\n  MAFIA WARS II : Dadou vs Even — serveur prêt sur le port ${PORT}`);
   console.log(`  Sur cet ordinateur :   http://localhost:${PORT}`);
   for (const list of Object.values(networkInterfaces())) {
     for (const a of list ?? []) {

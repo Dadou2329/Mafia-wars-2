@@ -323,7 +323,7 @@ export function settingsPanel(app: AppApi, opts: { inGame: boolean; onClose(): v
       row('Échelle de rendu', 'Une échelle réduite allège le travail de la carte graphique.', scale.input, scale.value),
       row(
         'Effet de lueur',
-        'Halo des réverbères et des fenêtres éclairées.',
+        'Halo des néons, des lampadaires et des fenêtres éclairées.',
         toggle(app, 'Effet de lueur', () => settings.bloom, (v) => {
           settings.bloom = v;
           saveSettings();
@@ -361,7 +361,7 @@ export function settingsPanel(app: AppApi, opts: { inGame: boolean; onClose(): v
       vol('Volume général', 'volMaster', null, () => app.audio.play('ui_click')),
       vol('Musique', 'volMusic', 'Thèmes du menu et de la partie.'),
       vol('Effets', 'volSfx', 'Coups de feu, pas, interface…', () => app.audio.play('notify')),
-      vol('Ambiance', 'volAmbience', 'Rumeur de la ville, cloches, pluie et brouillard sur la Tamise.'),
+      vol('Ambiance', 'volAmbience', 'Rumeur de la ville, circulation, sirènes, pluie et East River.'),
       h('p', { class: 'mw-page-note' }, icon('info'), fr('Tous les sons du jeu sont synthétisés en temps réel : aucun fichier audio n’est téléchargé.')),
     );
   }

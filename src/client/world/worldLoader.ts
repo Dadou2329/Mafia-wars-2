@@ -62,7 +62,7 @@ export function loadWorld(): Promise<WorldData> {
         for (let i = 0; i < world.chunks.length; i++) world.chunks[i] = m.chunks[i] ?? null;
         world.fillMat.set(m.fillMat);
         const nav = NavGrid.deserialize(m.nav);
-        progress('Londres est prête.', 1);
+        progress('New York est prête.', 1);
         resolve({
           world,
           regions: m.regions,
@@ -97,7 +97,7 @@ function loadOnMainThread(): WorldData {
   const tint = computeTintVolume(city.world, city.ctx.lights);
   const nav = buildCityNav(city);
   const regions = meshRegions(city.world);
-  progress('Londres est prête.', 1);
+  progress('New York est prête.', 1);
   return {
     world: city.world,
     regions,

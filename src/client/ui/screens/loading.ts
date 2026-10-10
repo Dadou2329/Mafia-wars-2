@@ -1,4 +1,4 @@
-// Écran de chargement : logo, barre de progression en laiton, astuces de jeu.
+// Écran de chargement : logo, jauge néon, astuces de jeu (New York, 2085).
 
 import { keyLabel, type ActionId } from '../../input/bindings';
 import { settings } from '../../settings';
@@ -6,28 +6,31 @@ import { DISTRICT_BONUS, HQ_CAPTURE_MIN_DISTRICTS } from '../../../shared/consta
 import { h } from '../dom';
 import { BRAND, TITLE, ambience, fr, pct, shieldPointer, watchUnmount } from './menu';
 
-function key(id: ActionId): string {
-  const c = settings.bindings[id]?.[0];
-  return c ? keyLabel(c) : '—';
+/** Libellé de la première touche d'une action ; `fallback` si l'action n'existe pas ou n'a pas de touche. */
+function key(id: ActionId | string, fallback = '—'): string {
+  const c = (settings.bindings as Partial<Record<string, string[]>>)[id]?.[0];
+  return c ? keyLabel(c) : fallback;
 }
 
 function tips(): string[] {
   return [
     `Appuyez sur ${key('wheel')} près de vos hommes pour leur donner un ordre rapide.`,
-    `Contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers pour pouvoir prendre d’assaut le QG adverse.`,
-    'Un quartier n’est à vous que si vous tenez tous ses bâtiments clés.',
-    'Recrutez de nouveaux gangsters au comptoir du bar de votre QG.',
-    `Au QG, approchez-vous de votre bureau et appuyez sur ${key('interact')} pour diriger vos lieutenants.`,
-    `Le Télégraphe vous permet de donner vos ordres depuis la carte (${key('map')}), où que vous soyez.`,
-    'Les fusillades attirent la police : faites-vous discret pour qu’elle perde votre trace.',
-    `Chaque quartier contrôlé vous rapporte ${DISTRICT_BONUS} £ de plus par minute.`,
-    'Si vous tombez, le docteur vous recoud au QG… moyennant finances.',
-    'Plus vous êtes nombreux dans un bâtiment, plus vite vous le prenez.',
-    'Les gilets matelassés donnent 35 % de points de vie en plus à tous vos hommes.',
-    'Achetez une armurerie au QG pour vous procurer fusils et munitions.',
-    'Votre QG est attaqué ? Une alerte s’affiche : rentrez vite le défendre !',
+    `Contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 pour pouvoir prendre d’assaut le QG actuel de votre rival.`,
+    'Un quartier n’est à vous que si vous tenez tous ses bâtiments clés ★.',
+    'Recrutez de nouveaux gangsters auprès du recruteur de votre QG, par 1, 5 ou 10.',
+    `Au QG, installez-vous au bureau (${key('interact')}) pour ouvrir la carte stratégique. Elle s’ouvre aussi partout avec ${key('map')}.`,
+    `Votre téléphone (${key('phone', 'Tab')}) : alertes, véhicule, taxi volant vers le QG et ordres rapides.`,
+    'De la planque à la tour : chaque emménagement augmente vos effectifs, vos lieutenants et vos revenus. Votre QG vous suit !',
+    `Maintenez ${key('interact')} devant un terminal de sécurité pour couper caméras et tourelles, ou ouvrir une porte verrouillée.`,
+    'Les fusillades attirent la police de New York : faites-vous oublier pour qu’elle perde votre trace.',
+    `Chaque quartier contrôlé vous rapporte ${DISTRICT_BONUS}\u00a0$ de plus par minute.`,
+    'Le métro relie Brooklyn et le Queens à Times Square : parfait pour une attaque surprise par les souterrains.',
+    'Ordonnez à un lieutenant de « Tenir le toit » : vos hommes dominent la rue depuis les hauteurs.',
+    'L’aéronef ADAV se pose sur les toits : idéal pour frapper là où personne ne vous attend.',
+    'Braquages et convois à intercepter : des coups libres pour remplir vos caisses.',
+    'Un drone de reconnaissance révèle les ennemis d’un quartier sur vos cartes.',
     `Appuyez sur ${key('view')} pour passer de la vue à la première personne à la troisième.`,
-    `Appuyez sur ${key('scores')} pour consulter le bilan de la partie.`,
+    'Plus vous êtes nombreux dans un bâtiment, plus vite vous le prenez.',
     'Un lieutenant blessé revient au combat après quelques instants de repos.',
   ];
 }
@@ -47,7 +50,7 @@ export function loadingScreen(): { el: HTMLElement; set(step: string, f: number)
   const stepEl = h('span', { class: 'mw-pbar-step' }, 'Préparation…');
   const pctEl = h('span', { class: 'mw-pbar-pct' }, pct(0));
   const tipText = h('span', { class: 'mw-tip-text' }, fr(list[tipIndex]));
-  const tip = h('div', { class: 'mw-loading-tip', role: 'note' }, h('span', { class: 'mw-tip-label' }, 'Astuce\u00a0:'), ' ', tipText);
+  const tip = h('div', { class: 'mw-loading-tip', role: 'note' }, h('span', { class: 'mw-tip-label' }, 'Astuce :'), ' ', tipText);
 
   const el = h(
     'div',

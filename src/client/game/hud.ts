@@ -29,6 +29,7 @@ export class Hud {
   private terr!: HTMLElement;
   private home!: HTMLElement;
   private bannerEl!: HTMLElement;
+  private vehEl!: HTMLElement;
   private bannerTimer = 0;
   private objective!: HTMLElement;
   private eventLine!: HTMLElement;
@@ -101,6 +102,13 @@ export class Hud {
         'position:absolute;left:50%;top:22%;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .6s ease;font-family:var(--font-title);text-shadow:0 0 18px rgba(60,220,255,.8),0 2px 4px #000;',
     });
     this.el.appendChild(this.bannerEl);
+    // véhicule conduit : vitesse et état de la carrosserie
+    this.vehEl = h('div', {
+      class: 'hud-vehicle hidden',
+      style:
+        'position:absolute;right:24px;bottom:150px;min-width:190px;padding:8px 12px;text-align:right;font-family:var(--font-title);background:rgba(6,10,18,.62);border:1px solid rgba(60,220,255,.45);border-radius:6px;pointer-events:none;',
+    });
+    this.el.appendChild(this.vehEl);
     this.captureLbl = h('div');
     this.captureFill = h('div', { class: 'fill' });
     this.capture = h('div', { class: 'hud-capture hidden' }, this.captureLbl, h('div', { class: 'bar' }, this.captureFill));
@@ -296,7 +304,12 @@ export class Hud {
     }
   }
 
+  /** Journal des notifications (consulté depuis le téléphone). */
+  readonly log: { text: string; kind: string; at: number }[] = [];
+
   notify(text: string, kind: string, duration = 5200): void {
+    this.log.unshift({ text, kind, at: performance.now() });
+    if (this.log.length > 40) this.log.length = 40;
     const n = h('div', { class: `notice ${kind}` }, text);
     this.notices.appendChild(n);
     while (this.notices.childElementCount > 5) this.notices.firstChild!.remove();
@@ -381,6 +394,25 @@ export class Hud {
       setTimeout(() => this.chatInput.focus(), 0);
       for (const c of Array.from(this.chatMsgs.children)) c.classList.remove('old');
     } else this.chatInput.blur();
+  }
+
+  /** Compteur du véhicule conduit (null : à pied). */
+  setVehicle(name: string | null, kmh = 0, hp = 1): void {
+    if (!name) {
+      this.vehEl.classList.add('hidden');
+      return;
+    }
+    this.vehEl.classList.remove('hidden');
+    const col = hp > 0.5 ? '#40ff9a' : hp > 0.25 ? '#ffb020' : '#ff2a40';
+    const sig = `${name}|${Math.round(kmh)}|${Math.round(hp * 20)}`;
+    if (this.vehEl.dataset.sig === sig) return;
+    this.vehEl.dataset.sig = sig;
+    clear(this.vehEl);
+    this.vehEl.appendChild(h('div', { style: 'font-size:12px;letter-spacing:.12em;color:#9fe8ff' }, name.toUpperCase()));
+    this.vehEl.appendChild(h('div', { style: 'font-size:34px;font-weight:900;color:#eafcff;line-height:1.05' }, `${Math.round(kmh)}`, h('small', { style: 'font-size:13px;margin-left:4px;color:#9fe8ff' }, 'km/h')));
+    this.vehEl.appendChild(
+      h('div', { style: 'height:6px;margin-top:4px;background:rgba(255,255,255,.12);border-radius:3px;overflow:hidden' }, h('div', { style: `height:100%;width:${Math.max(0, Math.min(1, hp)) * 100}%;background:${col}` })),
+    );
   }
 
   /** Grande annonce centrale (nouveau QG…). */

@@ -40,7 +40,7 @@ import type { SfxName } from '../audio/types';
 import { settings } from '../settings';
 import { actionKey } from '../input/bindings';
 import { h, clear } from '../ui/dom';
-import { MAP_SCALE } from './cityMap';
+import { MAP_FONT, MAP_FONT_TITLE, MAP_SCALE } from './cityMap';
 import type { GameClient } from './GameClient';
 import { leNom } from '../../shared/french';
 
@@ -574,12 +574,12 @@ export class StrategicMap {
       c.arc(ev.x * M, ev.z * M, (raid ? 16 : 4 + (now % 1) * 4) * M, 0, Math.PI * 2);
       c.stroke();
       c.setLineDash([]);
-      c.font = `700 ${Math.max(22, 26 / S)}px 'Cinzel', serif`;
+      c.font = `700 ${Math.max(22, 26 / S)}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillStyle = raid ? '#2a4a9a' : '#a8740a';
       c.fillText(raid ? '⚑' : '$', ev.x * M, ev.z * M);
-      c.font = `600 ${13 / S}px 'EB Garamond', serif`;
+      c.font = `600 ${13 / S}px ${MAP_FONT}`;
       c.fillStyle = '#2a1a0c';
       c.fillText(raid ? 'Descente de police' : 'Contrebande', ev.x * M, ev.z * M + 22 / S);
     }
@@ -590,7 +590,7 @@ export class StrategicMap {
       c.arc(sp.x * M, sp.z * M, (2 + Math.min(5, sp.n * 0.5)) * M, 0, Math.PI * 2);
       c.fill();
       c.fillStyle = '#7a0c08';
-      c.font = `700 ${Math.max(16, 18 / S)}px 'Cinzel', serif`;
+      c.font = `700 ${Math.max(16, 18 / S)}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.fillText(`${sp.n}`, sp.x * M, sp.z * M + 6 / S);
     }
@@ -631,11 +631,11 @@ export class StrategicMap {
       c.fill();
       c.stroke();
       c.fillStyle = '#fff6dc';
-      c.font = `700 ${11 / S}px 'Cinzel', serif`;
+      c.font = `700 ${11 / S}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillText(initials(lt.name), lt.x * M, lt.z * M + 0.5 / S);
-      c.font = `600 ${12 / S}px 'EB Garamond', serif`;
+      c.font = `600 ${12 / S}px ${MAP_FONT}`;
       c.fillStyle = '#2a1a0c';
       c.fillText(`${lt.name} (${lt.men})`, lt.x * M, lt.z * M + r + 10 / S);
     }
@@ -656,7 +656,7 @@ export class StrategicMap {
     c.fill();
     c.stroke();
     c.restore();
-    c.font = `700 ${12 / S}px 'Cinzel', serif`;
+    c.font = `700 ${12 / S}px ${MAP_FONT_TITLE}`;
     c.textAlign = 'center';
     c.fillStyle = '#1a0c06';
     c.fillText('VOUS', p.x * M, p.z * M - 18 / S);
@@ -689,7 +689,7 @@ export class StrategicMap {
       c.fill();
     }
     c.rotate(0);
-    c.font = "700 13px 'Cinzel', serif";
+    c.font = `700 13px ${MAP_FONT_TITLE}`;
     c.textAlign = 'center';
     c.fillStyle = '#7a1a10';
     c.fillText('N', 0, -32);
@@ -730,7 +730,7 @@ export class StrategicMap {
     this.stats.appendChild(item('Argent', formatMoney(p.money)));
     this.stats.appendChild(item('Revenus', `+${formatMoney(p.income)}/min`, 'c-good'));
     this.stats.appendChild(item('Hommes', `${p.men}${p.pool ? ` (${p.pool} au QG)` : ''}`));
-    this.stats.appendChild(item('Territoires', `${this.gc.pub.territories[this.gc.you]}/6`));
+    this.stats.appendChild(item('Territoires', `${this.gc.pub.territories[this.gc.you]}/7`));
   }
 
   private renderTabs(): void {
@@ -872,6 +872,10 @@ export class StrategicMap {
     if (def.capturable && def.income) card.appendChild(h('div', null, 'Revenus : ', h('b', { class: 'c-good' }, `+${def.income} $/min`)));
     card.appendChild(h('p', { class: 'sm-blurb' }, def.blurb));
     if (st && st.cap > 0) card.appendChild(h('div', { class: 'c-bad' }, `Capture en cours : ${Math.round(st.cap * 100)} %${st.contested ? ' (contesté)' : ''}`));
+    if (def.security) card.appendChild(h('div', { class: 'dim' }, `Sécurité : ${def.security >= 2 ? 'caméras, tourelles automatiques, coffre verrouillé' : 'caméras'}${gc.pub.hacked?.includes(id) ? ' — PIRATÉE' : ''}. Piratez le terminal près de l’entrée.`));
+    if (def.heist) card.appendChild(h('div', { class: 'dim' }, `Coffre : ${formatMoney(def.heist.reward)} (${def.heist.label.toLowerCase()}).`));
+    const hz = gc.pub.heists?.find((x) => x.b === id);
+    if (hz) card.appendChild(h('div', { class: 'c-bad' }, `Braquage en cours par ${hz.slot === 'dadou' ? 'Dadou' : 'Even'} : ${Math.round(hz.p * 100)} %`));
     if (enemyHq) {
       const terr = gc.pub.territories[gc.you];
       card.appendChild(
@@ -934,6 +938,8 @@ export class StrategicMap {
     }
     if (gc.world.buildings[id]?.roofPts.length)
       actions.appendChild(this.actionBtn('Tenir le toit', '', () => this.choose({ order: 'roof', target: id, label: `${ORDER_LABEL.roof} : ${def.name}`, confirm: 'Monter sur le toit' })));
+    if (def.heist && !mine)
+      actions.appendChild(this.actionBtn(`Braquer (${formatMoney(def.heist.reward)})`, 'danger', () => this.choose({ order: 'heist', target: id, label: `${ORDER_LABEL.heist} : ${def.name}`, confirm: 'Lancer le braquage' })));
     card.appendChild(actions);
     return card;
   }

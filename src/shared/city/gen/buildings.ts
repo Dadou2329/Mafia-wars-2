@@ -88,6 +88,7 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         rooms: [
           ['casino_floor', 'cashier'],
           ['casino_floor', 'exec_office'],
+          ['club_vip', 'bar'],
         ],
         groundClear: 20,
         facade: { wall: M.LIMESTONE, wallSide: M.LIMESTONE, trim: M.GOLD, lit: 0.85, winW: 4, winH: 9 },
@@ -206,6 +207,8 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         rooms: [
           ['hotel_lobby', 'bar'],
           ['suite', 'suite'],
+          ['suite', 'apartment'],
+          ['club_vip', 'bar'],
         ],
         groundClear: 18,
         facade: { wall: M.LIMESTONE, wallSide: M.LIMESTONE, trim: M.GRANITE, lit: 0.75, winH: 8 },
@@ -232,10 +235,12 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
             ? [
                 ['bank_hall', 'vault'],
                 ['office', 'exec_office'],
+                ['server_room', 'security_room'],
               ]
             : [
                 ['trading_floor', 'office'],
                 ['office', 'exec_office'],
+                ['trading_floor', 'server_room'],
               ],
         groundClear: 20,
         facade: { wall: M.LIMESTONE, wallSide: M.GRANITE, trim: M.LIMESTONE, lit: 0.6, winW: 4, winH: 10, cool: true },
@@ -247,6 +252,7 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         rooms: [
           ['security_room', 'server_room'],
           ['office', 'storeroom'],
+          ['control_room', 'exec_office'],
         ],
         facade: { wall: M.METAL_PANEL_DARK, wallSide: M.CONCRETE_DARK, trim: M.STEEL, lit: 0.6, cool: true },
         neon: M.LED_BLUE,
@@ -257,6 +263,7 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         rooms: [
           ['studio_set', 'control_room'],
           ['office', 'club_vip'],
+          ['studio_set', 'storeroom'],
         ],
         groundClear: 18,
         facade: { wall: M.METAL_PANEL_DARK, wallSide: M.METAL_PANEL_DARK, trim: M.CHROME, lit: 0.7, cool: true },
@@ -280,6 +287,7 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         rooms: [
           ['showroom', 'office'],
           ['store', 'storeroom'],
+          ['store', 'office'],
         ],
         groundClear: 18,
         facade: { wall: M.CURTAIN_DARK, wallSide: M.METAL_PANEL_DARK, trim: M.CHROME, lit: 0.7, cool: true },

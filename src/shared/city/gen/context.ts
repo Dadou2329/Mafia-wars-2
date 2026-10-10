@@ -103,6 +103,8 @@ export interface BuildingInfo {
   elevator?: ElevatorStop[];
   /** Coffre / cible de braquage. */
   vault?: Pt;
+  /** Terminal de sécurité (bâtiments protégés : caméras, tourelles, coffre verrouillé). */
+  terminal?: Pt;
   /** Panneau d'enseigne (texte) : position et orientation. */
   sign?: { x: number; y: number; z: number; yaw: number; w: number; h: number };
   /** Plaque « Bureau de … ». */

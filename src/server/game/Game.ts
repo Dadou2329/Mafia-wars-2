@@ -64,6 +64,9 @@ import type { AiState, BState, Ent, FactionState, Mode, Role, Squad, Vec2 } from
 import { updateNpc } from './npc';
 import { createSquad, giveOrder, squadStatus, updateSquad, releaseMember } from './squads';
 import { updatePolice, spawnPolice } from './police';
+import { closed, driveInput, explodeVehicle, launchDrone, leaveVehicle, setupVehicles, updateVehicles, vdef, vehicleAction } from './vehicles';
+import { hackAction, hackedList, heistAction, heists, isHacked, securityOnCapture, setupSecurity, updateSecurity } from './security';
+import { convoyHostile, convoyReadyIn, convoys, loots, neutralConvoy, sendConvoy, updateConvoys } from './convoys';
 import { aNom, cap, deNom, leNom, pluriel } from '../../shared/french';
 
 export const SLOTS: Slot[] = ['dadou', 'even'];
@@ -164,6 +167,13 @@ export class Game {
       custom: {},
       tier: 1,
       hqId: HQ_BUILDING[slot].id,
+      garage: new Set([0]),
+      vehicles: new Map(),
+      vehicle: -1,
+      callAt: 0,
+      droneAt: 0,
+      droneReveal: null,
+      hack: null,
     };
   }
 
@@ -254,6 +264,8 @@ export class Game {
       }
     }
     spawnPolice(this, 6);
+    setupVehicles(this);
+    setupSecurity(this);
   }
 
   addEnt(o: {
@@ -304,7 +316,7 @@ export class Game {
       lastDamageAt: -100,
       lastAttacker: -1,
       criminalUntil: 0,
-      ai: o.role === 'boss' ? null : this.makeAi(o.role, o.mode ?? 'idle'),
+      ai: o.role === 'boss' || o.role === 'vehicle' ? null : this.makeAi(o.role, o.mode ?? 'idle'),
       removeAt: Infinity,
     };
     this.ents.set(id, e);
@@ -557,8 +569,37 @@ export class Game {
 
   hostile(a: Ent, b: Ent): boolean {
     if (!b.alive || a.id === b.id || b.invulnerable || a.invulnerable) return false;
-    if (b.flags & FLAG.HIDDEN) return false; // dans un ascenseur
-    if (b.role === 'barman') return false;
+    if (b.flags & FLAG.HIDDEN) return false; // dans un ascenseur, à l'intérieur d'un véhicule
+    if (b.role === 'barman' || a.role === 'vehicle') return false;
+    // tourelles : elles tirent sur les intrus du camp adverse dans leur bâtiment (sauf piratées)
+    if (a.role === 'turret') {
+      const home = a.ai!.home;
+      if (home < 0 || isHacked(this, home)) return false;
+      if (b.role === 'vehicle' || b.role === 'turret' || b.role === 'police') return false;
+      if (b.faction !== Faction.DADOU && b.faction !== Faction.EVEN) return false;
+      if (b.faction === a.faction) return false;
+      return this.inBuildingArea(this.building(home), b.x, b.y, b.z) || Math.hypot(b.x - a.x, b.z - a.z) < 9;
+    }
+    if (b.role === 'turret') {
+      if (isHacked(this, b.ai!.home)) return false;
+      if (b.faction === a.faction || a.faction === Faction.POLICE) return false;
+      if (b.faction === Faction.DADOU || b.faction === Faction.EVEN) return a.faction === Faction.DADOU || a.faction === Faction.EVEN;
+      // tourelle neutre : on la vise si elle nous menace ou si on prend son bâtiment
+      if (a.ai && a.ai.squad >= 0 && this.squads.get(a.ai.squad)?.goalBuilding === b.ai!.home) return true;
+      return b.ai!.target >= 0 && this.ents.get(b.ai!.target)?.faction === a.faction;
+    }
+    if (b.role === 'vehicle') {
+      // convoi blindé (pilote automatique)
+      if (b.veh?.auto && vdef(b).cls === 'truck') return convoyHostile(this, a, b);
+      // un véhicule est une cible si son conducteur en est une
+      const d = b.veh && b.veh.driver >= 0 ? this.ents.get(b.veh.driver) : undefined;
+      if (!d || !d.alive) return false;
+      const hidden = d.flags & FLAG.HIDDEN;
+      d.flags &= ~FLAG.HIDDEN;
+      const h = this.hostile(a, d);
+      d.flags |= hidden;
+      return h;
+    }
     const t = this.time;
     // agression directe : on riposte toujours
     const ag = a.ai?.aggro.get(b.id);
@@ -608,7 +649,7 @@ export class Game {
 
   damage(target: Ent, amount: number, attacker: Ent | null, head = false, hx?: number, hy?: number, hz?: number): void {
     if (!target.alive || target.invulnerable || this.over) return;
-    const dmg = Math.round(amount * (head ? 1.8 : 1));
+    const dmg = Math.round(amount * (head && target.role !== 'vehicle' ? 1.8 : 1));
     target.hp -= dmg;
     target.lastDamageAt = this.time;
     target.lastAttacker = attacker ? attacker.id : -1;
@@ -635,6 +676,20 @@ export class Game {
     target.flags = 0;
     target.vx = target.vz = 0;
     this.emitAll({ t: 'death', id: target.id, by: attacker ? attacker.id : -1 });
+    if (target.role === 'vehicle') {
+      explodeVehicle(this, target, attacker);
+      return;
+    }
+    // parrain abattu sur sa moto : il tombe
+    if (target.role === 'boss' && target.slot && this.factions[target.slot].vehicle >= 0) {
+      const v = this.ents.get(this.factions[target.slot].vehicle);
+      if (v && v.veh) {
+        v.veh.driver = -1;
+        v.flags &= ~FLAG.VEHICLE;
+        this.emitAll({ t: 'ride', id: v.id, driver: -1 });
+      }
+      this.factions[target.slot].vehicle = -1;
+    }
     const killerName = attacker ? this.displayName(attacker) : 'Un inconnu';
     const victimName = this.displayName(target);
     if (target.role === 'boss' || target.role === 'lieutenant' || attacker?.role === 'boss') {
@@ -693,6 +748,8 @@ export class Game {
         return 'un policier';
       case 'guard':
         return 'un garde';
+      case 'turret':
+        return 'une tourelle';
       default:
         return 'quelqu’un';
     }
@@ -720,6 +777,26 @@ export class Game {
     if (tp !== f.tp) return; // position antérieure à une téléportation
     const dt = Math.max(0.03, this.time - f.lastInputAt);
     f.lastInputAt = this.time;
+    // au volant : le client envoie la position du véhicule
+    if (f.vehicle >= 0) {
+      const v = this.ents.get(f.vehicle);
+      if (!v || !v.alive || !v.veh || v.veh.driver !== e.id) {
+        f.vehicle = -1;
+        e.flags &= ~(FLAG.VEHICLE | FLAG.HIDDEN);
+      } else {
+        const cx = clamp(x, 0.5, WORLD_W - 0.5);
+        const cz = clamp(z, 0.5, WORLD_D - 0.5);
+        if (!driveInput(this, slot, v, cx, clamp(y, -9, 90), cz, yaw, vx, vz, dt) && this.time - f.tpAt > 1) {
+          this.teleport(slot, v.x, v.y, v.z, v.yaw);
+          return;
+        }
+        e.pitch = clamp(pitch, -1.5, 1.5);
+        const keep = FLAG.VEHICLE | (closed(vdef(v)) ? FLAG.HIDDEN : 0);
+        e.flags = (flags & FLAG.AIM) | keep;
+        if (f.weapons.has(weapon as Weapon)) e.weapon = weapon as Weapon;
+        return;
+      }
+    }
     const dist = Math.hypot(x - e.x, z - e.z);
     const maxD = 9.5 * dt + 1.2;
     if (dist > maxD && this.time - f.tpAt > 1) {
@@ -788,7 +865,11 @@ export class Game {
       const t = this.ents.get(id);
       if (!t || !t.alive || t.id === e.id) continue;
       if (t.slot === slot && t.role !== 'boss') continue; // pas de tir allié
-      if (Math.hypot(hx - t.x, hz - t.z) > 1.6 || hy < t.y - 0.6 || hy > t.y + 2.4) continue;
+      if (t.flags & FLAG.HIDDEN) continue;
+      if (t.role === 'vehicle') {
+        const vd = vdef(t);
+        if (Math.hypot(hx - t.x, hz - t.z) > Math.max(vd.size[0], vd.size[2]) / 2 + 0.6 || hy < t.y - 0.6 || hy > t.y + vd.size[1] + 0.6) continue;
+      } else if (Math.hypot(hx - t.x, hz - t.z) > 1.6 || hy < t.y - 0.6 || hy > t.y + 2.4) continue;
       const dist = Math.hypot(hx - ox, hy - oy, hz - oz);
       if (dist > def.range + 1) continue;
       if (!this.w.city.world.lineOfSight(ox, oy, oz, hx, hy, hz)) continue;
@@ -971,6 +1052,21 @@ export class Game {
       }
       case 'quick':
         this.quickCommand(slot, act);
+        break;
+      case 'vehicle':
+        vehicleAction(this, slot, act.op, act.id, act.v);
+        break;
+      case 'drone':
+        launchDrone(this, slot, act.d);
+        break;
+      case 'hack':
+        hackAction(this, slot, act.b);
+        break;
+      case 'heist':
+        heistAction(this, slot, act.b);
+        break;
+      case 'convoy':
+        sendConvoy(this, slot);
         break;
       case 'debugTp': {
         // réservé aux tests automatisés (rendu logiciel trop lent pour marcher jusqu'au but)
@@ -1247,6 +1343,7 @@ export class Game {
     st.capBy = 0;
     const def = BUILDINGS[bid];
     this.emitAll({ t: 'capture', b: bid, owner, prev });
+    securityOnCapture(this, bid, owner);
     const prevSlot = factionSlot(prev);
     const newSlot = factionSlot(owner);
     if (newSlot) this.factions[newSlot].captured++;
@@ -1325,7 +1422,7 @@ export class Game {
       const cz = (info.footprint[1] + info.footprint[3]) / 2;
       const r = Math.hypot(info.footprint[2] - info.footprint[0], info.footprint[3] - info.footprint[1]) / 2 + 1;
       this.near(cx, cz, r, (e) => {
-        if (!e.alive || e.role === 'barman' || e.role === 'police' || e.flags & FLAG.HIDDEN) return;
+        if (!e.alive || e.role === 'barman' || e.role === 'police' || e.role === 'vehicle' || e.role === 'turret' || e.flags & FLAG.HIDDEN) return;
         if (!this.insideBuilding(info, e.x, e.y, e.z)) return;
         if (e.faction === Faction.DADOU) c1++;
         else if (e.faction === Faction.EVEN) c2++;
@@ -1385,6 +1482,9 @@ export class Game {
     for (const e of this.ents.values()) if (e.ai && e.alive) updateNpc(this, e, dt);
     if (this.tick % 5 === 0) this.updateCapture(dt * 5);
     updatePolice(this, dt);
+    updateVehicles(this);
+    updateSecurity(this, dt);
+    updateConvoys(this, dt);
     if (this.tick % 20 === 0) this.updateSpotted();
     this.updateEvents();
     this.updateWeather(dt);
@@ -1461,6 +1561,12 @@ export class Game {
     const f = this.factions[slot];
     const boss = this.ents.get(f.bossId)!;
     f.respawnAt = -1;
+    if (f.vehicle >= 0) {
+      const v = this.ents.get(f.vehicle);
+      if (v && v.veh && v.alive) leaveVehicle(this, slot, v);
+      f.vehicle = -1;
+    }
+    boss.flags &= ~(FLAG.VEHICLE | FLAG.HIDDEN);
     const sp = hq.deskSeat ?? hq.spawn[0] ?? hq.center;
     boss.alive = true;
     boss.hp = boss.maxHp;
@@ -1487,9 +1593,10 @@ export class Game {
       const seen = new Map<number, { x: number; z: number; n: number }>();
       const enemy = otherSlot(slot);
       const informed = this.time < this.informantUntil[slot];
+      const drone = f.droneReveal && this.time < f.droneReveal.until ? DISTRICT_BY_ID[f.droneReveal.district as DistrictId] : null;
       for (const e of this.ents.values()) {
-        if (!e.alive || e.slot !== enemy || e.role === 'barman' || e.role === 'boss') continue;
-        let vis = informed;
+        if (!e.alive || e.slot !== enemy || e.role === 'barman' || e.role === 'boss' || e.role === 'vehicle' || e.flags & FLAG.HIDDEN) continue;
+        let vis = informed || (!!drone && e.x >= drone.rect[0] && e.x < drone.rect[2] && e.z >= drone.rect[1] && e.z < drone.rect[3]);
         for (const m of mine) {
           if (Math.abs(m.x - e.x) < 36 && Math.abs(m.z - e.z) < 36) {
             vis = true;
@@ -1556,6 +1663,9 @@ export class Game {
         this.endEvent();
         return;
       }
+    } else if (ev.kind === 'convoy' && !convoys(this).some((c) => !c.owner)) {
+      this.endEvent();
+      return;
     } else if (ev.kind === 'raid' && this.tick % 10 === 0) {
       // les agents de la descente interpellent les hommes armés qui se battent
       for (const id of ev.police) {
@@ -1588,7 +1698,7 @@ export class Game {
 
   /** Lance un événement aléatoire. */
   private startRandomEvent(): void {
-    const kinds = ['contraband', 'contraband', 'raid', 'storm', 'informant'];
+    const kinds = ['contraband', 'contraband', 'convoy', 'convoy', 'raid', 'storm', 'informant'];
     const kind = kinds[this.rng.int(0, kinds.length - 1)];
     // pas de descente dans les fiefs de départ (Brooklyn et le Queens)
     const districts = DISTRICTS.filter((d) => d.id !== HQ_BUILDING.dadou.district && d.id !== HQ_BUILDING.even.district);
@@ -1628,6 +1738,14 @@ export class Game {
         this.activeEvent = { kind, x: c.x, z: c.z, until: this.time + 140, reward: 0, district: d.id, police };
         this.emitAll({ t: 'event', kind, text: `Descente du NYPD ${aNom(d.name)} ! Les agents arrêtent tous ceux qui se battent dans le quartier.`, x: c.x, z: c.z, until: this.time + 140 });
         this.news('LE NYPD FRAPPE FORT', `La maire envoie ses unités d’élite ${aNom(d.name)} pour rétablir l’ordre. Les gangs sont priés de se tenir tranquilles.`);
+        break;
+      }
+      case 'convoy': {
+        const t = neutralConvoy(this);
+        if (!t) return;
+        this.activeEvent = { kind, x: t.x, z: t.z, until: this.time + 200, reward: 0, district: d.id, police: [] };
+        this.emitAll({ t: 'event', kind, text: 'Un convoi blindé de la Banque Fédérale traverse Manhattan ! Détruisez le camion pour rafler son chargement — le NYPD n’appréciera pas.', x: t.x, z: t.z, until: this.time + 200 });
+        this.news('UN CONVOI DE LA BANQUE FÉDÉRALE SOUS HAUTE TENSION', 'Les parrains de la ville rôdent autour du camion blindé. La banque assure que « tout est sous contrôle ».');
         break;
       }
       case 'storm': {
@@ -1748,7 +1866,17 @@ export class Game {
       if (b) b.intensity++;
       else battles.push({ x: s.x, z: s.z, intensity: 1 });
     }
+    const rides: [number, number][] = [];
+    for (const e of this.ents.values()) if (e.role === 'vehicle' && e.alive && e.veh && e.veh.driver >= 0) rides.push([e.id, e.veh.driver]);
     return {
+      rides,
+      hacked: hackedList(this),
+      convoys: convoys(this).map((c) => {
+        const e = this.ents.get(c.id);
+        return { id: c.id, slot: c.owner, x: e ? Math.round(e.x * 10) / 10 : 0, z: e ? Math.round(e.z * 10) / 10 : 0, reward: c.reward };
+      }),
+      loot: loots(this).map((l) => ({ x: l.x, z: l.z, reward: l.reward })),
+      heists: heists(this).map((h) => ({ b: h.b, slot: h.slot, p: Math.min(1, h.progress) })),
       buildings: BUILDINGS.map((b) => {
         const st = this.bstate.get(b.id)!;
         let guards = 0;
@@ -1806,6 +1934,13 @@ export class Game {
       maxLt: this.tierOf(slot).maxLt,
       tier: f.tier,
       hq: f.hqId,
+      garage: [...f.garage],
+      vehicle: f.vehicle,
+      callIn: Math.max(0, Math.ceil(f.callAt - this.time)),
+      droneIn: Math.max(0, Math.ceil(f.droneAt - this.time)),
+      droneOver: f.droneReveal && this.time < f.droneReveal.until ? (f.droneReveal.district as DistrictId) : null,
+      hack: f.hack ? { b: f.hack.b, p: Math.min(1, (this.time - f.hack.start) / Math.max(0.1, f.hack.done - f.hack.start)) } : null,
+      convoyIn: convoyReadyIn(this, slot),
       spotted: f.spotted,
     };
   }

@@ -1,4 +1,4 @@
-// Écran de fin de partie : vainqueur, bilan comparé, revanche.
+// Écran de fin de partie : vainqueur, flash d'information, bilan comparé, revanche (New York, 2085).
 
 import type { AppApi, VictoryData } from '../../appApi';
 import type { MatchStats, Slot } from '../../../shared/protocol';
@@ -24,7 +24,7 @@ const STAT_ROWS: { key: keyof MatchStats; label: string; lowerIsBetter?: boolean
 
 const num = (n: number): string => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-/** Feuilles d'or (ou d'argent) qui tombent doucement. */
+/** Confettis néon (éclats holographiques aux couleurs du vainqueur) qui tombent en tournoyant. */
 function leaves(count: number): HTMLElement {
   const box = h('div', { class: 'mw-leaves', 'aria-hidden': 'true' });
   for (let i = 0; i < count; i++) {
@@ -79,10 +79,12 @@ export function victoryScreen(
   });
 
   // ------------------------------------------------------------ titres
-  const headline = w ? `${BOSS_NAME[w].toUpperCase()} RÈGNE SUR LONDRES !` : 'ÉGALITÉ !';
-  const sub = w
-    ? `${BOSS_NAME[other(w)]} a été vaincu. Londres appartient désormais à ${BOSS_NAME[w]} !`
-    : 'Aucun parrain n’a su s’imposer : Londres reste divisée.';
+  const loser = w ? other(w) : null;
+  const headline = w ? `${BOSS_NAME[w].toUpperCase()} RÈGNE SUR NEW YORK !` : 'ÉGALITÉ !';
+  const sub =
+    w && loser
+      ? `${BOSS_NAME[loser]} a été vaincu. New York appartient désormais à ${BOSS_NAME[w]} !`
+      : 'Aucun parrain n’a su s’imposer : New York reste divisée entre les deux familles.';
   const outcomeLabel = outcome === 'win' ? 'Victoire' : outcome === 'loss' ? 'Défaite' : 'Fin de la partie';
 
   // ------------------------------------------------------------ bilan
@@ -168,7 +170,7 @@ export function victoryScreen(
           h('h1', { class: 'mw-victory-headline' }, fr(headline)),
           h('p', { class: 'mw-victory-sub' }, fr(sub)),
           data.reason
-            ? h('div', { class: 'mw-gazette' }, h('div', { class: 'mw-gazette-mast' }, 'La Gazette de Londres'), h('p', { class: 'mw-gazette-text' }, fr(data.reason)))
+            ? h('div', { class: 'mw-gazette' }, h('div', { class: 'mw-gazette-mast' }, 'LE FLASH DE NEW YORK'), h('p', { class: 'mw-gazette-text' }, fr(data.reason)))
             : null,
           table,
         ),

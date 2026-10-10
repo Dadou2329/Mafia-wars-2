@@ -3,7 +3,7 @@
 import { CharKind } from '../../shared/characters';
 import { BUILDINGS, Faction } from '../../shared/city/plan';
 import type { GameEvent, PrivateState, PublicState, Slot } from '../../shared/protocol';
-import { MAP_SCALE, type CityMap } from './cityMap';
+import { MAP_FONT_TITLE, MAP_SCALE, type CityMap } from './cityMap';
 import type { EntityStore } from './entities';
 
 export const OWNER_FILL: Record<number, string> = {
@@ -118,7 +118,7 @@ export function drawMinimap(
     c.fillStyle = event.kind === 'raid' ? '#7fa8ff' : '#ffc94a';
     c.font = `${30}px serif`;
     c.textAlign = 'center';
-    c.fillText(event.kind === 'raid' ? '⚑' : '£', event.x * MAP_SCALE, event.z * MAP_SCALE + 10);
+    c.fillText(event.kind === 'raid' ? '⚑' : '$', event.x * MAP_SCALE, event.z * MAP_SCALE + 10);
   }
   c.restore();
   // repère de la cargaison hors de la mini-carte : flèche au bord
@@ -138,10 +138,10 @@ export function drawMinimap(
       c.fill();
       c.stroke();
       c.fillStyle = '#2a1a0c';
-      c.font = "700 15px 'Cinzel', serif";
+      c.font = `700 15px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('£', 0, 1);
+      c.fillText('$', 0, 1);
       c.restore();
     }
   }
@@ -163,7 +163,7 @@ export function drawMinimap(
   c.restore();
   // cerclage et nord
   c.fillStyle = '#f2e2b0';
-  c.font = "700 22px 'Cinzel', serif";
+  c.font = `700 22px ${MAP_FONT_TITLE}`;
   c.textAlign = 'center';
   c.fillText('N', W / 2, 26);
 }

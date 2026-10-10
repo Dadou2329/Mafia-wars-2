@@ -11,6 +11,8 @@ export const enum CharKind {
   CIVILIAN_F = 7,
   BARMAN = 8, // rabatteur du QG
   TURRET = 9, // tourelle de sécurité
+  /** Véhicule (le modèle est donné par EntityInfo.gang = identifiant de VehicleDef). */
+  VEHICLE = 10,
 }
 
 export const enum Weapon {
@@ -73,7 +75,9 @@ export const FLAG = {
   WANTED: 8,
   INSIDE: 16,
   LEADER: 32,
+  /** Personnage : au volant ou passager d'un véhicule. Véhicule : occupé. */
   VEHICLE: 64,
+  /** Invisible : dans un ascenseur, passager à l'intérieur d'un véhicule. */
   HIDDEN: 128,
 } as const;
 

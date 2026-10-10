@@ -189,6 +189,8 @@ export class EntityStore {
         v.anim = last.anim;
         v.aiming = (last.flags & FLAG.AIM) !== 0;
         v.weapon = last.weapon;
+        // dans un ascenseur ou à l'intérieur d'un véhicule
+        v.hidden = (last.flags & FLAG.HIDDEN) !== 0;
       }
       this.views.push(v);
     }

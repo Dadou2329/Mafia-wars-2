@@ -18,6 +18,39 @@ export function updateNpc(g: Game, e: Ent, dt: number): void {
     // le barman regarde la salle
     return;
   }
+  // tourelle : immobile, elle pivote et tire
+  if (e.role === 'turret') {
+    if (t >= ai.scanAt) {
+      ai.scanAt = t + 0.35;
+      ai.target = pickTarget(g, e);
+    }
+    const tg = ai.target >= 0 ? g.ents.get(ai.target) : undefined;
+    e.flags &= ~FLAG.AIM;
+    e.anim = Anim.IDLE;
+    if (tg && tg.alive && g.hostile(e, tg)) {
+      const dx = tg.x - e.x;
+      const dz = tg.z - e.z;
+      const d = Math.hypot(dx, dz);
+      e.yaw += angleDiff(e.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 6);
+      e.pitch = clamp(Math.atan2(tg.y + 1.2 - (e.y + 1.1), d), -0.8, 0.8);
+      if (d < 26 && (t - ai.lastSeen < 0.6 || g.los(e, tg))) {
+        ai.lastSeen = t;
+        e.flags |= FLAG.AIM;
+        tryFire(g, e, tg, d);
+      }
+    } else ai.target = -1;
+    if (e.ammo <= 0 && t >= e.reloadUntil) {
+      e.reloadUntil = t + 2.5;
+      e.ammo = WEAPONS[e.weapon].magazine;
+    }
+    return;
+  }
+  // passager d'un véhicule : assis, il attend qu'on le dépose
+  if (ai.mode === 'ride') {
+    e.anim = Anim.SIT;
+    ai.target = -1;
+    return;
+  }
   // ---------------------------------------------------------------- perception
   if (t >= ai.scanAt) {
     ai.scanAt = t + 0.3 + g.rng.next() * 0.2;

@@ -1,50 +1,61 @@
 /**
- * AudioEngine — fully procedural Web Audio engine for
- * "MAFIA WARS : Dadou vs Even" (Victorian London, 1888).
+ * AudioEngine — moteur Web Audio entièrement procédural de
+ * « MAFIA WARS II : Dadou vs Even » (New York, 2085).
  *
- * No audio files: every sound, ambience bed, reverb and music cue is
- * synthesised at runtime. Usage:
+ * Aucun fichier audio : chaque bruitage, lit d'ambiance, réverbération, son de
+ * moteur et morceau de musique est synthétisé à l'exécution. Utilisation :
  *
  *   import { audio } from './audio/AudioEngine';
  *   window.addEventListener('pointerdown', () => audio.unlock());
  *   audio.playMusic('menu');
- *   audio.play('revolver', { pos: { x: 10, y: 1.5, z: -3 } });
- *   // each frame:
+ *   audio.play('pistol', { pos: { x: 10, y: 1.5, z: -3 } });
+ *   const moteur = audio.loop('engine_car', { pos: voiture.position });
+ *   // à chaque image :
+ *   moteur?.update({ pos: voiture.position, pitch: 1 + 1.5 * vitesse / vitesseMax });
  *   audio.setListener(camera.position, cameraForward, camera.up);
  *   audio.update(dt);
+ *   // à la destruction du véhicule :
+ *   moteur?.stop();
  */
 import { Ambience } from './ambience';
-import { towerStrike, westminsterPlan } from './bells';
 import { clamp } from './dsp';
+import { LoopManager, type LoopListener } from './loops';
 import { MusicDirector } from './music';
-import { AudioResources } from './resources';
+import { AudioResources, type BankName } from './resources';
 import { SFX, type SfxDef, type SpatialProfile } from './sfx';
-import { footstep, type SfxCtx } from './sfx_combat';
+import { playBank, type SfxCtx } from './sfx_combat';
 import { biquad, chain, gainNode, setSourceCollector, type SynthEnv } from './synth';
 import type {
-  AmbienceParams, MusicTrackName, PlayOptions, SfxName, Vec3Like, VolumeSettings,
+  AmbienceParams, LoopHandle, LoopName, LoopOptions, MusicTrackName, PlayOptions, SfxName, Vec3Like, VolumeSettings,
 } from './types';
 
-export { SFX_NAMES } from './types';
+export { LOOP_NAMES, SFX_NAMES } from './types';
 export type {
-  AmbienceParams, MusicTrackName, PlayOptions, SfxName, Vec3Like, VolumeSettings,
+  AmbienceParams, LoopHandle, LoopName, LoopOptions, MusicTrackName, PlayOptions, SfxName, Vec3Like, VolumeSettings,
 } from './types';
 
 export interface AudioEngineOptions {
-  /** Inject a context (e.g. an OfflineAudioContext for tests/rendering). */
+  /** Contexte injecté (ex. OfflineAudioContext pour les tests / le rendu). */
   context?: BaseAudioContext;
-  /** Maximum simultaneous SFX voices (default 32). */
+  /** Nombre maximal de voix de bruitage simultanées (32 par défaut). */
   maxVoices?: number;
-  /** Use HRTF panning for important positional sounds (default true). */
+  /** Nombre maximal de sons continus simultanés (`loop()`, 12 par défaut). */
+  maxLoops?: number;
+  /** Panoramique HRTF pour les sons positionnels importants (vrai par défaut). */
   hrtf?: boolean;
 }
 
 export interface AudioStats {
   state: string;
   time: number;
+  /** Voix de bruitage actives. */
   voices: number;
+  /** Sons continus actifs (y compris en attente de démarrage). */
+  loops: number;
   music: MusicTrackName;
+  /** Voix et boucles en cours d'extinction (fondu de sortie avant libération). */
   pendingEvents: number;
+  /** Vrai tant que des ressources différées (banques, réverbérations, boucles) sont en génération. */
   loopsPending: boolean;
 }
 
@@ -58,9 +69,7 @@ interface Voice {
   score: number;
 }
 
-interface QueuedEvent { time: number; fn: (t: number) => void }
-
-/** Bus trims (linear) applied on top of the user volumes. */
+/** Ajustements des bus (linéaires) appliqués en plus des volumes de l'utilisateur. */
 const TRIM = { sfx: 0.9, music: 0.5, ambience: 0.5 };
 const LOOKAHEAD_MIN = 0.15;
 const LOOKAHEAD_MAX = 2.5;
@@ -96,7 +105,7 @@ export class AudioEngine {
   private readonly maxVoices: number;
   private hrtf: boolean;
 
-  // Graph
+  // Graphe
   private master: GainNode | null = null;
   private sfxBus: GainNode | null = null;
   private musicBus: GainNode | null = null;
@@ -105,35 +114,42 @@ export class AudioEngine {
   private sfxRoomSend: GainNode | null = null;
   private ambStreetSend: GainNode | null = null;
   private musicHallSend: GainNode | null = null;
+  /** Les envois « extérieurs » se partagent entre la rue et le tunnel du métro selon `underground`. */
+  private outdoorVerb: GainNode | null = null;
+  private tunnelVerb: GainNode | null = null;
+  private tunnelConv: ConvolverNode | null = null;
+  private tunnelOn = false;
+  private tunnelOffAt = Infinity;
   private convolvers: ConvolverNode[] = [];
   private outNode: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
 
-  // Sub-systems
+  // Sous-systèmes
   private music: MusicDirector | null = null;
   private ambience: Ambience | null = null;
+  private readonly loops: LoopManager;
   private voices: Voice[] = [];
   private dying: Voice[] = [];
-  private events: QueuedEvent[] = [];
-  private lastStep = { stone: { v: -1 }, wood: { v: -1 }, carpet: { v: -1 } };
+  private readonly bankLast = new Map<BankName, { v: number }>();
 
-  // Remembered state (applied on unlock)
+  // État mémorisé (appliqué au déverrouillage)
   private volumes: VolumeSettings = { master: 1, music: 0.8, sfx: 1, ambience: 0.8 };
   private lisPos: Vec3Like = { x: 0, y: 0, z: 0 };
   private lisFwd: Vec3Like = { x: 0, y: 0, z: -1 };
   private lisUp: Vec3Like = { x: 0, y: 1, z: 0 };
   private listenerIndoor = false;
+  private underground = 0;
+  private readonly loopListener: LoopListener = { pos: this.lisPos, indoor: false, underground: 0 };
   private ambParams: AmbienceParams | null = null;
   private desiredTrack: MusicTrackName = 'none';
   private combat = 0;
   private combatSmooth = 0;
   private calmTime = 0;
   private userSuspended = false;
-  /** Short window after unlock() during which a still-starting context accepts sounds. */
+  /** Courte fenêtre après unlock() pendant laquelle un contexte qui démarre accepte des sons. */
   private startingUntil = 0;
-  private chimeToken = 0;
 
-  // Scheduler
+  // Ordonnanceur
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTickWall = 0;
   private gapEstimate = TIMER_MS / 1000;
@@ -141,12 +157,14 @@ export class AudioEngine {
   constructor(opts: AudioEngineOptions = {}) {
     this.injected = opts.context ?? null;
     this.maxVoices = Math.max(4, opts.maxVoices ?? 32);
+    this.loops = new LoopManager(Math.max(1, opts.maxLoops ?? 12));
+    this.loops.setListener(this.loopListener);
     this.hrtf = opts.hrtf ?? true;
   }
 
-  /* ================================================================ lifecycle */
+  /* ================================================================ cycle de vie */
 
-  /** Must be called from a user gesture (click/keydown). Safe to call many times. */
+  /** À appeler depuis un geste de l'utilisateur (clic/touche). Sans risque si appelé plusieurs fois. */
   unlock(): void {
     try {
       if (!this.ctx) {
@@ -158,25 +176,25 @@ export class AudioEngine {
       const ctx = this.ctx;
       if (!isRealtime(ctx)) return;
       if (this.userSuspended) {
-        if (ctx.state === 'running') ctx.suspend().catch(() => { /* ignore */ });
+        if (ctx.state === 'running') ctx.suspend().catch(() => { /* ignorer */ });
       } else if (ctx.state === 'suspended') {
-        // Some browsers (Firefox) switch to 'running' asynchronously: accept sounds briefly.
+        // Certains navigateurs (Firefox) passent à 'running' de façon asynchrone : on accepte des sons brièvement.
         this.startingUntil = nowMs() + 500;
-        ctx.resume().catch(() => { /* will retry on next gesture */ });
+        ctx.resume().catch(() => { /* nouvel essai au prochain geste */ });
       }
     } catch {
-      /* never throw from audio */
+      /* jamais d'exception depuis l'audio */
     }
   }
 
-  /** True once the context exists and is running (always true for offline contexts after unlock). */
+  /** Vrai dès que le contexte existe et tourne (toujours vrai pour un contexte hors ligne après unlock). */
   get ready(): boolean {
     const ctx = this.ctx;
     if (!ctx || !this.res) return false;
     return isRealtime(ctx) ? ctx.state === 'running' : true;
   }
 
-  /** Running, or just unlocked and about to run (sounds may be scheduled). */
+  /** En marche, ou tout juste déverrouillé et sur le point de tourner (on peut programmer des sons). */
   private get canPlay(): boolean {
     if (this.ready) return true;
     const ctx = this.ctx;
@@ -184,32 +202,38 @@ export class AudioEngine {
       !this.userSuspended && nowMs() < this.startingUntil;
   }
 
-  /** The underlying context (null before unlock). */
+  /** Le contexte sous-jacent (null avant unlock). */
   get context(): BaseAudioContext | null { return this.ctx; }
 
   suspend(): void {
     this.userSuspended = true;
     const ctx = this.ctx;
-    if (ctx && isRealtime(ctx) && ctx.state === 'running') ctx.suspend().catch(() => { /* ignore */ });
+    if (ctx && isRealtime(ctx) && ctx.state === 'running') ctx.suspend().catch(() => { /* ignorer */ });
   }
 
   resume(): void {
     this.userSuspended = false;
     const ctx = this.ctx;
-    if (ctx && isRealtime(ctx) && ctx.state === 'suspended') ctx.resume().catch(() => { /* ignore */ });
+    if (ctx && isRealtime(ctx) && ctx.state === 'suspended') ctx.resume().catch(() => { /* ignorer */ });
   }
 
-  /** Stops timers and closes the realtime context. The engine can be unlocked again afterwards. */
+  /**
+   * Arrête les minuteries et ferme le contexte temps réel. Les boucles en cours
+   * sont arrêtées (leurs poignées deviennent inertes). Le moteur peut être
+   * déverrouillé de nouveau ensuite.
+   */
   dispose(): void {
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
+    this.loops.detach();
     const ctx = this.ctx;
-    if (ctx && isRealtime(ctx)) ctx.close().catch(() => { /* ignore */ });
+    if (ctx && isRealtime(ctx)) ctx.close().catch(() => { /* ignorer */ });
     this.ctx = null; this.res = null; this.env = null;
     this.outNode = null; this.analyser = null;
     this.music = null; this.ambience = null;
-    this.voices = []; this.dying = []; this.events = [];
+    this.voices = []; this.dying = [];
     this.convolvers = [];
+    this.tunnelConv = null; this.tunnelVerb = null; this.outdoorVerb = null; this.tunnelOn = false;
   }
 
   private build(ctx: BaseAudioContext): void {
@@ -244,23 +268,31 @@ export class AudioEngine {
       this.convolvers.push(c);
       return c;
     };
-    // Impulse responses arrive asynchronously (generated in time slices).
+    // Les réponses impulsionnelles arrivent de façon asynchrone (générées par tranches).
     const street = conv(0.8);
     const room = conv(0.7);
     const hall = conv(0.6);
-    this.sfxStreetSend = gainNode(ctx, 1); this.sfxStreetSend.connect(street);
+    const tunnel = conv(0.75);
+    this.tunnelConv = tunnel;
+    this.outdoorVerb = gainNode(ctx, 1); this.outdoorVerb.connect(street);
+    // Le tunnel n'est relié que lorsqu'on est sous terre (une convolution de moins le reste du temps).
+    this.tunnelVerb = gainNode(ctx, 0);
+    this.tunnelOn = false;
+    this.sfxStreetSend = gainNode(ctx, 1);
+    this.ambStreetSend = gainNode(ctx, 1);
+    for (const s of [this.sfxStreetSend, this.ambStreetSend]) { s.connect(this.outdoorVerb); s.connect(this.tunnelVerb); }
     this.sfxRoomSend = gainNode(ctx, 1); this.sfxRoomSend.connect(room);
-    this.ambStreetSend = gainNode(ctx, 1); this.ambStreetSend.connect(street);
     this.musicHallSend = gainNode(ctx, 1); this.musicHallSend.connect(hall);
     const setIR = (c: ConvolverNode, b: AudioBuffer | null): void => {
-      if (b && !c.buffer) { try { c.buffer = b; } catch { /* ignore */ } }
+      if (b && !c.buffer) { try { c.buffer = b; } catch { /* ignorer */ } }
     };
     res.onReady = (kind) => {
       if (this.res !== res) return;
       if (kind === 'streetIR') setIR(street, res.streetIR);
       else if (kind === 'roomIR') setIR(room, res.roomIR);
       else if (kind === 'hallIR') setIR(hall, res.hallIR);
-      else if (kind !== 'footsteps') this.ambience?.onLoopReady(kind);
+      else if (kind === 'tunnelIR') setIR(tunnel, res.tunnelIR);
+      else if (kind !== 'bank' && kind !== 'drums' && kind !== 'loopBuffer') this.ambience?.onLoopReady(kind);
     };
     if (!isRealtime(ctx)) res.finishAll();
 
@@ -268,6 +300,7 @@ export class AudioEngine {
     musicWet.connect(this.musicHallSend);
     this.music = new MusicDirector(env, this.musicBus, musicWet);
     this.ambience = new Ambience(env, this.ambBus, this.ambStreetSend, ctx.currentTime);
+    this.loops.attach({ ctx, res, bus: this.sfxBus, streetSend: this.sfxStreetSend, roomSend: this.sfxRoomSend });
 
     this.applyVolumes(true);
     this.applyListener();
@@ -275,8 +308,8 @@ export class AudioEngine {
     if (this.desiredTrack !== 'none') this.music.play(this.desiredTrack, ctx.currentTime, 2.5, 1);
 
     if (isRealtime(ctx)) {
-      // Footsteps, reverbs and ambience loops are generated in ~6 ms slices after
-      // unlock, keeping the user-gesture handler and frames fast.
+      // Banques, réverbérations et boucles sont générées par tranches de ~6 ms après le
+      // déverrouillage : le gestionnaire du geste et les images restent rapides.
       const pump = (): void => {
         if (this.res !== res) return;
         if (res.work(6)) setTimeout(pump, 4);
@@ -286,7 +319,7 @@ export class AudioEngine {
     }
   }
 
-  /* ================================================================ volumes & listener */
+  /* ================================================================ volumes et auditeur */
 
   setVolumes(v: { master: number; music: number; sfx: number; ambience: number }): void {
     const c = (x: number, d: number): number => (Number.isFinite(x) ? clamp(x, 0, 1) : d);
@@ -299,14 +332,14 @@ export class AudioEngine {
     this.applyVolumes(false);
   }
 
-  /** Current (remembered) volume settings. */
+  /** Volumes mémorisés. */
   getVolumes(): VolumeSettings { return { ...this.volumes }; }
 
   private applyVolumes(immediate: boolean): void {
     const ctx = this.ctx;
     if (!ctx || !this.master) return;
     const now = ctx.currentTime;
-    // Squared taper: perceptually smoother sliders.
+    // Courbe quadratique : curseurs perceptivement plus réguliers.
     const curve = (x: number): number => x * x;
     const set = (g: GainNode | null, val: number): void => {
       if (!g) return;
@@ -324,14 +357,15 @@ export class AudioEngine {
     set(this.ambStreetSend, curve(v.ambience) * TRIM.ambience);
   }
 
-  /** Camera/listener position and orientation (Three.js world: y up, metres). */
+  /** Position et orientation de la caméra / de l'auditeur (monde Three.js : y vers le haut, mètres). */
   setListener(pos: Vec3Like, forward: Vec3Like, up?: Vec3Like): void {
     this.lisPos = v3(pos);
+    this.loopListener.pos = this.lisPos;
     const f = v3(forward);
     const fl = Math.hypot(f.x, f.y, f.z);
     if (fl > 1e-6) this.lisFwd = { x: f.x / fl, y: f.y / fl, z: f.z / fl };
     let u = up ? v3(up) : { x: 0, y: 1, z: 0 };
-    // Orthogonalise up against forward (avoids a degenerate frame when looking straight down).
+    // Orthogonalise « haut » par rapport à « avant » (évite un repère dégénéré en regardant vers le bas).
     const F = this.lisFwd;
     const d = u.x * F.x + u.y * F.y + u.z * F.z;
     u = { x: u.x - F.x * d, y: u.y - F.y * d, z: u.z - F.z * d };
@@ -352,17 +386,17 @@ export class AudioEngine {
         L.forwardX.value = f.x; L.forwardY.value = f.y; L.forwardZ.value = f.z;
         L.upX.value = u.x; L.upY.value = u.y; L.upZ.value = u.z;
       } else {
-        // Firefox: AudioListener has no AudioParams, use the legacy setters.
+        // Firefox : l'AudioListener n'a pas d'AudioParam, on utilise les anciens réglages.
         L.setPosition(p.x, p.y, p.z);
         L.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z);
       }
-    } catch { /* ignore */ }
+    } catch { /* ignorer */ }
   }
 
-  /** Enable/disable HRTF panning for new positional voices. */
+  /** Active/désactive le panoramique HRTF pour les nouvelles voix positionnelles. */
   setHrtf(enabled: boolean): void { this.hrtf = enabled; }
 
-  /* ================================================================ SFX */
+  /* ================================================================ bruitages */
 
   play(name: SfxName, opts: PlayOptions = {}): void {
     const ctx = this.ctx, res = this.res, env = this.env;
@@ -370,32 +404,39 @@ export class AudioEngine {
     const def: SfxDef | undefined = SFX[name];
     if (!def) return;
     try {
-      this.playDef(ctx, res, name, def, opts);
+      this.playDef(ctx, res, name, def, opts ?? {});
     } catch {
-      /* never throw from audio */
+      /* jamais d'exception depuis l'audio */
     }
   }
 
   private playDef(ctx: BaseAudioContext, res: AudioResources, name: SfxName, def: SfxDef, opts: PlayOptions): void {
-    if (def.surface && res.footsteps[def.surface].length === 0) return; // still generating (first ~50 ms)
     const now = ctx.currentTime;
     const t = Math.max(now, opts.when ?? now + 0.005);
     const spatial: SpatialProfile | null = opts.pos && def.spatial ? def.spatial : null;
     let synth = def.synth;
+    let bank = def.bank;
+    let gainMul = 1;
     let dist = 0;
     if (spatial && opts.pos) {
       dist = dist3(this.lisPos, opts.pos);
       if (!Number.isFinite(dist) || dist > spatial.cull) return;
-      if (def.far && dist > def.far.dist) synth = def.far.synth;
+      if (def.far && dist > def.far.dist) {
+        if (def.far.bank) bank = def.far.bank;
+        else if (def.far.synth) { synth = def.far.synth; bank = undefined; }
+        gainMul = def.far.gain ?? 1;
+      }
     }
-    const vol = clamp(Number.isFinite(opts.volume) ? (opts.volume as number) : 1, 0, 4) * def.gain;
+    const variants = bank ? res.banks[bank] : null;
+    if (bank && (!variants || variants.length === 0)) return; // encore en génération (première seconde)
+    const vol = clamp(Number.isFinite(opts.volume) ? (opts.volume as number) : 1, 0, 4) * def.gain * gainMul;
     if (vol < 0.0005) return;
     const pitch = clamp(Number.isFinite(opts.pitch) ? (opts.pitch as number) : 1, 0.25, 4);
     const att = spatial ? spatial.ref / (spatial.ref + spatial.rolloff * Math.max(0, dist - spatial.ref)) : 1;
     const score = vol * att * (1 + def.priority);
 
     this.reap(now);
-    // Per-name instance cap: cut the oldest instance.
+    // Plafond par nom : on coupe l'instance la plus ancienne.
     let same = 0;
     let oldest: Voice | null = null;
     for (const v of this.voices) {
@@ -404,7 +445,7 @@ export class AudioEngine {
       if (!oldest || v.start < oldest.start) oldest = v;
     }
     if (same >= def.maxInst && oldest) this.kill(oldest, now);
-    // Global voice limit: steal the weakest (quiet / almost finished / low priority).
+    // Limite globale : on vole la plus faible (discrète / presque finie / peu prioritaire).
     if (this.voices.length >= this.maxVoices) {
       let weakest: Voice | null = null;
       let ws = Infinity;
@@ -414,17 +455,17 @@ export class AudioEngine {
         const s = v.score * (0.2 + 0.8 * rem);
         if (s < ws) { ws = s; weakest = v; }
       }
-      if (!weakest || ws > score) return; // the new sound is the least important: drop it
+      if (!weakest || ws > score) return; // le nouveau son est le moins important : on l'abandonne
       this.kill(weakest, now);
     }
 
-    // Voice graph: out -> [air lp] -> [indoor muffle] -> [panner] -> sfxBus, + reverb send.
+    // Graphe de la voix : out -> [air] -> [étouffement intérieur] -> [panoramique] -> bus, + envoi de réverbération.
     const out = gainNode(ctx, vol);
     const nodes: AudioNode[] = [out];
     let tail: AudioNode = out;
     const indoor = opts.indoor ?? this.listenerIndoor;
     if (spatial && opts.pos) {
-      if (dist > 20 && !def.surface) {
+      if (dist > 20 && !def.step) {
         const lp = biquad(ctx, 'lowpass', clamp(22000 * Math.exp(-dist / 55), 1000, 20000), 0.6);
         tail.connect(lp); tail = lp; nodes.push(lp);
       }
@@ -458,14 +499,20 @@ export class AudioEngine {
     }
 
     const sources: AudioScheduledSourceNode[] = [];
-    const s: SfxCtx = { ctx, res, out, t, p: pitch };
+    const s: SfxCtx = { ctx, res, out, t, p: pitch, spatial: !!spatial };
     let end: number;
     setSourceCollector(sources);
     try {
-      end = def.surface ? footstep(s, res.footsteps[def.surface], this.lastStep[def.surface]) : synth(s);
+      if (bank && variants) {
+        let last = this.bankLast.get(bank);
+        if (!last) { last = { v: -1 }; this.bankLast.set(bank, last); }
+        end = playBank(s, variants, last);
+      } else {
+        end = synth(s);
+      }
     } catch {
       for (const n of nodes) n.disconnect();
-      for (const src of sources) { try { src.stop(); } catch { /* ignore */ } }
+      for (const src of sources) { try { src.stop(); } catch { /* ignorer */ } }
       return;
     } finally {
       setSourceCollector(null);
@@ -482,9 +529,9 @@ export class AudioEngine {
       g.cancelScheduledValues(now);
       g.setValueAtTime(g.value, now);
       g.linearRampToValueAtTime(0, now + 0.03);
-    } catch { /* ignore */ }
+    } catch { /* ignorer */ }
     for (const s of v.sources) {
-      try { s.stop(now + 0.04); } catch { /* already stopped */ }
+      try { s.stop(now + 0.04); } catch { /* déjà arrêtée */ }
     }
     v.end = now + 0.1;
     this.dying.push(v);
@@ -510,19 +557,60 @@ export class AudioEngine {
 
   private disconnect(v: Voice): void {
     for (const n of v.nodes) {
-      try { n.disconnect(); } catch { /* ignore */ }
+      try { n.disconnect(); } catch { /* ignorer */ }
     }
   }
 
-  /* ================================================================ ambience & music */
+  /* ================================================================ sons continus */
+
+  /**
+   * Démarre un son continu (moteur, ADAV, drone, alarme, sirène), positionnel
+   * si `pos` est donné. Renvoie une poignée à mettre à jour à chaque image
+   * (`update({ pos, pitch, volume })`) et à arrêter (`stop()`), ou null si le
+   * plafond de boucles simultanées est atteint (ou le nom inconnu). Avant le
+   * déverrouillage, la poignée reste en attente et démarre d'elle-même.
+   */
+  loop(name: LoopName, opts: LoopOptions = {}): LoopHandle | null {
+    try {
+      return this.loops.create(name, opts ?? {});
+    } catch {
+      return null;
+    }
+  }
+
+  /* ================================================================ ambiance et musique */
 
   setAmbience(p: AmbienceParams): void {
+    if (!p) return;
     this.ambParams = { ...p };
-    this.listenerIndoor = !!p.indoor;
+    const u = clamp(Number.isFinite(p.underground) ? (p.underground as number) : 0, 0, 1);
+    this.underground = u;
+    // Dans le métro, les bruitages prennent la réverbération du quai (envoi « extérieur »).
+    this.listenerIndoor = !!p.indoor && u < 0.5;
+    this.loopListener.indoor = this.listenerIndoor;
+    this.loopListener.underground = u;
     this.combat = clamp(Number.isFinite(p.combat) ? p.combat : 0, 0, 1);
     const ctx = this.ctx;
     if (!ctx || !this.ambience) return;
-    try { this.ambience.setParams(p, ctx.currentTime); } catch { /* ignore */ }
+    try {
+      this.ambience.setParams(p, ctx.currentTime);
+      this.applyUnderground(ctx.currentTime);
+    } catch { /* ignorer */ }
+  }
+
+  /** Partage des envois extérieurs entre la rue et le tunnel du métro. */
+  private applyUnderground(now: number): void {
+    const o = this.outdoorVerb, tv = this.tunnelVerb, tc = this.tunnelConv;
+    if (!o || !tv || !tc) return;
+    const u = this.underground;
+    o.gain.setTargetAtTime(1 - u, now, 0.3);
+    tv.gain.setTargetAtTime(u, now, 0.3);
+    if (u > 0.001) {
+      if (!this.tunnelOn) { tv.connect(tc); this.tunnelOn = true; }
+      this.tunnelOffAt = Infinity;
+    } else if (this.tunnelOn && this.tunnelOffAt === Infinity) {
+      this.tunnelOffAt = now + 3;
+    }
   }
 
   playMusic(track: MusicTrackName): void {
@@ -531,17 +619,17 @@ export class AudioEngine {
     const m = this.music;
     if (!ctx || !m) return;
     const cur = m.currentName;
-    // 'game' and 'tension' are auto-managed from the combat level.
+    // 'game' et 'tension' sont gérés automatiquement d'après l'intensité des combats.
     if (track === 'game' && cur === 'tension') return;
     const now = ctx.currentTime;
     try {
       if (track === 'victory' || track === 'defeat') m.play(track, now, 0.05, 1.2);
       else m.play(track, now, 2.5, 2.5);
-    } catch { /* ignore */ }
+    } catch { /* ignorer */ }
     this.calmTime = 0;
   }
 
-  /** Name of the track currently playing (after automatic game/tension switching). */
+  /** Nom du morceau en cours (après la bascule automatique jeu / tension). */
   get currentMusic(): MusicTrackName { return this.music?.currentName ?? 'none'; }
 
   private autoMusic(dt: number): void {
@@ -566,87 +654,9 @@ export class AudioEngine {
     }
   }
 
-  /* ================================================================ Big Ben */
+  /* ================================================================ ordonnanceur */
 
-  /**
-   * Westminster Quarters followed by `hourCount` strikes of the hour bell.
-   * Optional extra `quarter` (1..3) rings only that quarter's chime.
-   */
-  bellChime(hourCount: number, pos?: Vec3Like, quarter: 1 | 2 | 3 | 4 = 4): void {
-    const ctx = this.ctx, env = this.env;
-    if (!ctx || !env || !this.canPlay || !this.sfxBus) return;
-    try {
-      const token = ++this.chimeToken;
-      const start = ctx.currentTime + 0.1;
-      const plan = westminsterPlan(start, Number.isFinite(hourCount) ? hourCount : 12, quarter);
-      if (!plan.length) return;
-      const out = gainNode(ctx, 0.35);
-      const nodes: AudioNode[] = [out];
-      let tail: AudioNode = out;
-      let send = 0.55;
-      if (this.listenerIndoor) {
-        // Heard through walls and windows.
-        const m = biquad(ctx, 'lowpass', 1000, 0.6);
-        const g = gainNode(ctx, 0.5);
-        chain(out, m, g);
-        tail = g;
-        nodes.push(m, g);
-        send = 0.3;
-      }
-      const pre = tail;
-      if (pos) {
-        const d = dist3(this.lisPos, pos);
-        const lp = biquad(ctx, 'lowpass', clamp(26000 * Math.exp(-d / 220), 1500, 20000), 0.6);
-        const pn = ctx.createPanner();
-        pn.panningModel = 'equalpower';
-        pn.distanceModel = 'inverse';
-        pn.refDistance = 60;
-        pn.rolloffFactor = 0.5;
-        pn.maxDistance = 100000;
-        if (pn.positionX) { pn.positionX.value = pos.x; pn.positionY.value = pos.y; pn.positionZ.value = pos.z; }
-        else pn.setPosition(pos.x, pos.y, pos.z);
-        chain(pre, lp, pn);
-        tail = pn;
-        nodes.push(lp, pn);
-        send *= 0.8 + 0.55 * clamp(d / 400, 0, 1);
-      } else {
-        const lp = biquad(ctx, 'lowpass', 4500, 0.6);
-        pre.connect(lp);
-        tail = lp;
-        nodes.push(lp);
-      }
-      tail.connect(this.sfxBus);
-      const sg = gainNode(ctx, send);
-      pre.connect(sg);
-      sg.connect((this.listenerIndoor ? this.sfxRoomSend : this.sfxStreetSend) as GainNode);
-      nodes.push(sg);
-      let last = start;
-      for (const s of plan) {
-        last = Math.max(last, s.time);
-        this.queue(s.time - 0.05, () => {
-          if (token !== this.chimeToken || !this.env) return;
-          towerStrike(this.env, out, s);
-        });
-      }
-      // Clean-up after the final strike has rung out.
-      this.queue(last + 12, () => { for (const n of nodes) n.disconnect(); });
-    } catch { /* ignore */ }
-  }
-
-  /** Cancels a Big Ben sequence in progress (already-sounding strikes ring out). */
-  stopChime(): void { this.chimeToken++; }
-
-  /* ================================================================ scheduler */
-
-  private queue(time: number, fn: (t: number) => void): void {
-    const ev = { time, fn };
-    const q = this.events;
-    let i = q.length;
-    while (i > 0 && q[i - 1].time > time) i--;
-    q.splice(i, 0, ev);
-  }
-
-  /** Per-frame housekeeping: music sequencing, ambience events, voice clean-up, music auto-switch. */
+  /** Entretien par image : séquences musicales, évènements d'ambiance, sons continus, nettoyage des voix. */
   update(dt: number): void {
     if (!this.ctx) return;
     const d = Number.isFinite(dt) ? clamp(dt, 0, 0.5) : 0;
@@ -660,30 +670,33 @@ export class AudioEngine {
     const wall = nowMs();
     const gap = this.lastTickWall ? (wall - this.lastTickWall) / 1000 : TIMER_MS / 1000;
     this.lastTickWall = wall;
-    // Adaptive lookahead: covers timer throttling in background tabs.
+    // Avance adaptative : couvre le ralentissement des minuteries dans un onglet en arrière-plan.
     this.gapEstimate = Math.max(Math.min(gap, 5), this.gapEstimate * 0.97);
     const lookahead = clamp(this.gapEstimate * 1.6 + 0.08, LOOKAHEAD_MIN, LOOKAHEAD_MAX);
     const now = ctx.currentTime;
     this.runSchedulers(now, now + lookahead);
     this.reap(now);
+    try { this.loops.update(now); } catch { /* ignorer */ }
+    if (this.tunnelOn && now >= this.tunnelOffAt && this.tunnelVerb && this.tunnelConv) {
+      try { this.tunnelVerb.disconnect(this.tunnelConv); } catch { /* ignorer */ }
+      this.tunnelOn = false;
+      this.tunnelOffAt = Infinity;
+    }
   }
 
   private runSchedulers(now: number, until: number): void {
     try {
-      while (this.events.length && this.events[0].time <= until) {
-        const ev = this.events.shift() as QueuedEvent;
-        ev.fn(Math.max(ev.time, now));
-      }
       this.music?.schedule(now, until);
       this.ambience?.schedule(now, until);
     } catch {
-      /* never throw from audio */
+      /* jamais d'exception depuis l'audio */
     }
   }
 
   /**
-   * Offline helper: schedules every music/ambience/bell event up to `until`
-   * seconds (an OfflineAudioContext's clock does not advance before rendering).
+   * Aide hors ligne : programme tous les évènements de musique et d'ambiance
+   * jusqu'à `until` secondes (l'horloge d'un OfflineAudioContext n'avance pas
+   * avant le rendu).
    */
   pump(until: number): void {
     if (!this.ctx) return;
@@ -694,7 +707,7 @@ export class AudioEngine {
     }
   }
 
-  /** Optional extra: an AnalyserNode tapping the final output (VU meters, debugging). Null before unlock. */
+  /** Optionnel : un AnalyserNode sur la sortie finale (vumètres, débogage). Null avant unlock. */
   meter(): AnalyserNode | null {
     const ctx = this.ctx;
     if (!ctx || !this.outNode) return null;
@@ -711,24 +724,25 @@ export class AudioEngine {
       state: this.ctx ? (isRealtime(this.ctx) ? this.ctx.state : 'offline') : 'locked',
       time: this.ctx?.currentTime ?? 0,
       voices: this.voices.length,
+      loops: this.loops.count,
       music: this.currentMusic,
-      pendingEvents: this.events.length,
+      pendingEvents: this.dying.length + this.loops.releasing,
       loopsPending: this.res?.hasPendingJobs ?? true,
     };
   }
 
   /**
-   * Renders audio offline (tests, previews, baking): creates an engine bound to an
-   * OfflineAudioContext, runs `setup`, schedules everything and renders `seconds`.
+   * Rendu hors ligne (tests, aperçus, pré-calcul) : crée un moteur lié à un
+   * OfflineAudioContext, exécute `setup`, programme tout et rend `seconds`.
    */
   static async renderOffline(
     seconds: number,
     setup: (engine: AudioEngine) => void,
-    opts: { sampleRate?: number; maxVoices?: number; hrtf?: boolean } = {},
+    opts: { sampleRate?: number; maxVoices?: number; maxLoops?: number; hrtf?: boolean } = {},
   ): Promise<AudioBuffer> {
     const sr = opts.sampleRate ?? 44100;
     const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(seconds * sr)), sr);
-    const eng = new AudioEngine({ context: ctx, maxVoices: opts.maxVoices, hrtf: opts.hrtf ?? false });
+    const eng = new AudioEngine({ context: ctx, maxVoices: opts.maxVoices, maxLoops: opts.maxLoops, hrtf: opts.hrtf ?? false });
     eng.unlock();
     setup(eng);
     eng.pump(seconds);
@@ -736,5 +750,5 @@ export class AudioEngine {
   }
 }
 
-/** Shared engine instance for the whole game. */
+/** Instance partagée pour tout le jeu. */
 export const audio = new AudioEngine();

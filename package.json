@@ -2,7 +2,7 @@
   "name": "mafia-wars-dadou-vs-even",
   "version": "1.0.0",
   "private": true,
-  "description": "MAFIA WARS : Dadou vs Even — jeu multijoueur 3D voxel dans le Londres victorien",
+  "description": "MAFIA WARS II : Dadou vs Even — jeu multijoueur 3D voxel dans le New York cyberpunk de 2085",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n serveur,client -c yellow,cyan \"npm:dev:server\" \"npm:dev:client\"",

@@ -249,9 +249,9 @@ export class SignSystem {
     const desk = b.desk!;
     const boss = b.def.residence!.boss;
     const color = boss === 'dadou' ? '#ff4050' : '#6aa8ff';
-    const w = 1.5;
-    const hgt = 0.5;
-    const pxPerM = 500;
+    const w = 1.05;
+    const hgt = 0.35;
+    const pxPerM = 700;
     const cw = Math.round(w * pxPerM);
     const ch = Math.round(hgt * pxPerM);
     const canvas = document.createElement('canvas');
@@ -299,7 +299,7 @@ export class SignSystem {
     };
     draw();
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, hgt), signMaterial(tex, 1.4, true));
-    const y = (desk.y ?? b.floorY) + 1.75;
+    const y = (desk.y ?? b.floorY) + 2.15;
     mesh.position.set(desk.x, y, desk.z);
     mesh.renderOrder = 5;
     const owner = boss === 'dadou' ? Faction.DADOU : Faction.EVEN;
@@ -331,9 +331,12 @@ export class SignSystem {
         const mine = s.owner === (s.deskOf === 'dadou' ? Faction.DADOU : Faction.EVEN);
         s.mesh.visible = near && mine && dx * dx + dz * dz < 30 * 30;
         if (s.mesh.visible) {
-          // l'hologramme tourne vers la caméra et flotte doucement
+          // l'hologramme tourne vers la caméra, flotte doucement et s'efface quand on est dessous
           s.mesh.rotation.y = Math.atan2(camPos.x - s.x, camPos.z - s.z);
           s.mesh.position.y = (s.baseY ?? 0) + Math.sin(this.t * 1.6) * 0.04;
+          const d = Math.hypot(dx, dz);
+          const mat = (s.mesh as THREE.Mesh).material as THREE.MeshLambertMaterial;
+          mat.opacity = Math.max(0.12, Math.min(1, (d - 0.8) / 1.6));
         }
       } else s.mesh.visible = near;
     }

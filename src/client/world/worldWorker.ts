@@ -1,4 +1,4 @@
-// Worker : génère Londres, calcule l'éclairage, la navigation et les maillages hors du fil principal.
+// Worker : génère New York, calcule l'éclairage, la navigation et les maillages hors du fil principal.
 import { generateCity } from '../../shared/city/gen/city';
 import { buildCityNav } from '../../shared/city/navBuild';
 import { NavGrid } from '../../shared/nav';

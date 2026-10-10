@@ -1,5 +1,5 @@
-// Menu principal de MAFIA WARS : Dadou vs Even, et petits composants partagés par tous
-// les écrans d'interface (typographie française, sons, boutons, boîtes de dialogue).
+// Menu principal de MAFIA WARS II : Dadou vs Even (New York, 2085), et petits composants
+// partagés par tous les écrans d'interface (typographie française, sons, boutons, boîtes de dialogue).
 
 import type { AppApi } from '../../appApi';
 import type { Slot } from '../../../shared/protocol';
@@ -28,9 +28,10 @@ export function pct(f: number): string {
 const BASE = import.meta.env.BASE_URL;
 
 /**
- * Identité visuelle (fichiers servis depuis /public). On utilise les rendus PNG des SVG de
- * marque : les SVG contiennent de nombreux flous (filtres), que le navigateur recalculerait à
- * chaque nouveau tramage des zones qui les contiennent (survol d'une carte, changement d'état…).
+ * Identité visuelle de la suite (fichiers servis depuis /public, générés par
+ * scripts/build-logo.mjs). On utilise les rendus PNG des SVG de marque : les SVG contiennent de
+ * nombreux flous (néons), que le navigateur recalculerait à chaque nouveau tramage des zones qui
+ * les contiennent (survol d'une carte, changement d'état…).
  */
 export const BRAND = {
   logo: `${BASE}brand/logo.png`,
@@ -38,7 +39,7 @@ export const BRAND = {
   emblem: { dadou: `${BASE}brand/emblem-dadou.png`, even: `${BASE}brand/emblem-even.png` } as Record<Slot, string>,
 };
 
-export const TITLE = `MAFIA WARS${NBSP}: Dadou vs Even`;
+export const TITLE = `MAFIA WARS II${NBSP}: Dadou vs Even`;
 
 const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
@@ -282,7 +283,11 @@ export function choose(
   });
 }
 
-/** Couches d'ambiance du fond de menu : réverbères qui vacillent, brouillard qui dérive (opacité et translation seulement). */
+/**
+ * Couches d'ambiance du fond de menu (New York, 2085) : les deux hologrammes géants qui
+ * grésillent (`withLamps`), le smog qui dérive, la pluie et une légère trame d'écran.
+ * Opacité et translation seulement : tout reste sur le compositeur.
+ */
 export function ambience(withLamps = true): HTMLElement {
   return h(
     'div',
@@ -296,7 +301,10 @@ export function ambience(withLamps = true): HTMLElement {
         )
       : null,
     h('div', { class: 'mw-fog mw-fog--far' }),
+    h('div', { class: 'mw-rain mw-rain--far' }),
     h('div', { class: 'mw-fog mw-fog--near' }),
+    h('div', { class: 'mw-rain mw-rain--near' }),
+    h('div', { class: 'mw-scan' }),
     h('div', { class: 'mw-vignette' }),
   );
 }
@@ -462,7 +470,7 @@ export function mainMenu(app: AppApi): HTMLElement {
     status,
   );
 
-  // ------------------------------------------------------------ génération de Londres
+  // ------------------------------------------------------------ génération de New York
   const genText = h('span', { class: 'mw-gen-text' });
   const genFill = h('span', { class: 'mw-gen-fill' });
   const gen = h('div', { class: 'mw-worldgen', role: 'status' }, genText, h('span', { class: 'mw-gen-bar' }, genFill));
@@ -473,9 +481,9 @@ export function mainMenu(app: AppApi): HTMLElement {
     genFill.style.width = `${Math.round(f * 100)}%`;
     if (f >= 1) {
       genDone = true;
-      genText.textContent = 'Londres est prête';
+      genText.textContent = 'New York est prête';
       gen.classList.add('is-done');
-    } else genText.textContent = fr(`Génération de Londres… ${pct(f)}`);
+    } else genText.textContent = fr(`Génération de New York… ${pct(f)}`);
   });
   if (genDone) offGen();
   else offs.push(offGen);
@@ -484,7 +492,7 @@ export function mainMenu(app: AppApi): HTMLElement {
     'footer',
     { class: 'mw-menu-footer' },
     h('span', { class: 'mw-footer-orn', 'aria-hidden': 'true' }),
-    h('span', { class: 'mw-footer-text' }, 'Londres, 1888'),
+    h('span', { class: 'mw-footer-text' }, 'New York, 2085'),
     h('span', { class: 'mw-footer-orn', 'aria-hidden': 'true' }),
   );
   const corner = h('div', { class: 'mw-menu-corner' }, gen, h('div', { class: 'mw-version' }, 'Version 1.0'));

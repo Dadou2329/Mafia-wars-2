@@ -390,6 +390,22 @@ export class Civilians {
     return false;
   }
 
+  /** Passants percutés par un véhicule (boîte orientée) : renvoie leurs identifiants. */
+  hitBox(x: number, y: number, z: number, yaw: number, halfL: number, halfW: number): number[] {
+    const out: number[] = [];
+    const s = Math.sin(yaw);
+    const c = Math.cos(yaw);
+    for (const civ of this.civs) {
+      if (civ.state === 'dead') continue;
+      const v = civ.view;
+      if (Math.abs(v.y - y) > 1.5) continue;
+      const dx = v.x - x;
+      const dz = v.z - z;
+      if (Math.abs(dx * s + dz * c) <= halfL + 0.3 && Math.abs(dx * c - dz * s) <= halfW + 0.3) out.push(v.id);
+    }
+    return out;
+  }
+
   countNear(x: number, z: number, r: number): number {
     let n = 0;
     for (const c of this.civs) if (c.state !== 'dead' && Math.abs(c.view.x - x) < r && Math.abs(c.view.z - z) < r) n++;

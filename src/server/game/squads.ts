@@ -8,6 +8,8 @@ import { formatTime } from '../../shared/util';
 import { type Game, otherSlot, slotFaction } from './Game';
 import type { Ent, Squad, Vec2 } from './types';
 import { aNom, cap, deNom as deNomB, leNom, pluriel } from '../../shared/french';
+import { heistAction, heistOf, isHacked, securityOf, squadHack } from './security';
+import { convoyOf } from './convoys';
 
 export function createSquad(g: Game, lt: Ent, slot: Slot): Squad {
   const sq: Squad = {
@@ -34,6 +36,8 @@ export function createSquad(g: Game, lt: Ent, slot: Slot): Squad {
     lastCombat: -100,
     via: [],
     roof: false,
+    nearSince: -1,
+    heistStarted: false,
   };
   g.squads.set(lt.id, sq);
   lt.ai!.squad = lt.id;
@@ -174,7 +178,34 @@ export function giveOrder(g: Game, sq: Squad, type: OrderType, target?: number |
   sq.patrolPts = [];
   sq.via = [];
   sq.roof = false;
+  sq.nearSince = -1;
+  sq.heistStarted = false;
   switch (type) {
+    case 'escort':
+    case 'intercept': {
+      const c = convoyOf(g, Number(target));
+      const truck = g.ents.get(Number(target));
+      if (!c || !truck || !truck.alive) {
+        g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${sq.name} : « Plus de convoi à cet endroit, patron. »` });
+        return;
+      }
+      if (type === 'escort' && c.owner !== sq.slot) return;
+      if (type === 'intercept' && c.owner === sq.slot) return;
+      targetName = c.owner ? `le convoi ${c.owner === 'dadou' ? 'de Dadou' : 'd’Even'}` : 'le convoi blindé';
+      break;
+    }
+    case 'heist': {
+      const b = BUILDINGS[Number(target)];
+      if (!b || !b.heist) return;
+      if (g.bstate.get(b.id)!.owner === mine) {
+        g.emitTo(sq.slot, { t: 'order', lt: sq.id, ok: false, text: `${b.name} vous appartient : pas question de braquer votre propre coffre.` });
+        return;
+      }
+      targetName = b.name;
+      sq.goalBuilding = b.id;
+      sq.goal = g.building(b.id).doors[0].out;
+      break;
+    }
     case 'attack_district': {
       const d = String(target) as DistrictId;
       const def = DISTRICT_BY_ID[d];
@@ -411,6 +442,8 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
             setState(g, sq, 'patrol');
             break;
           case 'follow':
+          case 'escort':
+          case 'intercept':
             setState(g, sq, 'follow');
             break;
           case 'reinforce':
@@ -486,10 +519,19 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
         // relance les hommes inactifs vers l'intérieur
         assignPosts(g, sq, true);
       }
+      // l'équipe du lieutenant pirate la sécurité (tourelles) : vite avec des hackers, lentement sinon
+      const sec = securityOf(g, b.id);
+      if (sec && sec.level >= 2 && !isHacked(g, b.id) && g.time - sq.stateSince > (g.factions[sq.slot].upgrades.has('hackers') ? 8 : 22)) {
+        squadHack(g, sq.slot, b.id, `L’équipe de ${sq.name}`);
+      }
       break;
     }
     case 'hold': {
       const o = sq.order;
+      if (o && o.type === 'heist' && sq.goalBuilding >= 0) {
+        updateHeist(g, sq, lt);
+        break;
+      }
       sq.status = o
         ? o.type === 'hold'
           ? 'Tient la position'
@@ -511,6 +553,33 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
       break;
     }
     case 'follow': {
+      const o = sq.order;
+      if (o && (o.type === 'escort' || o.type === 'intercept')) {
+        // suivre (ou prendre en chasse) le camion du convoi
+        const truck = g.ents.get(Number(o.target));
+        if (!truck || !truck.alive || !convoyOf(g, truck.id)) {
+          // camion détruit : on va ramasser le butin sur l'épave
+          const wreck = truck && !truck.alive && o.type === 'intercept' ? { x: truck.x, z: truck.z, y: truck.y } : null;
+          finish(g, sq);
+          if (wreck) {
+            sq.goal = wreck;
+            setState(g, sq, 'hold');
+          }
+          break;
+        }
+        sq.status = o.type === 'escort' ? 'Escorte le convoi' : 'Prend le convoi en chasse';
+        sq.progress = 0.5;
+        lt.ai!.post = null;
+        lt.ai!.follow = truck.id;
+        lt.ai!.rank = 2;
+        lt.ai!.run = true;
+        for (const m of ms) {
+          m.ai!.run = true;
+          if (o.type === 'intercept') m.ai!.aggro.set(truck.id, g.time + 5);
+        }
+        if (o.type === 'intercept') lt.ai!.aggro.set(truck.id, g.time + 5);
+        break;
+      }
       const boss = g.ents.get(g.factions[sq.slot].bossId)!;
       sq.status = 'Escorte le patron';
       sq.progress = 1;
@@ -554,6 +623,51 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
     case 'down':
       break;
   }
+}
+
+/** Ordre de braquage : le lieutenant pirate le terminal si besoin, puis vide le coffre. */
+function updateHeist(g: Game, sq: Squad, lt: Ent): void {
+  const bid = sq.goalBuilding;
+  const info = g.building(bid);
+  const def = BUILDINGS[bid];
+  const sec = securityOf(g, bid);
+  const needHack = !!sec && sec.level >= 2 && !isHacked(g, bid) && !sq.heistStarted;
+  const spot = needHack ? info.terminal : info.vault;
+  if (!spot) return finish(g, sq);
+  lt.ai!.post = spot;
+  lt.ai!.run = true;
+  const near = Math.hypot(lt.x - spot.x, lt.z - spot.z) < 2.8 && Math.abs(lt.y - (spot.y ?? 0)) < 1.6;
+  if (!near) {
+    sq.nearSince = -1;
+    sq.status = needHack ? `Se dirige vers le terminal de sécurité ${deNomB(def.name)}` : `Se dirige vers le coffre ${deNomB(def.name)}`;
+    return;
+  }
+  if (sq.nearSince < 0) sq.nearSince = g.time;
+  if (needHack) {
+    const dur = g.factions[sq.slot].upgrades.has('hackers') ? 4 : 9;
+    sq.status = 'Pirate la sécurité';
+    sq.progress = clamp01((g.time - sq.nearSince) / dur) * 0.3;
+    if (g.time - sq.nearSince >= dur) {
+      squadHack(g, sq.slot, bid, sq.name);
+      sq.nearSince = -1;
+    }
+    return;
+  }
+  const h = heistOf(g, bid);
+  if (!sq.heistStarted) {
+    heistAction(g, sq.slot, bid, lt);
+    if (heistOf(g, bid)) sq.heistStarted = true;
+    else {
+      // coffre vide ou verrouillé : mission impossible pour l'instant
+      g.notify(sq.slot, `${sq.name} : « Le coffre ${deNomB(def.name)} est vide ou verrouillé, patron. »`, 'info');
+      return finish(g, sq);
+    }
+    return;
+  }
+  if (h) {
+    sq.status = `Braque le coffre ${deNomB(def.name)}`;
+    sq.progress = 0.3 + 0.7 * h.progress;
+  } else finish(g, sq);
 }
 
 function finish(g: Game, sq: Squad): void {

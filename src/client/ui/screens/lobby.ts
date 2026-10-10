@@ -12,8 +12,8 @@ import { currentPortraits } from './settings';
 const SLOTS: Slot[] = ['dadou', 'even'];
 
 const BOSS_INFO: Record<Slot, { desc: string; hq: string }> = {
-  dadou: { desc: 'Le flamboyant parrain de Soho. Manteau noir, melon et moustache en guidon.', hq: 'Le Lion Rouge, Soho' },
-  even: { desc: 'L’élégant parrain des Docks. Redingote bleu marine, haut-de-forme et monocle.', hq: 'L’Ancre Bleue, les Docks' },
+  dadou: { desc: 'Le flamboyant parrain de Brooklyn. Manteau noir et cramoisi, chapeau melon et moustache en guidon.', hq: 'Planque de Bushwick, Brooklyn' },
+  even: { desc: 'L’élégant parrain du Queens. Redingote bleu marine, haut-de-forme, monocle et barbe grise.', hq: 'Planque d’Astoria, Queens' },
 };
 
 const TIME_LIMITS = [0, 20, 30, 45, 60, 90];

@@ -1,7 +1,7 @@
 /**
- * Web Audio node helpers: envelopes, oscillators, noise bursts.
- * Every helper works on a BaseAudioContext so the same code renders in a
- * realtime AudioContext and in an OfflineAudioContext.
+ * Aides Web Audio : enveloppes, oscillateurs, salves de bruit, synthèse FM.
+ * Chaque aide travaille sur un BaseAudioContext : le même code produit le son
+ * dans un AudioContext temps réel et dans un OfflineAudioContext.
  */
 import type { AudioResources, NoiseKind } from './resources';
 
@@ -10,13 +10,13 @@ export interface SynthEnv {
   res: AudioResources;
 }
 
-/** -52 dB after 6 time constants: considered silent. */
+/** -52 dB après 6 constantes de temps : considéré comme silencieux. */
 export const TAU_END = 6;
 
 /**
- * Optional collector of every source node created by the helpers, so the
- * engine can stop a stolen voice's sources early. Set/cleared synchronously
- * around a synth call.
+ * Collecteur optionnel de toutes les sources créées par les aides, pour que
+ * le moteur puisse arrêter tôt les sources d'une voix volée. Posé puis retiré
+ * de façon synchrone autour d'un appel de synthèse.
  */
 let sourceCollector: AudioScheduledSourceNode[] | null = null;
 export function setSourceCollector(arr: AudioScheduledSourceNode[] | null): void {
@@ -48,7 +48,7 @@ export function clampFreq(ctx: BaseAudioContext, f: number): number {
   return Math.min(Math.max(f, 10), ctx.sampleRate * 0.45);
 }
 
-/** Connects nodes in series; the last element may be an AudioParam (modulation). */
+/** Relie des nœuds en série ; le dernier élément peut être un AudioParam (modulation). */
 export function chain(...nodes: [...AudioNode[], AudioNode | AudioParam]): void {
   for (let i = 0; i < nodes.length - 1; i++) {
     const a = nodes[i] as AudioNode;
@@ -70,7 +70,7 @@ export function osc(
   return trackSource(o);
 }
 
-/** Noise source started at t for `dur` seconds from a random offset of a shared buffer. */
+/** Source de bruit démarrée à t pour `dur` secondes, à un décalage aléatoire d'un tampon partagé. */
 export function noise(
   e: SynthEnv, kind: NoiseKind, t: number, dur: number, rate = 1,
 ): AudioBufferSourceNode {
@@ -88,7 +88,7 @@ export function noise(
   return trackSource(src);
 }
 
-/** Attack (linear) then exponential decay towards 0. Returns the "silent" end time. */
+/** Attaque (linéaire) puis décroissance exponentielle vers 0. Renvoie l'instant « silencieux ». */
 export function adEnv(param: AudioParam, t: number, peak: number, attack: number, tau: number): number {
   const a = Math.max(attack, 0.0005);
   param.setValueAtTime(0, t);
@@ -97,7 +97,7 @@ export function adEnv(param: AudioParam, t: number, peak: number, attack: number
   return t + a + tau * TAU_END;
 }
 
-/** Attack, hold at peak, exponential release. Returns end time. */
+/** Attaque, maintien au sommet, relâchement exponentiel. Renvoie l'instant de fin. */
 export function ahrEnv(
   param: AudioParam, t: number, peak: number, attack: number, hold: number, tau: number,
 ): number {
@@ -109,7 +109,7 @@ export function ahrEnv(
   return t + a + Math.max(hold, 0) + tau * TAU_END;
 }
 
-/** Exponential frequency sweep. */
+/** Glissando exponentiel de fréquence. */
 export function expSweep(param: AudioParam, t: number, from: number, to: number, dur: number): void {
   param.setValueAtTime(Math.max(from, 1e-3), t);
   param.exponentialRampToValueAtTime(Math.max(to, 1e-3), t + Math.max(dur, 0.001));
@@ -120,10 +120,10 @@ export interface NoiseBurstOpts {
   type: BiquadFilterType;
   freq: number;
   q?: number;
-  /** Optional filter sweep end frequency and duration. */
+  /** Fréquence finale optionnelle du filtre et durée du glissando. */
   freqEnd?: number;
   sweep?: number;
-  /** Optional second filter in series. */
+  /** Second filtre optionnel en série. */
   type2?: BiquadFilterType;
   freq2?: number;
   q2?: number;
@@ -133,7 +133,7 @@ export interface NoiseBurstOpts {
   rate?: number;
 }
 
-/** Filtered noise burst with an AD envelope. Returns end time. */
+/** Salve de bruit filtré avec enveloppe AD. Renvoie l'instant de fin. */
 export function noiseBurst(e: SynthEnv, dest: AudioNode, t: number, o: NoiseBurstOpts): number {
   const ctx = e.ctx;
   const attack = o.attack ?? 0.001;
@@ -164,7 +164,7 @@ export interface ToneOpts {
   detune?: number;
 }
 
-/** Oscillator with optional pitch sweep and AD/AHR envelope. Returns end time. */
+/** Oscillateur avec glissando optionnel et enveloppe AD/AHR. Renvoie l'instant de fin. */
 export function tone(e: SynthEnv, dest: AudioNode, t: number, o: ToneOpts): number {
   const ctx = e.ctx;
   const attack = o.attack ?? 0.002;
@@ -179,9 +179,54 @@ export function tone(e: SynthEnv, dest: AudioNode, t: number, o: ToneOpts): numb
   return end;
 }
 
+export interface FmOpts {
+  freq: number;
+  /** Rapport modulateur / porteuse (1 = piano électrique, 3,5 = cloche de verre). */
+  ratio?: number;
+  /** Indice de modulation initial (brillance de l'attaque). */
+  index?: number;
+  /** Constante de décroissance de l'indice (s), par défaut 40 % de `tau`. */
+  indexTau?: number;
+  peak: number;
+  attack?: number;
+  tau: number;
+  hold?: number;
+  freqEnd?: number;
+  sweep?: number;
+}
+
 /**
- * Bank of decaying sine partials (bells, coins, metal). `partials` entries are
- * [frequency ratio, amplitude, decay tau seconds]. Returns end time.
+ * Note FM à deux opérateurs (style DX) : porteuse sinusoïdale modulée en
+ * fréquence par un second sinus dont l'indice décroît. Quatre nœuds.
+ */
+export function fmTone(e: SynthEnv, dest: AudioNode, t: number, o: FmOpts): number {
+  const ctx = e.ctx;
+  const attack = o.attack ?? 0.002;
+  const hold = o.hold ?? 0;
+  const end = t + attack + hold + o.tau * TAU_END;
+  const ratio = o.ratio ?? 3.5;
+  const car = osc(ctx, 'sine', o.freq, t, end + 0.02);
+  const mod = osc(ctx, 'sine', o.freq * ratio, t, end + 0.02);
+  if (o.freqEnd !== undefined) {
+    expSweep(car.frequency, t, clampFreq(ctx, o.freq), clampFreq(ctx, o.freqEnd), o.sweep ?? o.tau * 2);
+    expSweep(mod.frequency, t, clampFreq(ctx, o.freq * ratio), clampFreq(ctx, o.freqEnd * ratio), o.sweep ?? o.tau * 2);
+  }
+  const depth = gainNode(ctx, 0);
+  const idx = o.freq * (o.index ?? 2);
+  depth.gain.setValueAtTime(idx, t);
+  depth.gain.setTargetAtTime(idx * 0.08, t + attack, Math.max(0.002, o.indexTau ?? o.tau * 0.4));
+  chain(mod, depth, car.frequency);
+  const g = gainNode(ctx, 0);
+  if (hold > 0) ahrEnv(g.gain, t, o.peak, attack, hold, o.tau);
+  else adEnv(g.gain, t, o.peak, attack, o.tau);
+  chain(car, g, dest);
+  return end;
+}
+
+/**
+ * Banque de partiels sinusoïdaux amortis (cloches, pièces, métal). Les entrées
+ * de `partials` sont [rapport de fréquence, amplitude, tau en secondes].
+ * Renvoie l'instant de fin.
  */
 export function partials(
   e: SynthEnv, dest: AudioNode, t: number, f0: number, peak: number,
@@ -198,12 +243,13 @@ export function partials(
 }
 
 /**
- * Several short grains from ONE noise source / filter / gain (cheap clatter,
- * debris, crackle). Each grain is an envelope spike on the shared gain.
+ * Plusieurs grains brefs sur UNE seule source de bruit / filtre / gain
+ * (cliquetis, débris, crépitements bon marché). Chaque grain est un pic
+ * d'enveloppe sur le gain partagé.
  */
 export function grains(
   e: SynthEnv, dest: AudioNode, t: number,
-  hits: ReadonlyArray<readonly [number, number]>, // [offset seconds, amplitude]
+  hits: ReadonlyArray<readonly [number, number]>, // [décalage en secondes, amplitude]
   o: { type: BiquadFilterType; freq: number; q?: number; tau: number; kind?: NoiseKind },
 ): number {
   if (hits.length === 0) return t;
@@ -226,11 +272,11 @@ export function grains(
 }
 
 /**
- * A bell (or any modal object) struck several times: one oscillator per
- * partial, re-excited analytically at every strike so energy accumulates.
+ * Objet modal (cloche, carillon) frappé plusieurs fois : un oscillateur par
+ * partiel, réexcité analytiquement à chaque frappe pour que l'énergie s'accumule.
  */
 export function ringBell(
-  e: SynthEnv, dest: AudioNode, strikes: ReadonlyArray<readonly [number, number]>, // [time, amp]
+  e: SynthEnv, dest: AudioNode, strikes: ReadonlyArray<readonly [number, number]>, // [instant, amplitude]
   f0: number, list: ReadonlyArray<readonly [number, number, number]>,
 ): number {
   if (strikes.length === 0) return 0;
@@ -261,8 +307,20 @@ export function ringBell(
   return end;
 }
 
-/** Random float in [lo, hi). */
-export const rnd =(lo: number, hi: number): number => lo + (hi - lo) * Math.random();
-/** Symmetric jitter factor around 1, e.g. jit(0.05) in [0.95, 1.05). */
+/**
+ * Panoramique stéréo qui balaie de `from` à `to` (passages de véhicules en 2D).
+ * Renvoie le nœud à utiliser comme destination.
+ */
+export function panSweep(ctx: BaseAudioContext, dest: AudioNode, t: number, from: number, to: number, dur: number): AudioNode {
+  const p = ctx.createStereoPanner();
+  p.pan.setValueAtTime(Math.max(-1, Math.min(1, from)), t);
+  p.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, to)), t + Math.max(0.01, dur));
+  p.connect(dest);
+  return p;
+}
+
+/** Flottant aléatoire dans [lo, hi). */
+export const rnd = (lo: number, hi: number): number => lo + (hi - lo) * Math.random();
+/** Facteur d'écart symétrique autour de 1, ex. jit(0.05) dans [0,95, 1,05). */
 export const jit = (amount: number): number => 1 + (Math.random() * 2 - 1) * amount;
 export const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];

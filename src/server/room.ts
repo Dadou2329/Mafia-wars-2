@@ -169,7 +169,7 @@ export class Room {
       const s = this.members.get(this.picks[slot]!);
       if (s) this.sendInit(s, slot);
     }
-    this.game.news('GUERRE DES GANGS : DADOU ET EVEN SE DISPUTENT LONDRES !', 'Deux parrains rivaux, le flamboyant Dadou et l’élégant Even, se sont juré de régner seuls sur la capitale. Les honnêtes gens sont priés de rester chez eux après la tombée de la nuit.');
+    this.game.news('GUERRE DES GANGS : DADOU ET EVEN SE DISPUTENT NEW YORK !', 'Deux parrains rivaux, le flamboyant Dadou et l’élégant Even, se sont juré de régner seuls sur la ville. Les honnêtes gens sont priés de rester chez eux après la tombée de la nuit.');
     this.game.notify('dadou', 'Arthur Collins attend vos ordres, Dadou.', 'info');
     this.game.notify('even', 'William Hayes attend vos ordres, Even.', 'info');
     if (this.timer) clearInterval(this.timer);

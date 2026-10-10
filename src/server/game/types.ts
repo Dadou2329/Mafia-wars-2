@@ -4,8 +4,24 @@ import type { Anim, CharKind, Weapon } from '../../shared/characters';
 import type { OrderType } from '../../shared/constants';
 import type { Slot } from '../../shared/protocol';
 
-export type Role = 'boss' | 'gangster' | 'lieutenant' | 'thug' | 'police' | 'guard' | 'barman';
-export type Mode = 'pool' | 'escort' | 'squad' | 'guard' | 'patrol' | 'flee' | 'hold' | 'idle';
+export type Role = 'boss' | 'gangster' | 'lieutenant' | 'thug' | 'police' | 'guard' | 'barman' | 'vehicle' | 'turret';
+export type Mode = 'pool' | 'escort' | 'squad' | 'guard' | 'patrol' | 'flee' | 'hold' | 'idle' | 'ride';
+
+/** État d'un véhicule. */
+export interface VehState {
+  /** Identifiant de VehicleDef. */
+  def: number;
+  /** Conducteur (id d'entité) ou −1. */
+  driver: number;
+  /** Passagers (cachés à l'intérieur). */
+  passengers: number[];
+  /** Parrain propriétaire (null : véhicule sans maître, volé ou neutre). */
+  owner: Slot | null;
+  /** Dernier choc infligé à chaque victime écrasée (anti-répétition). */
+  rammed: Map<number, number>;
+  /** Pilote automatique (drones, convois) : étapes et phase. */
+  auto?: { phase: 'go' | 'hover' | 'back'; pts: Vec2[]; i: number; alt: number; until: number; district?: string; home: Vec2 };
+}
 
 /** Point au sol ; y = altitude du sol visé (m), 0 (la rue) par défaut. */
 export interface Vec2 {
@@ -89,6 +105,8 @@ export interface Ent {
   ai: AiState | null;
   /** Invulnérable (barman). */
   invulnerable?: boolean;
+  /** Véhicule (rôle 'vehicle'). */
+  veh?: VehState;
   /** Supprimer de la simulation à cet instant (cadavres, fuyards). */
   removeAt: number;
   /** Entités pour lesquelles les infos ont été envoyées. */
@@ -132,6 +150,9 @@ export interface Squad {
   via: Vec2[];
   /** Tenir le toit du bâtiment visé plutôt que l'intérieur. */
   roof: boolean;
+  /** Braquage : instant d'arrivée au terminal ou au coffre, braquage lancé. */
+  nearSince: number;
+  heistStarted: boolean;
 }
 
 export interface FactionState {
@@ -166,6 +187,16 @@ export interface FactionState {
   /** Palier du logement (1 planque … 5 tour) et bâtiment du QG actuel. */
   tier: number;
   hqId: number;
+  /** Véhicules possédés (VehicleDef), véhicule en service par type, véhicule conduit et délai de livraison. */
+  garage: Set<number>;
+  vehicles: Map<number, number>;
+  vehicle: number;
+  callAt: number;
+  /** Drone de reconnaissance : prochain lancement possible, quartier survolé et fin de la reconnaissance. */
+  droneAt: number;
+  droneReveal: { district: string; until: number } | null;
+  /** Piratage d'un terminal en cours. */
+  hack: { b: number; start: number; done: number } | null;
 }
 
 export interface BState {

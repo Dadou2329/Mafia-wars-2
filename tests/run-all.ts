@@ -199,6 +199,137 @@ section('Ascension : de la planque à la tour');
   check(`le loft exige ${needD} quartier contrôlé`, g.territories('dadou') >= needD ? D.tier === 3 : D.tier === 2, lastNotify('dadou')?.text);
 }
 
+// ---------------------------------------------------------------------------- véhicules
+section('Véhicules');
+{
+  const moto = [...g.ents.values()].find((e) => e.role === 'vehicle' && e.veh?.owner === 'dadou' && e.veh.def === 0);
+  check('la moto de Dadou l’attend devant sa planque', !!moto);
+  const boss = g.ents.get(D.bossId)!;
+  if (moto) {
+    // le parrain rejoint sa moto et monte
+    boss.x = moto.x + 1.5;
+    boss.z = moto.z;
+    boss.y = moto.y;
+    g.action('dadou', { a: 'vehicle', op: 'enter', id: moto.id });
+    drain();
+    check('monter sur sa moto', D.vehicle === moto.id && moto.veh!.driver === boss.id, lastNotify('dadou')?.text);
+    check('le serveur publie qui conduit', g.publicState().rides.some(([v, d]) => v === moto.id && d === boss.id));
+    // conduite : le client envoie la position du véhicule
+    let ok = true;
+    for (let i = 0; i < 10; i++) {
+      g.step();
+      g.input('dadou', [moto.x + 0.9, moto.y, moto.z, moto.yaw, 0, 18, 0, 6, 64, 1, D.tp]);
+      if (Math.abs(boss.x - moto.x) > 0.01) ok = false;
+    }
+    check('la moto avance et le parrain la suit', ok && Math.hypot(moto.vx, moto.vz) > 10);
+    moto.vx = moto.vz = 0;
+    g.action('dadou', { a: 'vehicle', op: 'exit' });
+    drain();
+    check('descendre de la moto', D.vehicle === -1 && moto.veh!.driver === -1);
+  }
+  // achat et livraison d'une berline (palier 2 atteint plus haut)
+  D.money = 5000;
+  const before = [...g.ents.values()].filter((e) => e.role === 'vehicle').length;
+  g.action('dadou', { a: 'vehicle', op: 'buy', v: 1 });
+  drain();
+  const after = [...g.ents.values()].filter((e) => e.role === 'vehicle').length;
+  check('acheter une berline : elle est livrée dans une rue proche', D.garage.has(1) && after === before + 1, lastNotify('dadou')?.text);
+  // destruction
+  const car = g.ents.get(D.vehicles.get(1)!)!;
+  g.damage(car, 99999, g.ents.get(E.bossId)!);
+  drain();
+  check('un véhicule détruit explose (épave)', !car.alive && events.some((e) => e.t === 'boom'));
+  check('le garage impose un délai après une destruction', g.privateState('dadou').callIn > 20);
+}
+
+// ---------------------------------------------------------------------------- sécurité, braquage, drone
+section('Sécurité, piratage, braquage, drone');
+{
+  const bank = BUILDING_BY_KEY['banque_federale'];
+  const info = w.byId.get(bank.id)!;
+  const turrets = [...g.ents.values()].filter((e) => e.role === 'turret' && e.ai?.home === bank.id && e.alive);
+  check('des tourelles gardent la Banque Fédérale', turrets.length >= 2, `${turrets.length}`);
+  check('un terminal de sécurité et un coffre', !!info.terminal && !!info.vault);
+  const boss = g.ents.get(D.bossId)!;
+  boss.invulnerable = true;
+  // on fait le ménage dans la banque pour un test déterministe
+  for (const id of g.bstate.get(bank.id)!.thugs) {
+    const t = g.ents.get(id);
+    if (t && t.alive) g.damage(t, 9999, null);
+  }
+  if (info.terminal && info.vault) {
+    boss.x = info.vault.x;
+    boss.z = info.vault.z;
+    boss.y = info.vault.y ?? info.floorY;
+    g.action('dadou', { a: 'heist', b: bank.id });
+    drain();
+    check('coffre verrouillé tant que la sécurité n’est pas piratée', !g.publicState().heists.some((h) => h.b === bank.id), lastNotify('dadou')?.text);
+    boss.x = info.terminal.x;
+    boss.z = info.terminal.z;
+    boss.y = info.terminal.y ?? info.floorY;
+    g.action('dadou', { a: 'hack', b: bank.id });
+    for (let i = 0; i < 20 * 8; i++) g.step();
+    drain();
+    check('piratage du terminal : sécurité coupée', g.publicState().hacked.includes(bank.id), lastNotify('dadou')?.text);
+    boss.x = info.vault.x;
+    boss.z = info.vault.z;
+    boss.y = info.vault.y ?? info.floorY;
+    const m0 = D.money;
+    g.action('dadou', { a: 'heist', b: bank.id });
+    drain();
+    check('le braquage commence', g.publicState().heists.some((h) => h.b === bank.id && h.slot === 'dadou'));
+    for (let i = 0; i < 20 * (bank.heist!.time + 2); i++) {
+      boss.x = info.vault.x;
+      boss.z = info.vault.z;
+      boss.y = info.vault.y ?? info.floorY;
+      boss.hp = boss.maxHp;
+      g.step();
+    }
+    drain();
+    check(`braquage réussi : +${formatMoney(bank.heist!.reward)}`, D.money - m0 >= bank.heist!.reward - 1, `${Math.round(D.money - m0)} $`);
+  }
+  boss.invulnerable = false;
+  // drone de reconnaissance
+  D.upgrades.add('drones');
+  g.action('dadou', { a: 'drone', d: 'queens' });
+  for (let i = 0; i < 20 * 25; i++) g.step();
+  drain();
+  check('un drone survole le Queens et révèle les ennemis', g.privateState('dadou').droneOver === 'queens', JSON.stringify(g.privateState('dadou').droneOver));
+}
+
+// ---------------------------------------------------------------------------- convois
+section('Convois blindés');
+{
+  // Dadou possède la Brasserie de Williamsburg (bâtiment logistique) : il envoie un convoi
+  g.action('dadou', { a: 'convoy' });
+  drain();
+  const conv = g.publicState().convoys.find((c) => c.slot === 'dadou');
+  check('envoyer un convoi depuis un bâtiment logistique', !!conv, lastNotify('dadou')?.text);
+  if (conv) {
+    const truck = g.ents.get(conv.id)!;
+    const x0 = truck.x;
+    const z0 = truck.z;
+    for (let i = 0; i < 20 * 5; i++) g.step();
+    check('le camion roule tout seul dans les rues', Math.hypot(truck.x - x0, truck.z - z0) > 20, `${Math.hypot(truck.x - x0, truck.z - z0).toFixed(1)} m`);
+    // Even l'intercepte : camion détruit, butin sur la chaussée
+    g.damage(truck, 99999, g.ents.get(E.bossId)!);
+    g.step();
+    drain();
+    const loot = g.publicState().loot[0];
+    check('un convoi détruit laisse son butin', !!loot && loot.reward > 0);
+    if (loot) {
+      const eb = g.ents.get(E.bossId)!;
+      const m0 = E.money;
+      eb.x = loot.x;
+      eb.z = loot.z;
+      eb.y = 0;
+      g.step();
+      drain();
+      check('Even rafle le butin', E.money - m0 >= loot.reward - 1, `${Math.round(E.money - m0)} $`);
+    }
+  }
+}
+
 // lieutenant blessé : il reste dans la simulation et revient au QG après sa convalescence
 {
   const ltId = E.lieutenants[0];

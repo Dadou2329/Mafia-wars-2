@@ -66,6 +66,8 @@ export const PROP_DEFS = {
   LANTERN_RED: { size: [0.5, 0.8, 0.5], collide: 'none', light: { y: 0.4, intensity: 0.65, radius: 5, color: 0xff4030 } },
   LANTERN_STRING: { size: [4.0, 0.6, 0.2], collide: 'none', light: { y: 0.2, intensity: 0.5, radius: 5, color: 0xff6040 } },
   SECURITY_CAMERA: { size: [0.3, 0.3, 0.5], collide: 'none', tinted: true },
+  /** Terminal de sécurité (piratable) à l'entrée des bâtiments protégés. */
+  SECURITY_PANEL: { size: [0.6, 1.35, 0.45], collide: 'solid', light: { y: 1.1, z: 0.25, intensity: 0.35, radius: 2.5, color: 0x40c8ff } },
   FLAG_BANNER: { size: [1.0, 2.6, 0.15], collide: 'none', tinted: true },
   DOOR_LEAF: { size: [1.5, 2.5, 0.12], collide: 'none' },
   ELEVATOR_DOOR: { size: [1.6, 2.4, 0.15], collide: 'none', light: { y: 2.6, z: 0.2, intensity: 0.4, radius: 3, color: 0xdfe8ff } },

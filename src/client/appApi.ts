@@ -14,7 +14,7 @@ export interface AppApi {
   readonly audio: AudioEngine;
   /** Portraits 3D des deux parrains (rendus une fois au démarrage). */
   readonly portraits: Promise<Portraits>;
-  /** Résolue quand Londres est générée (le jeu peut démarrer). */
+  /** Résolue quand New York est générée (le jeu peut démarrer). */
   readonly worldReady: Promise<void>;
   showMenu(): void;
   showLobby(): void;

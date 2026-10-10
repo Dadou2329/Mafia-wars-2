@@ -111,29 +111,44 @@ export const AMMO_PRICE = 50;
 /** Taxi volant vers le QG (téléphone). */
 export const TAXI_PRICE = 60;
 
-/** Véhicules achetables (au garage, à partir du palier indiqué). */
+/** Véhicules : achetables au garage (à partir du palier indiqué), ou réservés (police, convois, drones). */
+export type VehicleClass = 'moto' | 'car' | 'van' | 'truck' | 'vtol' | 'drone';
+
 export interface VehicleDef {
   id: number;
   key: string;
   name: string;
+  /** Prix au garage (−1 : non achetable). */
   price: number;
   tier: number;
+  /** Places (conducteur compris). */
   seats: number;
   hp: number;
   /** Vitesse maximale (m/s), accélération (m/s²). */
   speed: number;
   accel: number;
-  flying?: boolean;
+  cls: VehicleClass;
+  /** Encombrement (m) : largeur, hauteur, longueur. */
+  size: [number, number, number];
   desc: string;
 }
 
 export const VEHICLES: VehicleDef[] = [
-  { id: 0, key: 'moto', name: 'Moto de récup', price: 0, tier: 1, seats: 1, hp: 120, speed: 22, accel: 11, desc: 'Une vieille moto électrique rafistolée. Rapide et nerveuse.' },
-  { id: 1, key: 'berline', name: 'Berline Nimbus', price: 900, tier: 2, seats: 4, hp: 260, speed: 24, accel: 8, desc: 'Une berline électrique sobre, quatre places.' },
-  { id: 2, key: 'sport', name: 'Bolide Stingray', price: 2600, tier: 3, seats: 2, hp: 220, speed: 34, accel: 14, desc: 'Un coupé de sport à propulsion magnétique.' },
-  { id: 3, key: 'fourgon', name: 'Fourgon blindé Rhino', price: 3400, tier: 3, seats: 8, hp: 600, speed: 18, accel: 5, desc: 'Blindé, lent, il transporte toute une escouade.' },
-  { id: 4, key: 'adav', name: 'Aéronef Corvus (ADAV)', price: 12000, tier: 4, seats: 4, hp: 420, speed: 26, accel: 7, flying: true, desc: 'Un aéronef à décollage vertical : il se pose sur les toits.' },
+  { id: 0, key: 'moto', name: 'Moto de récup', price: 0, tier: 1, seats: 1, hp: 120, speed: 22, accel: 11, cls: 'moto', size: [0.8, 1.2, 2.1], desc: 'Une vieille moto électrique rafistolée. Rapide et nerveuse.' },
+  { id: 1, key: 'berline', name: 'Berline Nimbus', price: 900, tier: 2, seats: 4, hp: 260, speed: 24, accel: 8, cls: 'car', size: [2.0, 1.45, 4.4], desc: 'Une berline à coussin magnétique, sobre, quatre places : trois hommes vous accompagnent.' },
+  { id: 2, key: 'sport', name: 'Bolide Stingray', price: 2600, tier: 3, seats: 2, hp: 220, speed: 31, accel: 14, cls: 'car', size: [2.0, 1.2, 4.6], desc: 'Un coupé de sport à propulsion magnétique. Le plus rapide de New York.' },
+  { id: 3, key: 'fourgon', name: 'Fourgon blindé Rhino', price: 3400, tier: 3, seats: 8, hp: 600, speed: 18, accel: 5, cls: 'van', size: [2.3, 2.4, 5.6], desc: 'Blindé, lent : il transporte toute une escouade (sept hommes).' },
+  { id: 4, key: 'adav', name: 'Aéronef Corvus (ADAV)', price: 12000, tier: 4, seats: 4, hp: 420, speed: 26, accel: 7, cls: 'vtol', size: [4.4, 2.0, 5.4], desc: 'Un aéronef à décollage vertical : il se pose sur les toits. Rare et prestigieux.' },
+  { id: 5, key: 'police', name: 'Croiseur du NYPD', price: -1, tier: 9, seats: 4, hp: 320, speed: 25, accel: 9, cls: 'car', size: [2.1, 1.5, 4.8], desc: 'Croiseur de patrouille du NYPD.' },
+  { id: 6, key: 'convoi', name: 'Camion blindé', price: -1, tier: 9, seats: 2, hp: 900, speed: 14, accel: 4, cls: 'truck', size: [2.5, 3.0, 7.0], desc: 'Un camion blindé chargé de valeurs.' },
+  { id: 7, key: 'drone', name: 'Drone de reconnaissance', price: -1, tier: 9, seats: 0, hp: 60, speed: 20, accel: 10, cls: 'drone', size: [1.2, 0.5, 1.2], desc: 'Un drone qui survole un quartier et repère les ennemis.' },
 ];
+
+export const VEHICLE_BY_KEY: Record<string, VehicleDef> = Object.fromEntries(VEHICLES.map((v) => [v.key, v]));
+
+/** Délai entre deux livraisons de véhicule (s), et après une destruction. */
+export const VEHICLE_CALL_COOLDOWN = 20;
+export const VEHICLE_WRECK_COOLDOWN = 60;
 
 /** Noms affichés des mafias. */
 export const MAFIA_NAME = { dadou: 'La Mafia de Dadou', even: 'La Mafia d’Even' } as const;
@@ -152,7 +167,10 @@ export type OrderType =
   | 'retreat'
   | 'hold'
   | 'roof'
-  | 'subway';
+  | 'subway'
+  | 'heist'
+  | 'escort'
+  | 'intercept';
 
 export const ORDER_LABEL: Record<OrderType, string> = {
   attack_district: 'Attaquer le quartier',
@@ -166,6 +184,9 @@ export const ORDER_LABEL: Record<OrderType, string> = {
   hold: 'Tenir la position',
   roof: 'Tenir le toit',
   subway: 'Attaquer par le métro',
+  heist: 'Braquer le coffre',
+  escort: 'Escorter le convoi',
+  intercept: 'Intercepter le convoi',
 };
 
 /** Libellé d'état des missions (affiché dans les rapports). */
@@ -181,7 +202,16 @@ export const ORDER_STATUS: Record<OrderType, string> = {
   hold: 'POSITION TENUE',
   roof: 'TOIT TENU',
   subway: 'ATTAQUE SOUTERRAINE',
+  heist: 'BRAQUAGE',
+  escort: 'ESCORTE DU CONVOI',
+  intercept: 'INTERCEPTION',
 };
+
+/** Sécurité des bâtiments : durée d'un piratage (s), de la coupure, temps de rechargement des braquages. */
+export const HACK_TIME = 7;
+export const HACK_TIME_PRO = 3.5;
+export const HACK_DURATION = 90;
+export const HEIST_COOLDOWN = 480;
 
 /** Le journal holographique de la ville. */
 export const NEWSPAPER = 'LE FLASH DE NEW YORK';

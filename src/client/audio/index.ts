@@ -1,4 +1,5 @@
-export { AudioEngine, audio, SFX_NAMES } from './AudioEngine';
+export { AudioEngine, audio, LOOP_NAMES, SFX_NAMES } from './AudioEngine';
 export type {
-  AmbienceParams, AudioEngineOptions, AudioStats, MusicTrackName, PlayOptions, SfxName, Vec3Like, VolumeSettings,
+  AmbienceParams, AudioEngineOptions, AudioStats, LoopHandle, LoopName, LoopOptions, MusicTrackName, PlayOptions, SfxName,
+  Vec3Like, VolumeSettings,
 } from './AudioEngine';

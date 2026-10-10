@@ -21,7 +21,7 @@ async function client(name) {
   if (process.env.LOWGFX)
     await ctx.addInitScript(() => {
       try {
-        const k = 'mafiawars.settings.v1';
+        const k = 'mafiawars2.settings.v1';
         const cur = JSON.parse(localStorage.getItem(k) || '{}');
         localStorage.setItem(k, JSON.stringify({ ...cur, quality: 'basse', renderScale: 0.5, bloom: false }));
       } catch {
@@ -192,11 +192,11 @@ step('Carte stratégique et ordre d’attaque');
 await A.evaluate(() => window.__app.game.strategic.show('orders'));
 await sleep(800);
 await shot(A, '08-strategic-A.png');
-// clic sur la cible de la première mission (Le Chat Noir)
+// clic sur une cible proche (Brasserie de Williamsburg)
 const target = await A.evaluate(() => {
   const g = window.__app.game;
   const sm = g.strategic;
-  const b = g.world.buildings.find((x) => x.def.key === (g.you === 'dadou' ? 'chat_noir' : 'entrepot_morgan'));
+  const b = g.world.buildings.find((x) => x.def.key === (g.you === 'dadou' ? 'brasserie_williamsburg' : 'usine_drones'));
   const o = sm.origin();
   const r = sm.canvas.getBoundingClientRect();
   return { x: r.left + o.ox + b.center.x * o.k, y: r.top + o.oy + b.center.z * o.k, name: b.def.name };

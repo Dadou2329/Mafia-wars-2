@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { Anim, CharKind, FLAG, RECRUITER_NAME, WEAPONS, Weapon } from '../../shared/characters';
-import { BOSS_NAME, DE_BOSS, MAFIA_NAME, tierDef } from '../../shared/constants';
+import { BOSS_NAME, DE_BOSS, MAFIA_NAME, VEHICLES, tierDef } from '../../shared/constants';
 import { BUILDINGS, DISTRICTS, Faction, RIVER_X0, RIVER_X1, districtAt, isWater } from '../../shared/city/plan';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import {
@@ -50,10 +50,13 @@ import { Tips } from './tips';
 import { DoorSystem } from './doors';
 import { SignSystem } from './signs';
 import { Civilians } from './civilians';
-import { Carriages } from './carriages';
+import { Traffic } from './traffic';
 import { Viewmodel } from './viewmodel';
 import { WeaponSystem, surfaceKind } from './weapons';
-import { leNom } from '../../shared/french';
+import { VehicleRenderer } from './vehicleRenderer';
+import { Phone } from './phone';
+import { Drive } from './driving';
+import { deNom as deNomFr, leNom } from '../../shared/french';
 
 export interface GameInit {
   you: Slot;
@@ -89,12 +92,14 @@ export class GameClient {
   readonly map: CityMap;
   readonly strategic: StrategicMap;
   readonly wheel: CommandWheel;
+  readonly phone: Phone;
   tips: Tips;
   readonly doors: DoorSystem;
   readonly signs: SignSystem;
   readonly civilians: Civilians;
-  readonly carriages: Carriages;
+  readonly traffic: Traffic;
   readonly viewmodel: Viewmodel;
+  readonly vehicles = new VehicleRenderer();
   readonly post: PostFX;
   readonly marker = new EventMarker();
   /** Événement aléatoire en cours (annoncé par le serveur). */
@@ -184,8 +189,9 @@ export class GameClient {
     this.signs = new SignSystem(world.buildings, this.you);
     this.scene.add(this.signs.group);
     this.civilians = new Civilians(world, this.store);
-    this.carriages = new Carriages(world);
-    this.scene.add(this.carriages.group);
+    this.traffic = new Traffic(world);
+    this.scene.add(this.traffic.group);
+    this.scene.add(this.vehicles.group);
     this.viewmodel = new Viewmodel();
     this.viewmodel.setLook(this.you, settings.custom[this.you]);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
@@ -220,6 +226,8 @@ export class GameClient {
     this.overlay.appendChild(this.strategic.el);
     this.wheel = new CommandWheel(this);
     this.overlay.appendChild(this.wheel.el);
+    this.phone = new Phone(this);
+    this.overlay.appendChild(this.phone.el);
     this.tips = new Tips(this);
     this.myView = {
       id: this.selfId,
@@ -273,7 +281,7 @@ export class GameClient {
     input.lockEnabled = true;
     input.onEscape = () => this.onEscape();
     input.onUnlock = () => {
-      if (!this.modal && !this.strategic.open && !this.chatting && !this.wheel.open && !this.over) this.openPause();
+      if (!this.modal && !this.strategic.open && !this.phone.open && !this.chatting && !this.wheel.open && !this.over) this.openPause();
     };
     input.onKey = (code, e) => this.onKey(code, e);
     this.hud.chatInput.addEventListener('keydown', (e) => {
@@ -470,9 +478,46 @@ export class GameClient {
         audio.play('paper');
         break;
       case 'tp':
-        this.player.teleport(e.x, e.y, e.z, e.yaw);
+        if (this.player.drive) {
+          this.player.drive.pos.set(e.x, e.y, e.z);
+          this.player.drive.yaw = e.yaw;
+          this.player.drive.speed = 0;
+          this.player.pos.set(e.x, e.y, e.z);
+        } else this.player.teleport(e.x, e.y, e.z, e.yaw);
         this.placed = true;
         break;
+      case 'ride': {
+        if (e.driver === this.selfId) {
+          const ve = this.store.ents.get(e.id);
+          const def = ve ? ve.info.gang : 0;
+          const x = ve ? ve.x : this.player.pos.x;
+          const y = ve ? ve.y : this.player.pos.y;
+          const z = ve ? ve.z : this.player.pos.z;
+          const yaw = ve ? ve.view.yaw : this.player.yaw;
+          this.player.drive = new Drive(e.id, def, this.world.world, x, y, z, yaw);
+          this.player.yaw = yaw;
+          this.player.pitch = -0.15;
+          audio.play('ui_open', { volume: 0.5 });
+          const vd = VEHICLES[def];
+          this.hud.setHint(
+            vd.cls === 'vtol'
+              ? `${actionKey(settings.bindings, 'forward')}/${actionKey(settings.bindings, 'back')} : poussée — ${actionKey(settings.bindings, 'left')}/${actionKey(settings.bindings, 'right')} : virer — ${actionKey(settings.bindings, 'jump')} : monter — ${actionKey(settings.bindings, 'crouch')} : descendre — ${actionKey(settings.bindings, 'interact')} : descendre de l’aéronef`
+              : `${actionKey(settings.bindings, 'forward')} : accélérer — ${actionKey(settings.bindings, 'back')} : freiner — ${actionKey(settings.bindings, 'jump')} : frein à main — clic droit : tirer par la vitre — ${actionKey(settings.bindings, 'interact')} : descendre`,
+          );
+          setTimeout(() => this.hud.setHint(''), 7000);
+        } else if (this.player.drive && this.player.drive.id === e.id && e.driver !== this.selfId) {
+          this.player.drive = null;
+        }
+        break;
+      }
+      case 'boom': {
+        const p = new THREE.Vector3(e.x, e.y, e.z);
+        this.effects.burst(p, 0xff8a30, 70);
+        this.effects.burst(p, 0x333333, 40);
+        const d = p.distanceTo(this.player.pos);
+        if (d < 30) this.player.shake = Math.min(4, this.player.shake + (30 - d) / 8);
+        break;
+      }
       case 'respawned':
         this.player.dead = false;
         this.myView.deathAt = -10;
@@ -570,8 +615,13 @@ export class GameClient {
       return true;
     }
     if (b.map.includes(code)) {
+      this.phone.close();
       if (this.strategic.open) this.strategic.close();
-      else this.strategic.show(this.priv.upgrades.includes('crypto') ? 'orders' : 'view');
+      else this.strategic.show(this.priv.upgrades.includes('crypto') || this.priv.tier >= 3 ? 'orders' : 'view');
+      return true;
+    }
+    if (b.phone.includes(code) && !this.strategic.open && !this.wheel.open) {
+      this.phone.toggle();
       return true;
     }
     if (b.scores.includes(code) && !this.strategic.open) {
@@ -590,6 +640,7 @@ export class GameClient {
 
   private onEscape(): void {
     if (this.chatting) return this.closeChat();
+    if (this.phone.open) return this.phone.close();
     if (this.wheel.open) return this.wheel.cancel();
     if (this.strategic.open) return this.strategic.close();
     if (this.modal) {
@@ -726,13 +777,15 @@ export class GameClient {
     const input = this.app.input;
     const me = this.store.ents.get(this.selfId);
     // ------------------------------------------------- contrôle du joueur
-    const uiBlocked = this.strategic.open || !!this.modal || this.chatting || !!this.over;
+    const uiBlocked = this.strategic.open || this.phone.open || !!this.modal || this.chatting || !!this.over;
     this.player.frozen = uiBlocked || !this.placed || !!this.serverPause;
     this.wheel.update(dt, input);
     if (this.wheel.open) this.player.frozen = true;
     this.player.weapon = this.weapons.current;
     this.player.update(dt, input);
-    if (!uiBlocked && !this.wheel.open && !this.player.dead && this.placed) this.handleCombat(now, input);
+    // au volant : on ne tire qu'en visant (par la vitre), au pistolet ou au pistolet-mitrailleur
+    const canFight = !this.player.drive || (this.player.aiming && (this.weapons.current === Weapon.PISTOL || this.weapons.current === Weapon.SMG));
+    if (!uiBlocked && !this.wheel.open && !this.player.dead && this.placed && canFight) this.handleCombat(now, input);
     if (!uiBlocked && input.hit('interact') && this.interact) this.interact.run();
     this.player.updateCamera(dt, settings.fov);
     // ------------------------------------------------- envoi de l'état (20 Hz)
@@ -740,7 +793,11 @@ export class GameClient {
     if (this.sendAcc >= 0.05 && this.placed) {
       this.sendAcc = 0;
       const p = this.player;
-      this.app.net.sendInput([p.pos.x, p.pos.y, p.pos.z, p.bodyYaw, p.pitch, p.vel.x, p.vel.z, p.dead ? Anim.DEAD : p.anim, p.flags(), this.weapons.current, this.priv.tp]);
+      if (p.drive) {
+        const d = p.drive;
+        const v = d.velocity();
+        this.app.net.sendInput([d.pos.x, d.pos.y, d.pos.z, d.yaw, p.pitch, v.x, v.z, Anim.DRIVE, p.flags(), this.weapons.current, this.priv.tp]);
+      } else this.app.net.sendInput([p.pos.x, p.pos.y, p.pos.z, p.bodyYaw, p.pitch, p.vel.x, p.vel.z, p.dead ? Anim.DEAD : p.anim, p.flags(), this.weapons.current, this.priv.tp]);
     }
     // ------------------------------------------------- personnages
     const views = this.store.update(this.selfId);
@@ -756,12 +813,60 @@ export class GameClient {
     mv.aiming = this.player.aiming || now - mv.shotAt < 0.6;
     mv.weapon = this.weapons.current;
     mv.hidden = this.player.firstPerson && !this.player.dead;
-    const list = views.filter((v) => v.id !== this.selfId);
+    const drive = this.player.drive;
+    if (drive) {
+      // au volant : caché dans l'habitacle, ou en selle sur la moto
+      if (drive.def.cls !== 'moto') mv.hidden = true;
+      else {
+        const seat = VehicleRenderer.seat(drive.def.id, drive.pos.x, drive.pos.y, drive.pos.z, drive.yaw);
+        mv.x = seat.x;
+        mv.y = seat.y;
+        mv.z = seat.z;
+        mv.yaw = drive.yaw;
+        mv.anim = Anim.SIT;
+        mv.hidden = this.player.firstPerson;
+      }
+    }
+    const vehViews: CharView[] = [];
+    const list: CharView[] = [];
+    const vehById = new Map<number, CharView>();
+    for (const v of views) {
+      if (v.kind === CharKind.VEHICLE) {
+        vehViews.push(v);
+        vehById.set(v.id, v);
+      } else if (v.id !== this.selfId) list.push(v);
+    }
+    // pilotes de moto des autres : assis sur la selle
+    for (const [vid, did] of this.pub.rides ?? []) {
+      if (did === this.selfId) continue;
+      const vv = vehById.get(vid);
+      const dv = list.find((x) => x.id === did);
+      if (!vv || !dv) continue;
+      if (VEHICLES[vv.gang]?.cls === 'moto') {
+        const seat = VehicleRenderer.seat(vv.gang, vv.x, vv.y, vv.z, vv.yaw);
+        dv.x = seat.x;
+        dv.y = seat.y;
+        dv.z = seat.z;
+        dv.yaw = vv.yaw;
+        dv.anim = Anim.SIT;
+        dv.hidden = false;
+      } else dv.hidden = true;
+    }
+    this.vehicles.update(vehViews, dt, drive ? { id: drive.id, x: drive.pos.x, y: drive.pos.y, z: drive.pos.z, yaw: drive.yaw, speed: drive.speed } : null);
     if (this.placed) list.push(mv);
+    // passants renversés par le véhicule du joueur
+    if (drive && Math.abs(drive.speed) > 7 && drive.def.cls !== 'vtol') {
+      const hits = this.civilians.hitBox(drive.pos.x, drive.pos.y, drive.pos.z, drive.yaw, drive.def.size[2] / 2, drive.def.size[0] / 2);
+      for (const id of hits) {
+        this.civilians.kill(id, now);
+        this.effects.blood(new THREE.Vector3(drive.pos.x, drive.pos.y + 1, drive.pos.z), new THREE.Vector3(Math.sin(drive.yaw), 0.3, Math.cos(drive.yaw)), true);
+        audio.play('hit_flesh', { pos: drive.pos, volume: 0.9 });
+        this.app.net.act({ a: 'interact', what: 'civilian' });
+      }
+    }
     const civViews = this.civilians.update(dt, now, this.player.pos, this.recentShots);
     for (const c of civViews) list.push(c);
-    const cabViews = this.carriages.update(dt, now, this.player.pos, list);
-    for (const c of cabViews) list.push(c);
+    this.traffic.update(dt, now, this.player.pos, list, drive && drive.def.cls !== 'vtol' ? { x: drive.pos.x, z: drive.pos.z, yaw: drive.yaw, hl: drive.def.size[2] / 2, hw: drive.def.size[0] / 2 } : null);
     this.chars.update(list, this.camera, now, dt);
     // ------------------------------------------------- monde
     const camPos = this.camera.position;
@@ -827,6 +932,7 @@ export class GameClient {
       this.hud.setFps(settings.showFps ? this.fpsAcc.v : null);
     }
     this.tips.update(dt);
+    this.phone.update(dt);
     input.endFrame();
   };
 
@@ -856,7 +962,7 @@ export class GameClient {
       const { o, d } = this.player.aimRay();
       const moving = Math.hypot(this.player.vel.x, this.player.vel.z);
       const spreadMul = (this.player.aiming ? 0.45 : 1.15) * (1 + moving * 0.12) * (this.player.crouch ? 0.8 : 1) * (this.player.onGround ? 1 : 2.2);
-      const res = w.fire(now, o, d, this.store, this.selfId, spreadMul);
+      const res = w.fire(now, o, d, this.store, this.selfId, spreadMul, this.player.drive?.id ?? -1);
       if (!res) return;
       this.myView.shotAt = now;
       // bouche du canon
@@ -965,6 +1071,11 @@ export class GameClient {
         0,
         false,
       );
+    } else if (this.priv.hack) {
+      hud.setCapture(`Piratage ${deNomFr(BUILDINGS[this.priv.hack.b].name)} — ${Math.round(this.priv.hack.p * 100)} %`, this.priv.hack.p, false);
+    } else if (this.pub.heists?.some((h) => h.slot === this.you)) {
+      const hz = this.pub.heists.find((h) => h.slot === this.you)!;
+      hud.setCapture(`Braquage ${deNomFr(BUILDINGS[hz.b].name)} — ${Math.round(hz.p * 100)} % : restez près du coffre !`, hz.p, false);
     } else if (bid >= 0 && BUILDINGS[bid].capturable) {
       const st = this.pub.buildings[bid];
       const def = BUILDINGS[bid];
@@ -993,6 +1104,12 @@ export class GameClient {
       else if (ev.kind === 'storm') hud.setEvent('ORAGE MAGNÉTIQUE', `Pluie battante, visibilité réduite — encore ${time}`);
       else if (ev.kind === 'informant') hud.setEvent('HACKEUSE', `Positions ennemies révélées — encore ${time}`);
     } else hud.setEvent(null);
+    // véhicule conduit
+    const drv = this.player.drive;
+    if (drv) {
+      const ve = this.store.ents.get(drv.id);
+      hud.setVehicle(drv.def.name, Math.abs(drv.speed) * 3.6, ve ? ve.hp : 1);
+    } else hud.setVehicle(null);
     // interaction contextuelle
     this.interact = this.findInteraction(bid);
     if (this.interact && !this.strategic.open) hud.setPrompt(this.interact.key, this.interact.text, this.interact.sub);
@@ -1054,6 +1171,35 @@ export class GameClient {
     if (this.player.dead) return null;
     const p = this.player.pos;
     const key = actionKey(settings.bindings, 'interact');
+    // au volant : descendre
+    if (this.player.drive) {
+      const d = this.player.drive;
+      return { key, text: d.def.cls === 'vtol' ? 'Descendre de l’aéronef' : 'Descendre', sub: d.def.name, run: () => this.app.net.act({ a: 'vehicle', op: 'exit' }) };
+    }
+    // véhicule libre à portée de main
+    let bestVeh: ClientEnt | null = null;
+    let bestD = 3.6;
+    for (const e of this.store.alive()) {
+      if (e.info.kind !== CharKind.VEHICLE || e.flags & FLAG.VEHICLE) continue;
+      const def = VEHICLES[e.info.gang];
+      if (!def || def.cls === 'drone') continue;
+      const dd = Math.hypot(e.x - p.x, e.z - p.z) - Math.max(def.size[0], def.size[2]) * 0.35;
+      if (dd < bestD && Math.abs(e.y - p.y) < 2) {
+        bestD = dd;
+        bestVeh = e;
+      }
+    }
+    if (bestVeh) {
+      const ve = bestVeh;
+      const def = VEHICLES[ve.info.gang];
+      const mine = ve.info.faction === this.myFaction;
+      return {
+        key,
+        text: mine ? `Monter : ${def.name}` : `Voler : ${def.name}`,
+        sub: def.seats > 1 ? `${def.seats - 1} place${def.seats > 2 ? 's' : ''} pour votre escorte` : 'Une seule place',
+        run: () => this.app.net.act({ a: 'vehicle', op: 'enter', id: ve.info.id }),
+      };
+    }
     const hq = this.world.buildings[this.pub.hq[this.you]];
     const near = (pt: { x: number; z: number; y?: number } | undefined, r: number) => !!pt && Math.hypot(pt.x - p.x, pt.z - p.z) < r && Math.abs(p.y - (pt.y ?? hq.floorY)) < 1.6;
     if (near(hq.desk, 2.3))
@@ -1081,6 +1227,23 @@ export class GameClient {
       const def = BUILDINGS[bid];
       const st = this.pub.buildings[bid];
       const b = this.world.buildings[bid];
+      const notMine = st.owner !== this.myFaction;
+      // terminal de sécurité
+      if (def.security && b.terminal && notMine && near(b.terminal, 2.2) && !this.pub.hacked?.includes(bid) && !this.priv.hack)
+        return {
+          key,
+          text: 'Pirater la sécurité',
+          sub: `${def.security >= 2 ? 'Caméras, tourelles et coffre' : 'Caméras'} — ${this.priv.upgrades.includes('hackers') ? '4 s' : '7 s'}`,
+          run: () => this.app.net.act({ a: 'hack', b: bid }),
+        };
+      // coffre à braquer
+      if (def.heist && b.vault && notMine && near(b.vault, 2.6) && !this.pub.heists?.some((h) => h.b === bid))
+        return {
+          key,
+          text: def.heist.label,
+          sub: `${formatMoney(def.heist.reward)} — ${def.heist.time} s près du coffre ; l’alarme préviendra la police`,
+          run: () => this.app.net.act({ a: 'heist', b: bid }),
+        };
       if (def.residence && st.owner === Faction.NEUTRAL && def.residence.boss === this.you && near(b.desk, 2.6)) {
         const tier = def.residence.tier;
         return {

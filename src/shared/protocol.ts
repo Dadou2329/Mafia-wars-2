@@ -79,6 +79,15 @@ export interface PublicState {
   tier: Record<Slot, number>;
   /** Pluie : 0 (sec) à 1. */
   rain: number;
+  /** Véhicules occupés : [id du véhicule, id du conducteur]. */
+  rides: [number, number][];
+  /** Bâtiments dont la sécurité est piratée (caméras et tourelles coupées). */
+  hacked: number[];
+  /** Braquages en cours : bâtiment, parrain, progression 0..1. */
+  heists: { b: number; slot: Slot; p: number }[];
+  /** Convois blindés en route (camion, propriétaire, position, butin) et butins à ramasser. */
+  convoys: { id: number; slot: Slot | null; x: number; z: number; reward: number }[];
+  loot: { x: number; z: number; reward: number }[];
 }
 
 export interface LieutenantStatus {
@@ -98,7 +107,7 @@ export interface LieutenantStatus {
 
 export interface PrivateState {
   money: number;
-  income: number; // £/min
+  income: number; // $/min
   men: number; // gangsters vivants
   pool: number; // gangsters libres au QG
   escort: number; // gangsters qui suivent le parrain
@@ -119,6 +128,18 @@ export interface PrivateState {
   /** Palier du logement (1 planque … 5 tour) et bâtiment du QG actuel. */
   tier: number;
   hq: number;
+  /** Véhicules possédés (identifiants de VehicleDef) et véhicule conduit (id d'entité, −1 à pied). */
+  garage: number[];
+  vehicle: number;
+  /** Délai avant de pouvoir se faire livrer un véhicule (s). */
+  callIn: number;
+  /** Drone : délai avant le prochain lancement (s), quartier survolé. */
+  droneIn: number;
+  droneOver: DistrictId | null;
+  /** Piratage en cours (bâtiment, progression 0..1). */
+  hack: { b: number; p: number } | null;
+  /** Délai avant de pouvoir envoyer un convoi (s). */
+  convoyIn: number;
   /** Ennemis repérés (positions approximatives pour la carte). */
   spotted: { x: number; z: number; n: number }[];
 }
@@ -147,7 +168,11 @@ export type GameEvent =
   | { t: 'sound'; s: string; x: number; y: number; z: number }
   | { t: 'event'; kind: string; text: string; x: number; z: number; until: number }
   /** Un parrain emménage dans un nouveau QG. */
-  | { t: 'hq'; slot: Slot; b: number; tier: number };
+  | { t: 'hq'; slot: Slot; b: number; tier: number }
+  /** Quelqu'un monte dans un véhicule ou en descend (driver = −1). */
+  | { t: 'ride'; id: number; driver: number }
+  /** Explosion (véhicule détruit…). */
+  | { t: 'boom'; x: number; y: number; z: number; r: number };
 
 export interface MatchStats {
   kills: number;
@@ -176,6 +201,15 @@ export type ClientAction =
   | { a: 'moveIn'; b: number }
   /** Taxi volant : retour au QG (hors combat, sans police aux trousses). */
   | { a: 'goHome' }
+  /** Véhicules : monter (id d'entité), descendre, se faire livrer ou acheter (v = VehicleDef). */
+  | { a: 'vehicle'; op: 'enter' | 'exit' | 'call' | 'buy'; id?: number; v?: number }
+  /** Drone de reconnaissance au-dessus d'un quartier. */
+  | { a: 'drone'; d: DistrictId }
+  /** Pirater le terminal de sécurité d'un bâtiment, braquer son coffre. */
+  | { a: 'hack'; b: number }
+  | { a: 'heist'; b: number }
+  /** Envoyer un convoi depuis un bâtiment logistique vers le QG. */
+  | { a: 'convoy' }
   | { a: 'quick'; cmd: 'follow' | 'attack' | 'defend' | 'retreat'; target?: number; building?: number; x?: number; z?: number }
   | { a: 'customize'; custom: Record<string, unknown> }
   | { a: 'interact'; what: string }
@@ -222,8 +256,8 @@ export function encodeSnapshot(time: number, tick: number, ents: SnapEntity[]): 
     if (yaw < 0) yaw += Math.PI * 2;
     dv.setUint8(o + 8, Math.round((yaw / (Math.PI * 2)) * 256) & 255);
     dv.setInt8(o + 9, Math.max(-127, Math.min(127, Math.round((e.pitch / (Math.PI / 2)) * 127))));
-    dv.setInt8(o + 10, Math.max(-127, Math.min(127, Math.round(e.vx * 16))));
-    dv.setInt8(o + 11, Math.max(-127, Math.min(127, Math.round(e.vz * 16))));
+    dv.setInt8(o + 10, Math.max(-127, Math.min(127, Math.round(e.vx * 4))));
+    dv.setInt8(o + 11, Math.max(-127, Math.min(127, Math.round(e.vz * 4))));
     dv.setUint8(o + 12, e.anim);
     dv.setUint8(o + 13, e.flags);
     dv.setUint8(o + 14, e.weapon);
@@ -248,8 +282,8 @@ export function decodeSnapshot(buf: ArrayBuffer): { time: number; tick: number; 
       y: dv.getInt16(o + 6, true) / 256,
       yaw: (dv.getUint8(o + 8) / 256) * Math.PI * 2,
       pitch: (dv.getInt8(o + 9) / 127) * (Math.PI / 2),
-      vx: dv.getInt8(o + 10) / 16,
-      vz: dv.getInt8(o + 11) / 16,
+      vx: dv.getInt8(o + 10) / 4,
+      vz: dv.getInt8(o + 11) / 4,
       anim: dv.getUint8(o + 12) as Anim,
       flags: dv.getUint8(o + 13),
       weapon: dv.getUint8(o + 14) as Weapon,

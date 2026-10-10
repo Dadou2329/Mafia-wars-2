@@ -1,5 +1,5 @@
 // Contrôle du parrain local : déplacements avec collisions voxel, saut, accroupi,
-// caméras première/troisième personne avec collision de caméra.
+// caméras première/troisième personne avec collision de caméra, conduite des véhicules.
 
 import * as THREE from 'three';
 import { Anim, FLAG, Weapon } from '../../shared/characters';
@@ -8,6 +8,7 @@ import { GROUND_VY, INV_VOXEL, type VoxelWorld } from '../../shared/voxel';
 import { MAT_SOLID, MAT_VISIBLE } from '../../shared/materials';
 import type { Input } from '../input/input';
 import { settings } from '../settings';
+import type { Drive } from './driving';
 
 const HALF = 0.3;
 const HEIGHT = 1.75;
@@ -44,6 +45,11 @@ export class PlayerController {
   stepDist = 0;
   onStep: ((surface: number) => void) | null = null;
   weapon: Weapon = Weapon.PISTOL;
+  /** Véhicule conduit (null : à pied). */
+  drive: Drive | null = null;
+  /** Instant du dernier mouvement de souris (la caméra se recale derrière le véhicule). */
+  private lookAt = 0;
+  private t = 0;
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;
@@ -120,14 +126,40 @@ export class PlayerController {
   }
 
   update(dt: number, input: Input): void {
+    this.t += dt;
     // ----- regard
     const sens = 0.0022 * settings.sensitivity * (this.aiming ? 0.6 : 1);
     if (!this.frozen) {
       this.yaw -= input.mouseDX * sens;
       this.pitch -= input.mouseDY * sens * (settings.invertY ? -1 : 1);
       this.pitch = clamp(this.pitch, -1.45, 1.35);
+      if (input.mouseDX !== 0 || input.mouseDY !== 0) this.lookAt = this.t;
     }
     if (input.hit('view')) this.firstPerson = !this.firstPerson;
+    // ----- au volant
+    if (this.drive && !this.dead) {
+      const d = this.drive;
+      this.aiming = !this.frozen && input.is('aim');
+      d.update(dt, input, this.frozen);
+      this.pos.copy(d.pos);
+      const v = d.velocity();
+      this.vel.set(v.x, d.vy, v.z);
+      this.bodyYaw = d.yaw;
+      this.anim = Anim.DRIVE;
+      this.onGround = d.onGround;
+      this.crouch = false;
+      this.sprint = false;
+      // la caméra revient derrière le véhicule quand on ne touche plus à la souris
+      if (!this.aiming && this.t - this.lookAt > 1.2 && Math.abs(d.speed) > 2) {
+        let diff = d.yaw - this.yaw;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        this.yaw += diff * Math.min(1, dt * 2.5);
+        this.pitch += (-0.18 - this.pitch) * Math.min(1, dt * 2);
+      }
+      if (d.bump > 0.2) this.shake = Math.max(this.shake, d.bump * 3);
+      return;
+    }
     if (this.dead || this.frozen) {
       this.vel.x *= 0.8;
       this.vel.z *= 0.8;
@@ -266,6 +298,7 @@ export class PlayerController {
   /** Place la caméra. Renvoie la position de l'œil. */
   updateCamera(dt: number, fovBase: number): void {
     const cam = this.camera;
+    if (this.drive && !this.dead) return this.vehicleCamera(dt, fovBase);
     const eyeH = this.crouch ? 1.15 : 1.6;
     const targetFov = this.aiming ? (this.weapon === Weapon.RIFLE ? fovBase * 0.5 : fovBase * 0.72) : this.sprint ? fovBase * 1.06 : fovBase;
     cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 12);
@@ -296,6 +329,41 @@ export class PlayerController {
     const sh = this.castCamera(pivot, shoulderPt);
     const want = sh.clone().addScaledVector(dir, -this.camDist);
     const p = this.castCamera(sh, want);
+    cam.position.set(p.x + shakeX, p.y + shakeY, p.z);
+    cam.lookAt(cam.position.clone().add(dir));
+  }
+
+  /** Caméra de poursuite derrière le véhicule (ou vue du cockpit). */
+  private vehicleCamera(dt: number, fovBase: number): void {
+    const cam = this.camera;
+    const d = this.drive!;
+    const sp = Math.abs(d.speed);
+    const targetFov = this.aiming ? fovBase * 0.8 : fovBase * (1 + Math.min(0.12, sp / 250));
+    cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 6);
+    cam.updateProjectionMatrix();
+    const shakeX = (Math.random() - 0.5) * this.shake * 0.05;
+    const shakeY = (Math.random() - 0.5) * this.shake * 0.05;
+    this.shake *= Math.exp(-dt * 8);
+    this.recoil *= Math.exp(-dt * 12);
+    const pitch = this.pitch + this.recoil * 0.05;
+    const dir = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(this.yaw) * Math.cos(pitch));
+    const size = d.def.size;
+    if (this.firstPerson) {
+      // place du conducteur : un peu à gauche, à hauteur des yeux
+      const s = Math.sin(d.yaw);
+      const c = Math.cos(d.yaw);
+      const left = d.def.cls === 'moto' ? 0 : size[0] * 0.22;
+      const fwd = d.def.cls === 'moto' ? -0.15 : size[2] * 0.05;
+      const eye = d.def.cls === 'moto' ? 1.45 : Math.min(size[1] - 0.25, 1.2);
+      cam.position.set(d.pos.x + c * left + s * fwd + shakeX, d.pos.y + eye + shakeY, d.pos.z - s * left + c * fwd);
+      cam.lookAt(cam.position.clone().add(dir));
+      return;
+    }
+    const dist = (this.aiming ? 2.2 : 3.4) + size[2] * 0.75;
+    const pivot = new THREE.Vector3(d.pos.x, d.pos.y + size[1] + 0.55, d.pos.z);
+    const want = pivot.clone().addScaledVector(dir, -dist);
+    const p = this.castCamera(pivot, want);
+    this.camDist = p.distanceTo(pivot);
     cam.position.set(p.x + shakeX, p.y + shakeY, p.z);
     cam.lookAt(cam.position.clone().add(dir));
   }
@@ -334,7 +402,8 @@ export class PlayerController {
   flags(): number {
     let f = 0;
     if (this.aiming) f |= FLAG.AIM;
-    if (this.crouch) f |= FLAG.CROUCH;
+    if (this.crouch && !this.drive) f |= FLAG.CROUCH;
+    if (this.drive) f |= FLAG.VEHICLE;
     return f;
   }
 }

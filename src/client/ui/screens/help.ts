@@ -1,4 +1,4 @@
-// « Comment jouer » (manuel du parrain) et crédits.
+// « Comment jouer » (manuel du parrain, New York 2085) et crédits.
 
 import type { AppApi } from '../../appApi';
 import { ACTIONS, keyLabel, type ActionId } from '../../input/bindings';
@@ -10,9 +10,14 @@ import { BRAND, TITLE, button, closeOnEscape, fr, icon, shieldPointer, type Icon
 
 type Child = Node | string;
 
+/** Codes de touches d'une action (tolère une action absente de la configuration). */
+function codesOf(id: ActionId | string): string[] {
+  return (settings.bindings as Partial<Record<string, string[]>>)[id] ?? [];
+}
+
 /** Touches actuelles d'une action, sous forme de touches dessinées. */
 function keys(id: ActionId): HTMLElement {
-  const codes = settings.bindings[id] ?? [];
+  const codes = codesOf(id);
   if (!codes.length) return h('span', { class: 'mw-help-nokey' }, 'non attribuée');
   return h(
     'span',
@@ -21,14 +26,32 @@ function keys(id: ActionId): HTMLElement {
   );
 }
 
-/** « 1 250 £ » avec des espaces insécables. */
-const money = (n: number): string => formatMoney(n).replace(/ /g, '\u00a0');
+/** « 1 250 $ » avec des espaces insécables. */
+const money = (n: number): string => formatMoney(n).replace(/ /g, ' ');
 
-const k = (id: ActionId): string => (settings.bindings[id]?.[0] ? keyLabel(settings.bindings[id][0]) : '—');
+/** Libellé de la première touche d'une action (`fallback` si l'action n'existe pas ou n'a pas de touche). */
+const k = (id: ActionId | string, fallback = '—'): string => {
+  const c = codesOf(id)[0];
+  return c ? keyLabel(c) : fallback;
+};
+
+/** Touche dessinée (libellé de la touche actuelle d'une action). */
+const kc = (id: ActionId | string, fallback = '—'): HTMLElement => h('span', { class: 'keycap' }, k(id, fallback));
 
 function p(...parts: Child[]): HTMLElement {
   return h('p', null, ...parts.map((x) => (typeof x === 'string' ? fr(x) : x)));
 }
+
+/** Liste à puces (texte en typographie française). */
+function ul(...items: (Child | Child[])[]): HTMLElement {
+  return h(
+    'ul',
+    null,
+    items.map((it) => h('li', null, ...(Array.isArray(it) ? it : [it]).map((x) => (typeof x === 'string' ? fr(x) : x)))),
+  );
+}
+
+const strong = (t: string, cls?: string): HTMLElement => h('strong', cls ? { class: cls } : null, fr(t));
 
 interface Section {
   id: string;
@@ -38,7 +61,7 @@ interface Section {
 }
 
 function sections(): Section[] {
-  const move = ['forward', 'left', 'back', 'right'].map((id) => k(id as ActionId)).join(' ');
+  const move = ['forward', 'left', 'back', 'right'].map((id) => k(id)).join(' ');
   return [
     {
       id: 'but',
@@ -46,21 +69,52 @@ function sections(): Section[] {
       icon: 'crown',
       body: () => [
         p(
-          'Londres, 1888. Deux parrains se disputent la capitale : ',
-          h('strong', { class: 'c-ink-dadou' }, 'Dadou'),
-          ', le flamboyant maître de Soho, et ',
-          h('strong', { class: 'c-ink-even' }, 'Even'),
-          ', l’élégant seigneur des Docks.',
+          'New York, 2085. Sous les néons et les hologrammes, deux parrains se disputent la ville : ',
+          strong('Dadou', 'c-ink-dadou'),
+          ', le flamboyant chef de La Mafia de Dadou, et ',
+          strong('Even', 'c-ink-even'),
+          ', l’élégant patron de La Mafia d’Even.',
         ),
         p(
-          'Emparez-vous des ',
-          h('strong', null, 'bâtiments clés'),
-          ' d’un quartier pour en prendre le contrôle. ',
-          fr(`Dès que vous tenez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers, le quartier général adverse devient vulnérable : `),
-          h('strong', null, 'prenez-le d’assaut pour gagner la partie.'),
+          'C’est un bac à sable libre : ',
+          strong('pas de quêtes'),
+          ', pas de relations à entretenir avec les habitants. Vous décidez de tout, dans l’ordre que vous voulez.',
         ),
-        p('Si la partie a une durée limitée, le parrain qui contrôle le plus de quartiers à la fin du temps l’emporte.'),
+        ul(
+          ['Prenez des ', strong('bâtiments'), '.'],
+          ['Contrôlez des ', strong('quartiers'), ' : un quartier est à vous quand vous tenez tous ses bâtiments clés ★.'],
+          [`Dès que vous contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7, donnez l’assaut au `, strong('QG actuel de votre rival'), ' : le prendre, c’est gagner la partie.'],
+        ),
+        p('Les 7 quartiers : Harlem, Central Park, Times Square, Chinatown, Wall Street, le Queens et Brooklyn.'),
         p('Pour prendre un bâtiment, entrez-y avec vos hommes et restez-y tant qu’aucun défenseur ennemi n’est présent : plus vous êtes nombreux, plus la prise est rapide.'),
+        p('Si la partie a une durée limitée, le parrain qui contrôle le plus de quartiers à la fin du temps l’emporte.'),
+      ],
+    },
+    {
+      id: 'depart',
+      title: 'Votre point de départ',
+      icon: 'flag',
+      body: () => [
+        p('Chacun commence tout en bas de l’échelle, dans une planque miteuse :'),
+        ul(
+          [strong('Dadou', 'c-ink-dadou'), ' : la ', strong('Planque de Bushwick'), ', à Brooklyn.'],
+          [strong('Even', 'c-ink-even'), ' : la ', strong('Planque d’Astoria'), ', dans le Queens.'],
+        ),
+        p('Les deux camps ont les mêmes règles et les mêmes prix : seul le talent fera la différence.'),
+      ],
+    },
+    {
+      id: 'ascension',
+      title: 'L’ascension : de la planque à la tour',
+      icon: 'hat',
+      body: () => [
+        p(
+          'Votre logement grandit avec votre empire : ',
+          strong('Planque → Garage → Loft → Penthouse → Tour'),
+          '. Chaque logement est déjà entièrement meublé par le jeu.',
+        ),
+        p('Pour monter d’un palier, choisissez « Emménager » : cela coûte de l’argent et demande de contrôler un certain nombre de quartiers.'),
+        p('Chaque palier augmente le nombre d’hommes et de lieutenants que vous pouvez commander, votre bonus de revenus et vos gardes d’élite. Votre QG déménage avec vous : c’est toujours votre logement actuel que votre rival doit prendre.'),
       ],
     },
     {
@@ -74,77 +128,89 @@ function sections(): Section[] {
           ['Menu pause', h('span', { class: 'mw-help-keys' }, h('span', { class: 'keycap' }, keyLabel('Escape')))],
         ];
         return [
+          p(
+            'Par défaut : ZQSD (ou WASD) pour se déplacer, la souris pour regarder, clic gauche pour tirer, clic droit pour viser, Maj pour sprinter, E pour interagir, V pour passer de la 1re à la 3e personne, Q pour la roue des ordres, M pour la carte stratégique, Tab pour le téléphone et Échap pour la pause.',
+          ),
           h(
             'div',
             { class: 'mw-help-keytable' },
             rows.map(([label, ks]) => h('div', { class: 'mw-help-keyrow' }, h('span', null, label), ks)),
           ),
-          p('Toutes les touches se modifient dans le menu « Commandes ».'),
+          p('Toutes les touches se modifient dans « Paramètres → Commandes ».'),
         ];
       },
     },
     {
       id: 'bureau',
-      title: 'Votre bureau',
+      title: 'Le bureau et la carte stratégique',
       icon: 'book',
       body: () => [
         p(
-          'Votre quartier général abrite le ',
-          h('strong', null, 'Bureau de Dadou'),
-          ' (au Lion Rouge) ou le ',
-          h('strong', null, 'Bureau d’Even'),
-          ' (à l’Ancre Bleue). Approchez-vous du bureau et appuyez sur ',
-          h('span', { class: 'keycap' }, k('interact')),
-          ' pour vous y installer.',
+          'Votre QG abrite votre bureau : le ',
+          strong('Bureau de Dadou'),
+          ' ou le ',
+          strong('Bureau d’Even'),
+          '. Approchez-vous et appuyez sur ',
+          kc('interact'),
+          ' pour ouvrir la carte stratégique.',
         ),
-        p('Vous y trouverez la carte stratégique de Londres, vos lieutenants, vos finances et les améliorations de votre organisation.'),
+        p('La carte s’ouvre aussi n’importe où avec ', kc('map'), ' : quartiers, bâtiments, lieutenants, finances… et tous vos ordres en quelques clics.'),
       ],
     },
     {
       id: 'lieutenants',
-      title: 'Lieutenants et carte stratégique',
-      icon: 'flag',
+      title: 'Vos lieutenants',
+      icon: 'user',
       body: () => [
-        p('Chaque lieutenant commande une escouade de gangsters. Depuis la carte stratégique de votre bureau, confiez-lui des hommes puis un ordre : attaquer un quartier ou un bâtiment, défendre, patrouiller, renforcer, se replier…'),
-        p(`Un lieutenant blessé quitte le combat et revient au bout de ${LIEUTENANT_RECOVERY} secondes. Engagez de nouveaux lieutenants au bureau pour mener plusieurs offensives à la fois.`),
-      ],
-    },
-    {
-      id: 'ordres',
-      title: 'Ordres rapides',
-      icon: 'chat',
-      body: () => [
-        p(
-          'Sur le terrain, appuyez sur ',
-          h('span', { class: 'keycap' }, k('wheel')),
-          ' près de vos hommes pour ouvrir la roue des ordres rapides : suivez-moi, attaquez, défendez, repliez-vous.',
-        ),
-        p('Visez un ennemi ou un bâtiment avant de donner l’ordre pour désigner la cible.'),
+        p('Chaque lieutenant mène une escouade de gangsters. Confiez-lui des hommes, puis un ordre simple :'),
+        p(strong('Attaquer · Défendre · Patrouiller · Renforcer · Tenir le toit · Attaquer par le métro · Suivre')),
+        p('Ils traversent réellement la ville en 3D et se battent sur place : à pied, sur les toits ou par les tunnels du métro.'),
+        p('Sur le terrain, appuyez sur ', kc('wheel'), ' près de vos hommes pour ouvrir la roue des ordres rapides ; visez un ennemi ou un bâtiment avant de donner l’ordre pour désigner la cible.'),
+        p(fr(`Un lieutenant blessé quitte le combat et revient au bout de ${LIEUTENANT_RECOVERY} secondes.`)),
       ],
     },
     {
       id: 'recrutement',
-      title: 'Recrutement',
-      icon: 'user',
+      title: 'Recruter',
+      icon: 'trophy',
       body: () => [
-        p('Au comptoir du bar de votre QG, recrutez de nouveaux gangsters par 1, 5 ou 10. Les recrues vous attendent au QG : affectez-les à un lieutenant ou emmenez-les avec vous.'),
+        p('Le recruteur de votre QG vous fournit de nouveaux gangsters : « Recruter 1 », « Recruter 5 » ou « Recruter 10 ». Les recrues vous attendent au QG : affectez-les à un lieutenant ou emmenez-les avec vous.'),
+      ],
+    },
+    {
+      id: 'telephone',
+      title: 'Téléphone et véhicules',
+      icon: 'send',
+      body: () => [
+        p('Votre téléphone (', kc('phone', 'Tab'), ') regroupe les actions rapides : alertes, appel d’un véhicule, taxi volant pour rentrer au QG et ordres rapides.'),
+        p('Pour vos déplacements : moto, voitures, fourgon blindé… et, plus rare, un aéronef à décollage vertical qui se pose sur les toits.'),
+      ],
+    },
+    {
+      id: 'piratage',
+      title: 'Piratage et drones',
+      icon: 'link',
+      body: () => [
+        p('Maintenez ', kc('interact', 'E'), ' devant un terminal de sécurité pour le pirater : vous coupez les caméras et les tourelles, et vous ouvrez les portes verrouillées.'),
+        p('Les drones de reconnaissance surveillent un quartier : les ennemis repérés apparaissent sur vos cartes.'),
       ],
     },
     {
       id: 'argent',
-      title: 'L’argent',
-      icon: 'trophy',
+      title: 'L’argent, les braquages et les convois',
+      icon: 'crown',
       body: () => [
-        p('Chaque établissement que vous contrôlez vous rapporte un revenu passif, exprimé en livres par minute et versé en continu dans vos caisses.'),
-        p(`Chaque quartier entièrement contrôlé ajoute ${money(DISTRICT_BONUS)} par minute. Certains bâtiments neutres s’achètent ; ceux tenus par un gang se prennent par la force.`),
+        p('Chaque propriété que vous contrôlez vous rapporte un revenu passif, versé en continu dans vos caisses.'),
+        p(fr(`Chaque quartier entièrement contrôlé ajoute ${money(DISTRICT_BONUS)} par minute.`)),
+        p('Pour un gros coup, tentez un braquage ou interceptez un convoi : ce sont des activités libres, à lancer quand vous le voulez.'),
       ],
     },
     {
       id: 'police',
-      title: 'La police',
+      title: 'La police de New York',
       icon: 'alert',
       body: () => [
-        p('Les fusillades attirent Scotland Yard. Plus vous semez le désordre, plus votre niveau de recherche grimpe (jusqu’à 5) et plus les bobbies vous traquent.'),
+        p('La police de New York (NYPD) réagit à la violence. Plus vous semez le désordre, plus votre niveau de recherche grimpe (les étoiles sous votre santé) et plus les patrouilles vous traquent.'),
         p('Faites-vous oublier quelques instants : la police finit par perdre votre trace.'),
       ],
     },
@@ -155,23 +221,8 @@ function sections(): Section[] {
       body: () => [
         p(
           fr(
-            `Si vous tombez, vous reprenez connaissance à votre QG au bout de quelques secondes. Le docteur se fait payer : ${Math.round(RESPAWN_PENALTY * 100)} % de votre argent, ${money(RESPAWN_PENALTY_MAX)} au plus.`,
+            `Si vous tombez, vous reprenez connaissance à votre QG au bout de quelques secondes. La clinique se fait payer : ${Math.round(RESPAWN_PENALTY * 100)} % de votre argent, ${money(RESPAWN_PENALTY_MAX)} au plus.`,
           ),
-        ),
-      ],
-    },
-    {
-      id: 'ameliorations',
-      title: 'Améliorations',
-      icon: 'gear',
-      body: () => [
-        p('Investissez au bureau : revolvers pour tous, gilets matelassés, gardes du QG, armurerie, façade prestigieuse…'),
-        p(
-          'Le ',
-          h('strong', null, 'Télégraphe'),
-          ' vous permet de donner vos ordres depuis la carte (touche ',
-          h('span', { class: 'keycap' }, k('map')),
-          '), où que vous soyez.',
         ),
       ],
     },
@@ -185,7 +236,7 @@ export function helpPanel(app: AppApi, opts: { onClose(): void }): HTMLElement {
     h(
       'header',
       { class: 'mw-help-mast' },
-      h('div', { class: 'mw-help-kicker' }, 'Londres, 1888'),
+      h('div', { class: 'mw-help-kicker' }, 'New York, 2085'),
       h('h2', { class: 'mw-help-title' }, 'Le Manuel du parrain'),
       h('div', { class: 'mw-help-kicker' }, 'À l’usage de Dadou et d’Even'),
     ),
@@ -208,7 +259,7 @@ export function helpPanel(app: AppApi, opts: { onClose(): void }): HTMLElement {
     tocBtns.push(b);
     toc.appendChild(b);
   });
-  page.appendChild(h('p', { class: 'mw-help-end' }, fr('Bonne chance, parrain. Londres n’attend que vous !')));
+  page.appendChild(h('p', { class: 'mw-help-end' }, fr('Bonne chance, parrain. New York n’attend que vous !')));
 
   // le sommaire suit la lecture
   const sync = (): void => {
@@ -246,7 +297,7 @@ export function creditsPanel(app: AppApi, opts: { onClose(): void }): HTMLElemen
     'article',
     { class: 'parchment mw-credits-page scroll', tabindex: '0' },
     h('img', { class: 'mw-credits-logo', src: BRAND.compact, alt: TITLE, draggable: false }),
-    h('p', { class: 'mw-credits-dedication' }, fr('Un jeu créé pour Dadou et Even, rivaux de toujours.')),
+    h('p', { class: 'mw-credits-dedication' }, fr('Une suite créée pour Dadou et Even, rivaux de toujours.')),
     h('div', { class: 'divider mw-ink-divider' }),
     h(
       'div',
@@ -254,25 +305,18 @@ export function creditsPanel(app: AppApi, opts: { onClose(): void }): HTMLElemen
       block('Technologies', h('ul', { class: 'mw-credit-list' }, tech('Three.js', 'rendu 3D'), tech('Socket.IO', 'jeu en réseau'), tech('Vite', 'outillage'), tech('TypeScript', 'langage'))),
       block(
         'Polices de caractères',
-        h(
-          'ul',
-          { class: 'mw-credit-list' },
-          tech('Cinzel', 'Natanael Gama'),
-          tech('Cinzel Decorative', 'Natanael Gama'),
-          tech('EB Garamond', 'Georg Duffner, Octavio Pardo'),
-          tech('UnifrakturMaguntia', 'projet Unifraktur'),
-        ),
+        h('ul', { class: 'mw-credit-list' }, tech('Orbitron', 'Matt McInerney'), tech('Rajdhani', 'Indian Type Foundry')),
         'Distribuées sous licence SIL Open Font License 1.1.',
       ),
       block(
         'Images et sons',
-        'Tous les graphismes sont des voxels procéduraux : Londres, ses habitants et ses réverbères sont générés par le programme.',
+        'Tous les graphismes sont des voxels procéduraux : New York, ses habitants, ses néons et ses taxis volants sont générés par le programme.',
         'Tous les sons et toutes les musiques sont synthétisés en temps réel : aucun enregistrement n’est utilisé.',
         'Le logo, les emblèmes et le fond du menu sont eux aussi dessinés par le code.',
       ),
     ),
     h('div', { class: 'divider mw-ink-divider' }),
-    h('p', { class: 'mw-credits-end' }, fr('Londres, 1888 — merci d’avoir joué !')),
+    h('p', { class: 'mw-credits-end' }, fr('New York, 2085 — merci d’avoir joué !')),
   );
   const panel = h(
     'div',
