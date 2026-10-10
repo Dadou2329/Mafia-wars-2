@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
+import { PATH_STRIDE } from '../../shared/nav';
 import { GM } from '../../shared/city/gen/city';
 import { PROP_INDEX } from '../../shared/city/props';
 import { Rng, angleDiff, hash32 } from '../../shared/util';
@@ -57,8 +58,8 @@ export class Civilians {
         if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PIER) continue;
         const x = vx * 0.25;
         const z = vz * 0.25;
-        const n = world.nav.idx(x, z);
-        if (n < 0 || world.nav.floor[n] < 0 || world.nav.clear[n] < 2) continue;
+        const n = world.nav.nodeAt(x, z, 0, 0.6);
+        if (n < 0 || world.nav.clear[n] < 2) continue;
         pts.push(x, z);
       }
     this.spots = new Float32Array(pts);
@@ -137,8 +138,8 @@ export class Civilians {
       if (vx < 0 || vz < 0 || vx >= this.world.gw || vz >= this.world.gd) continue;
       const g = this.world.groundMap[vz * this.world.gw + vx];
       if (g !== GM.SIDEWALK && g !== GM.AREA && g !== GM.PIER && g !== GM.ROAD) continue;
-      const n = nav.idx(x, z);
-      if (n < 0 || nav.floor[n] < 0 || nav.clear[n] < 1) continue;
+      const n = nav.nodeAt(x, z, 0, 0.6);
+      if (n < 0 || nav.clear[n] < 1) continue;
       return [x, z];
     }
     return null;
@@ -146,8 +147,11 @@ export class Civilians {
 
   private planWalk(c: Civ, tx: number, tz: number, run: boolean): boolean {
     const v = c.view;
-    const path = this.world.nav.findPath(v.x, v.z, tx, tz, run ? 6000 : 2500);
-    if (!path || path.length < 2) return false;
+    const raw = this.world.nav.findPath(v.x, v.z, v.y, tx, tz, 0, run ? 6000 : 2500);
+    if (!raw || raw.length < 4) return false;
+    // les passants restent dans la rue : on ne garde que (x, z)
+    const path: number[] = [];
+    for (let i = 0; i < raw.length; i += PATH_STRIDE) path.push(raw[i], raw[i + 1]);
     c.path = path;
     c.pi = 0;
     c.speed = run ? this.rng.range(3.6, 4.6) : this.rng.range(1.0, 1.45);
@@ -335,7 +339,7 @@ export class Civilians {
       }
       // altitude du sol (lissée)
       if (c.state !== 'sit' && c.state !== 'dead' && !(c.state === 'cower' && c.seat)) {
-        const y = nav.heightAt(v.x, v.z);
+        const y = nav.heightAt(v.x, v.z, v.y);
         if (Number.isFinite(y)) c.ty = y;
         v.y += (c.ty - v.y) * Math.min(1, dt * 12);
       }
@@ -372,7 +376,7 @@ export class Civilians {
     }
     const nx = v.x + sx * dt;
     const nz = v.z + sz * dt;
-    if (this.world.nav.walkable(nx, nz)) {
+    if (this.world.nav.walkable(nx, nz, v.y)) {
       v.x = nx;
       v.z = nz;
     } else {

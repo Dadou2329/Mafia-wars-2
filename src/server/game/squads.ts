@@ -97,7 +97,8 @@ function assignPosts(g: Game, sq: Squad, assault: boolean): void {
       const a = (i / Math.max(4, ms.length)) * Math.PI * 2;
       const r = 2 + (i % 3) * 1.2;
       const p = { x: sq.goal.x + Math.cos(a) * r, z: sq.goal.z + Math.sin(a) * r };
-      if (g.w.nav.walkable(p.x, p.z)) outside.push(p);
+      const py = sq.goal.y ?? 0;
+      if (g.w.nav.walkable(p.x, p.z, py)) outside.push({ ...p, y: py });
     }
     if (outside.length === 0) outside.push(sq.goal);
   }
@@ -238,10 +239,10 @@ export function giveOrder(g: Game, sq: Squad, type: OrderType, target?: number |
 }
 
 function nearestWalkable(g: Game, p: Vec2): Vec2 {
-  const n = g.w.nav.nearestWalkable(p.x, p.z, 20);
+  const n = g.w.nav.nearestWalkable(p.x, p.z, p.y ?? 0, 20);
   if (n < 0) return p;
-  const [x, z] = g.w.nav.cellCenter(n);
-  return { x, z };
+  const [x, z] = g.w.nav.nodeCenter(n);
+  return { x, z, y: g.w.nav.nodeY(n) };
 }
 
 function nextTarget(g: Game, sq: Squad): boolean {

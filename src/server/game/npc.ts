@@ -4,6 +4,7 @@ import { Anim, FLAG, WEAPONS, Weapon } from '../../shared/characters';
 import { SPEED } from '../../shared/constants';
 import { Faction } from '../../shared/city/plan';
 import { angleDiff, clamp } from '../../shared/util';
+import { PATH_STRIDE } from '../../shared/nav';
 import type { Game } from './Game';
 import type { Ent, Vec2 } from './types';
 
@@ -44,20 +45,20 @@ export function updateNpc(g: Game, e: Ent, dt: number): void {
         tryFire(g, e, target, d);
         // petit repositionnement de temps en temps (on reste à couvert sinon)
         if (d < w.npcRange * 0.35 && e.weapon !== Weapon.SHOTGUN) {
-          goal = { x: e.x - (dx / d) * 2.5, z: e.z - (dz / d) * 2.5 };
+          goal = { x: e.x - (dx / d) * 2.5, z: e.z - (dz / d) * 2.5, y: e.y };
         } else goal = null;
         run = false;
       } else {
-        goal = { x: target.x, z: target.z };
+        goal = { x: target.x, z: target.z, y: target.y };
         run = true;
       }
     } else {
-      if (d <= w.range) {
+      if (d <= w.range && Math.abs(target.y - e.y) < 1.4) {
         e.flags |= FLAG.AIM;
         tryMelee(g, e, target);
         goal = null;
       } else {
-        goal = { x: target.x, z: target.z };
+        goal = { x: target.x, z: target.z, y: target.y };
         run = true;
         if (d < 6) e.flags |= FLAG.AIM;
       }
@@ -198,16 +199,17 @@ function modeGoal(g: Game, e: Ent): Vec2 | null {
       const gx = leader.x - sy * back + cy * side;
       const gz = leader.z - cy * back - sy * side;
       const tol = 1.6 + row * 0.3;
-      if (Math.hypot(gx - e.x, gz - e.z) < tol && d < 6) return null;
-      // si l'emplacement de formation est inaccessible (mur), on vise le chef
-      if (!g.w.nav.walkable(gx, gz)) return d > 2.2 ? { x: leader.x, z: leader.z } : null;
-      return { x: gx, z: gz };
+      const sameFloor = Math.abs(leader.y - e.y) < 1.2;
+      if (Math.hypot(gx - e.x, gz - e.z) < tol && d < 6 && sameFloor) return null;
+      // si l'emplacement de formation est inaccessible (mur, autre étage), on vise le chef
+      if (!g.w.nav.walkable(gx, gz, leader.y)) return d > 2.2 || !sameFloor ? { x: leader.x, z: leader.z, y: leader.y } : null;
+      return { x: gx, z: gz, y: leader.y };
     }
     ai.follow = -1;
   }
   if (ai.mode === 'patrol' && ai.patrol.length > 0) {
     const p = ai.patrol[ai.patrolI % ai.patrol.length];
-    if (Math.hypot(p.x - e.x, p.z - e.z) < 1.5) {
+    if (Math.hypot(p.x - e.x, p.z - e.z) < 1.5 && Math.abs((p.y ?? 0) - e.y) < 1.2) {
       if (g.time > ai.waitUntil + 3) ai.waitUntil = g.time + g.rng.range(1, 4);
       if (g.time > ai.waitUntil) ai.patrolI++;
       return null;
@@ -215,7 +217,7 @@ function modeGoal(g: Game, e: Ent): Vec2 | null {
     return p;
   }
   if (ai.post) {
-    if (Math.hypot(ai.post.x - e.x, ai.post.z - e.z) < 0.9) {
+    if (Math.hypot(ai.post.x - e.x, ai.post.z - e.z) < 0.9 && Math.abs((ai.post.y ?? 0) - e.y) < 1.2) {
       if (ai.mode === 'flee') e.removeAt = Math.min(e.removeAt, g.time + 1);
       ai.run = false;
       return null;
@@ -225,40 +227,74 @@ function modeGoal(g: Game, e: Ent): Vec2 | null {
   return null;
 }
 
-/** Déplacement le long d'un chemin de la grille de navigation. */
+/** Déplacement le long d'un chemin de la grille de navigation (escaliers, ascenseurs). */
 export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: number): void {
   const ai = e.ai!;
   const nav = g.w.nav;
+  // ---------------------------------------------------------------- trajet en ascenseur
+  if (ai.ride) {
+    e.vx = 0;
+    e.vz = 0;
+    e.anim = Anim.IDLE;
+    if (g.time < ai.ride.until) return;
+    e.x = ai.ride.x;
+    e.y = ai.ride.y;
+    e.z = ai.ride.z;
+    e.flags &= ~FLAG.HIDDEN;
+    ai.ride = null;
+    ai.lastX = e.x;
+    ai.lastZ = e.z;
+    if (ai.path) ai.pathI = Math.min(ai.pathI + 1, ai.path.length / PATH_STRIDE - 1);
+  }
   const speed = run ? SPEED.run : SPEED.walk;
   let wantX = 0;
   let wantZ = 0;
   if (goal) {
+    const gy = goal.y ?? 0;
     const gd = Math.hypot(goal.x - e.x, goal.z - e.z);
-    if (gd > 0.35) {
+    if (gd > 0.35 || Math.abs(gy - e.y) > 1.2) {
       // (re)calcul du chemin si besoin
-      const goalMoved = Math.hypot(goal.x - ai.pathGoalX, goal.z - ai.pathGoalZ) > Math.max(1.2, gd * 0.25);
-      if (!ai.path || goalMoved || ai.pathI >= ai.path.length / 2 || (g.time > ai.repathAt && ai.stuck > 0.5)) {
-        if (nav.lineWalkable(e.x, e.z, goal.x, goal.z, 1)) {
-          ai.path = [goal.x, goal.z];
+      const goalMoved = Math.hypot(goal.x - ai.pathGoalX, goal.z - ai.pathGoalZ) > Math.max(1.2, gd * 0.25) || Math.abs(gy - ai.pathGoalY) > 1.2;
+      if (!ai.path || goalMoved || ai.pathI >= ai.path.length / PATH_STRIDE || (g.time > ai.repathAt && ai.stuck > 0.5)) {
+        if (Math.abs(gy - e.y) < 1.0 && nav.lineWalkable(e.x, e.z, goal.x, goal.z, 1, e.y)) {
+          ai.path = [goal.x, goal.z, gy, -1];
           ai.pathI = 0;
         } else if (g.pathBudget > 0) {
           const t0 = performance.now();
-          const p = nav.findPath(e.x, e.z, goal.x, goal.z, 25000);
+          const p = nav.findPath(e.x, e.z, e.y, goal.x, goal.z, gy, 25000);
           g.pathBudget -= performance.now() - t0 + 0.05;
-          ai.path = p ?? [goal.x, goal.z];
+          ai.path = p ?? [goal.x, goal.z, gy, -1];
           ai.pathI = 0;
         }
         ai.pathGoalX = goal.x;
         ai.pathGoalZ = goal.z;
+        ai.pathGoalY = gy;
         ai.repathAt = g.time + 2 + g.rng.next();
       }
-      if (ai.path) {
-        let px = ai.path[ai.pathI * 2];
-        let pz = ai.path[ai.pathI * 2 + 1];
-        if (Math.hypot(px - e.x, pz - e.z) < 0.45 && ai.pathI < ai.path.length / 2 - 1) {
-          ai.pathI++;
-          px = ai.path[ai.pathI * 2];
-          pz = ai.path[ai.pathI * 2 + 1];
+      const path = ai.path;
+      if (path) {
+        const n = path.length / PATH_STRIDE;
+        let o = ai.pathI * PATH_STRIDE;
+        let px = path[o];
+        let pz = path[o + 1];
+        if (Math.hypot(px - e.x, pz - e.z) < 0.45) {
+          const portal = path[o + 3];
+          if (portal >= 0 && ai.pathI < n - 1) {
+            // on prend l'ascenseur : disparition, puis arrivée à l'étage visé
+            const p = nav.portals[portal];
+            const q = o + PATH_STRIDE;
+            ai.ride = { until: g.time + (p ? p.cost / 6 : 3), x: path[q], y: path[q + 2], z: path[q + 1] };
+            e.flags |= FLAG.HIDDEN;
+            e.vx = 0;
+            e.vz = 0;
+            return;
+          }
+          if (ai.pathI < n - 1) {
+            ai.pathI++;
+            o = ai.pathI * PATH_STRIDE;
+            px = path[o];
+            pz = path[o + 1];
+          }
         }
         const dx = px - e.x;
         const dz = pz - e.z;
@@ -273,11 +309,11 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
       ai.path = null;
     }
   } else ai.path = null;
-  // séparation entre voisins
+  // séparation entre voisins (même étage)
   let sx = 0;
   let sz = 0;
   g.near(e.x, e.z, 0.9, (o, d2) => {
-    if (o === e || !o.alive || d2 < 1e-6) return;
+    if (o === e || !o.alive || d2 < 1e-6 || Math.abs(o.y - e.y) > 1.2) return;
     const d = Math.sqrt(d2);
     const k = (0.9 - d) / 0.9;
     sx += ((e.x - o.x) / d) * k;
@@ -291,29 +327,37 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
   e.vz += (wantZ - e.vz) * a;
   const nx = e.x + e.vx * dt;
   const nz = e.z + e.vz * dt;
-  const fromN = nav.idx(e.x, e.z);
-  const ok = (x: number, z: number) => {
-    const n = nav.idx(x, z);
-    if (n < 0 || nav.floor[n] < 0) return false;
-    if (fromN >= 0 && nav.floor[fromN] >= 0 && Math.abs(nav.floor[n] - nav.floor[fromN]) > 2) return false;
-    return true;
-  };
-  if (ok(nx, nz)) {
-    e.x = nx;
-    e.z = nz;
-  } else if (ok(nx, e.z)) {
-    e.x = nx;
-    e.vz *= 0.5;
-  } else if (ok(e.x, nz)) {
-    e.z = nz;
-    e.vx *= 0.5;
-  } else {
-    e.vx = 0;
-    e.vz = 0;
+  let cur = nav.nodeAt(e.x, e.z, e.y, 1.5);
+  if (cur < 0) {
+    // hors grille (poussé contre un mur, apparition imprécise) : on se raccroche au plus proche
+    const near = nav.nearestWalkable(e.x, e.z, e.y, 4);
+    if (near >= 0) {
+      const [cx, cz] = nav.nodeCenter(near);
+      e.x += (cx - e.x) * Math.min(1, dt * 4);
+      e.z += (cz - e.z) * Math.min(1, dt * 4);
+      e.y += (nav.nodeY(near) - e.y) * Math.min(1, dt * 6);
+    }
+    cur = -1;
   }
-  // altitude
-  const h = nav.heightAt(e.x, e.z);
-  if (Number.isFinite(h)) e.y += (h - e.y) * Math.min(1, dt * 14);
+  let node = -1;
+  if (cur >= 0) {
+    if ((node = nav.stepNode(cur, nx, nz)) >= 0) {
+      e.x = nx;
+      e.z = nz;
+    } else if ((node = nav.stepNode(cur, nx, e.z)) >= 0) {
+      e.x = nx;
+      e.vz *= 0.5;
+    } else if ((node = nav.stepNode(cur, e.x, nz)) >= 0) {
+      e.z = nz;
+      e.vx *= 0.5;
+    } else {
+      node = cur;
+      e.vx = 0;
+      e.vz = 0;
+    }
+  }
+  // altitude : on suit le sol du niveau atteint
+  if (node >= 0) e.y += (nav.nodeY(node) - e.y) * Math.min(1, dt * 14);
   // détection de blocage
   const moved = Math.hypot(e.x - ai.lastX, e.z - ai.lastZ);
   ai.lastX = e.x;
@@ -328,7 +372,8 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
     const ang = g.rng.range(0, Math.PI * 2);
     const tx = e.x + Math.cos(ang) * 0.6;
     const tz = e.z + Math.sin(ang) * 0.6;
-    if (ok(tx, tz)) {
+    const n2 = cur >= 0 ? nav.stepNode(cur, tx, tz) : -1;
+    if (n2 >= 0) {
       e.x = tx;
       e.z = tz;
     }

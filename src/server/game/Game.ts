@@ -227,8 +227,8 @@ export class Game {
         const x = p.x + dx;
         const z = p.z + dz;
         if (x < r[0] || x > r[2] || z < r[1] || z > r[3]) continue;
-        if (!this.w.nav.walkable(x, z)) continue;
-        if (this.w.nav.lineWalkable(p.x, p.z, x, z, 1)) continue; // de l'autre côté du comptoir
+        if (!this.w.nav.walkable(x, z, hq.floorY)) continue;
+        if (this.w.nav.lineWalkable(p.x, p.z, x, z, 1, hq.floorY)) continue; // de l'autre côté du comptoir
         const d = Math.min(x - r[0], r[2] - x, z - r[1], r[3] - z);
         if (bestD < 0 || d < bestD) {
           bestD = d;
@@ -246,6 +246,8 @@ export class Game {
     slot?: Slot | null;
     x: number;
     z: number;
+    /** Altitude du sol visé (étages) ; la rue par défaut. */
+    y?: number;
     hp: number;
     weapon: Weapon;
     name?: string;
@@ -254,7 +256,7 @@ export class Game {
     look?: number;
   }): Ent {
     const id = o.id ?? this.nextId++;
-    const y = this.w.nav.heightAt(o.x, o.z);
+    const y = this.w.nav.heightAt(o.x, o.z, o.y ?? 0);
     const e: Ent = {
       id,
       kind: o.kind,
@@ -265,7 +267,7 @@ export class Game {
       gang: o.gang ?? 0,
       name: o.name,
       x: o.x,
-      y: Number.isFinite(y) ? y : 0.25,
+      y: Number.isFinite(y) ? y : (o.y ?? 0.25),
       z: o.z,
       yaw: this.rng.range(0, Math.PI * 2),
       pitch: 0,
@@ -307,6 +309,8 @@ export class Game {
       pathI: 0,
       pathGoalX: 0,
       pathGoalZ: 0,
+      pathGoalY: 0,
+      ride: null,
       repathAt: 0,
       stuck: 0,
       lastX: 0,
@@ -515,6 +519,7 @@ export class Game {
 
   hostile(a: Ent, b: Ent): boolean {
     if (!b.alive || a.id === b.id || b.invulnerable || a.invulnerable) return false;
+    if (b.flags & FLAG.HIDDEN) return false; // dans un ascenseur
     if (b.role === 'barman') return false;
     const t = this.time;
     // agression directe : on riposte toujours
@@ -1328,7 +1333,7 @@ export class Game {
       f.money -= cost;
       if (cost > 0) this.notify(slot, `Le docteur vous a recousu : −${formatMoney(cost)}.`, 'money');
     }
-    const y = this.w.nav.heightAt(sp.x, sp.z);
+    const y = this.w.nav.heightAt(sp.x, sp.z, sp.y ?? hq.floorY);
     this.teleport(slot, sp.x, Number.isFinite(y) ? y : hq.floorY, sp.z, hq.desk ? hq.desk.yaw + Math.PI : 0);
     this.emitTo(slot, { t: 'respawned' });
     this.emitAll({ t: 'spawn', e: this.info(boss) });
@@ -1420,8 +1425,8 @@ export class Game {
     // point praticable dans la rue, un peu à l'écart de la porte
     let x = out.x;
     let z = out.z;
-    const n = this.w.nav.nearestWalkable(out.x + this.rng.range(-3, 3), out.z + this.rng.range(-3, 3), 8);
-    if (n >= 0) [x, z] = this.w.nav.cellCenter(n);
+    const n = this.w.nav.nearestWalkable(out.x + this.rng.range(-3, 3), out.z + this.rng.range(-3, 3), 0, 8);
+    if (n >= 0) [x, z] = this.w.nav.nodeCenter(n);
     switch (kind) {
       case 'contraband': {
         const reward = 250 + 50 * this.rng.int(0, 4);

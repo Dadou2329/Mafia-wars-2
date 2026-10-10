@@ -780,3 +780,9 @@ export const PIERS: [number, number, number, number][] = [
 ];
 
 export const RIVER_Z = 140; // bord du quai
+
+/** Sols interdits à la navigation (lit du fleuve). */
+export function navExclude(x: number, z: number, y: number): boolean {
+  void x;
+  return z >= RIVER_Z && y < -0.3;
+}

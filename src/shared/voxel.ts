@@ -1,12 +1,16 @@
-// Monde voxel creux découpé en tronçons (chunks) de 32³.
+// Monde voxel découpé en tronçons (chunks) de 32³.
 // Taille d'un voxel : 0,25 m. Le niveau de la chaussée est à y = 0 m, ce qui correspond
-// à la couche de voxels GROUND_VY (première couche d'air au-dessus des pavés).
+// à la couche de voxels GROUND_VY (première couche d'air au-dessus de la chaussée).
+// Sous la rue : 8,5 m de sous-sol (métro, tunnels, lit de la rivière).
+//
+// Un tronçon non alloué est « uniforme » : tous ses voxels valent fillMat[ci] (0 = air).
+// Le sous-sol plein et les grands volumes vides ne coûtent donc rien en mémoire.
 
 import { MAT_BLOCKS_BULLETS, MAT_SOLID } from './materials';
 
 export const VOXEL = 0.25;
 export const INV_VOXEL = 4;
-export const GROUND_VY = 8;
+export const GROUND_VY = 34;
 export const CHUNK_BITS = 5;
 export const CHUNK = 1 << CHUNK_BITS; // 32
 export const CHUNK_MASK = CHUNK - 1;
@@ -28,6 +32,8 @@ export class VoxelWorld {
   readonly cy: number;
   readonly cz: number;
   readonly chunks: (Uint8Array | null)[];
+  /** Matériau des tronçons non alloués (uniformes). */
+  readonly fillMat: Uint8Array;
 
   constructor(sx: number, sy: number, sz: number) {
     this.sx = sx;
@@ -37,6 +43,7 @@ export class VoxelWorld {
     this.cy = Math.ceil(sy / CHUNK);
     this.cz = Math.ceil(sz / CHUNK);
     this.chunks = new Array(this.cx * this.cy * this.cz).fill(null);
+    this.fillMat = new Uint8Array(this.cx * this.cy * this.cz);
   }
 
   chunkIndex(cx: number, cy: number, cz: number): number {
@@ -48,14 +55,29 @@ export class VoxelWorld {
     return this.chunks[this.chunkIndex(cx, cy, cz)];
   }
 
+  /** Matériau d'un tronçon uniforme (−1 si le tronçon est alloué ou hors du monde). */
+  uniformOf(cx: number, cy: number, cz: number): number {
+    if (cx < 0 || cy < 0 || cz < 0 || cx >= this.cx || cy >= this.cy || cz >= this.cz) return -1;
+    const ci = this.chunkIndex(cx, cy, cz);
+    return this.chunks[ci] === null ? this.fillMat[ci] : -1;
+  }
+
+  /** Nombre de tronçons alloués (statistiques). */
+  allocatedChunks(): number {
+    let n = 0;
+    for (const c of this.chunks) if (c) n++;
+    return n;
+  }
+
   inBounds(x: number, y: number, z: number): boolean {
     return x >= 0 && y >= 0 && z >= 0 && x < this.sx && y < this.sy && z < this.sz;
   }
 
   get(x: number, y: number, z: number): number {
     if (x < 0 || y < 0 || z < 0 || x >= this.sx || y >= this.sy || z >= this.sz) return 0;
-    const c = this.chunks[((y >> CHUNK_BITS) * this.cz + (z >> CHUNK_BITS)) * this.cx + (x >> CHUNK_BITS)];
-    if (c === null) return 0;
+    const ci = ((y >> CHUNK_BITS) * this.cz + (z >> CHUNK_BITS)) * this.cx + (x >> CHUNK_BITS);
+    const c = this.chunks[ci];
+    if (c === null) return this.fillMat[ci];
     return c[((y & CHUNK_MASK) << (CHUNK_BITS * 2)) | ((z & CHUNK_MASK) << CHUNK_BITS) | (x & CHUNK_MASK)];
   }
 
@@ -64,10 +86,20 @@ export class VoxelWorld {
     const ci = ((y >> CHUNK_BITS) * this.cz + (z >> CHUNK_BITS)) * this.cx + (x >> CHUNK_BITS);
     let c = this.chunks[ci];
     if (c === null) {
-      if (m === 0) return;
+      const u = this.fillMat[ci];
+      if (m === u) return;
       c = this.chunks[ci] = new Uint8Array(CHUNK_VOL);
+      if (u !== 0) c.fill(u);
     }
     c[((y & CHUNK_MASK) << (CHUNK_BITS * 2)) | ((z & CHUNK_MASK) << CHUNK_BITS) | (x & CHUNK_MASK)] = m;
+  }
+
+  /** Rend un tronçon entièrement uniforme (libère sa mémoire). */
+  setUniform(cx: number, cy: number, cz: number, m: number): void {
+    if (cx < 0 || cy < 0 || cz < 0 || cx >= this.cx || cy >= this.cy || cz >= this.cz) return;
+    const ci = this.chunkIndex(cx, cy, cz);
+    this.chunks[ci] = null;
+    this.fillMat[ci] = m;
   }
 
   /** Remplit la boîte [x0,x1)×[y0,y1)×[z0,z1) (bornes ordonnées automatiquement). */
@@ -81,6 +113,33 @@ export class VoxelWorld {
     x1 = Math.min(this.sx, x1);
     y1 = Math.min(this.sy, y1);
     z1 = Math.min(this.sz, z1);
+    if (x1 <= x0 || y1 <= y0 || z1 <= z0) return;
+    // tronçons entièrement couverts : on les rend uniformes d'un coup
+    const big = (x1 - x0) >= CHUNK && (y1 - y0) >= CHUNK && (z1 - z0) >= CHUNK;
+    if (big) {
+      const ccx0 = Math.ceil(x0 / CHUNK);
+      const ccy0 = Math.ceil(y0 / CHUNK);
+      const ccz0 = Math.ceil(z0 / CHUNK);
+      const ccx1 = Math.floor(x1 / CHUNK);
+      const ccy1 = Math.floor(y1 / CHUNK);
+      const ccz1 = Math.floor(z1 / CHUNK);
+      for (let cy = ccy0; cy < ccy1; cy++)
+        for (let cz = ccz0; cz < ccz1; cz++) for (let cx = ccx0; cx < ccx1; cx++) this.setUniform(cx, cy, cz, m);
+      for (let y = y0; y < y1; y++) {
+        const fullY = y >= ccy0 * CHUNK && y < ccy1 * CHUNK;
+        for (let z = z0; z < z1; z++) {
+          const fullZ = fullY && z >= ccz0 * CHUNK && z < ccz1 * CHUNK;
+          for (let x = x0; x < x1; x++) {
+            if (fullZ && x >= ccx0 * CHUNK && x < ccx1 * CHUNK) {
+              x = ccx1 * CHUNK - 1;
+              continue;
+            }
+            this.set(x, y, z, m);
+          }
+        }
+      }
+      return;
+    }
     for (let y = y0; y < y1; y++) for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) this.set(x, y, z, m);
   }
 
@@ -96,6 +155,28 @@ export class VoxelWorld {
     for (let y = y0; y < y1; y++)
       for (let z = z0; z < z1; z++)
         for (let x = x0; x < x1; x++) if (this.get(x, y, z) === from) this.set(x, y, z, to);
+  }
+
+  /** Repasse en uniforme les tronçons alloués qui ne contiennent qu'un seul matériau. */
+  compact(): number {
+    let freed = 0;
+    for (let ci = 0; ci < this.chunks.length; ci++) {
+      const c = this.chunks[ci];
+      if (!c) continue;
+      const m = c[0];
+      let same = true;
+      for (let i = 1; i < CHUNK_VOL; i++)
+        if (c[i] !== m) {
+          same = false;
+          break;
+        }
+      if (same) {
+        this.chunks[ci] = null;
+        this.fillMat[ci] = m;
+        freed++;
+      }
+    }
+    return freed;
   }
 
   isSolid(x: number, y: number, z: number): boolean {
@@ -145,7 +226,7 @@ export class VoxelWorld {
     let t = 0;
     let face = -1;
     // le voxel de départ est ignoré s'il est solide (on part de l'intérieur d'un mur)
-    for (let i = 0; i < 4096; i++) {
+    for (let i = 0; i < 8192; i++) {
       if (tMaxX < tMaxY) {
         if (tMaxX < tMaxZ) {
           x += stepX;

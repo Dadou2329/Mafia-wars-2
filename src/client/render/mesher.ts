@@ -73,18 +73,22 @@ function fillPad(world: VoxelWorld, cx: number, cy: number, cz: number): boolean
   const oy = cy * CHUNK - 1;
   const oz = cz * CHUNK - 1;
   const chunk = world.getChunk(cx, cy, cz);
-  let any = false;
+  // tronçon uniforme : un seul matériau à l'intérieur
+  const uni = chunk === null ? world.fillMat[world.chunkIndex(cx, cy, cz)] : 0;
+  let any = uni !== 0;
   for (let y = 0; y < P; y++) {
     const wy = oy + y;
     for (let z = 0; z < P; z++) {
       const wz = oz + z;
       const row = y * P2 + z * P;
-      const inner = chunk !== null && y > 0 && y < P - 1 && z > 0 && z < P - 1;
+      const inner = y > 0 && y < P - 1 && z > 0 && z < P - 1;
       for (let x = 0; x < P; x++) {
         let m: number;
         if (inner && x > 0 && x < P - 1) {
-          m = chunk![((y - 1) << 10) | ((z - 1) << 5) | (x - 1)];
-          if (m !== 0) any = true;
+          if (chunk !== null) {
+            m = chunk[((y - 1) << 10) | ((z - 1) << 5) | (x - 1)];
+            if (m !== 0) any = true;
+          } else m = uni;
         } else if (wy < 0) m = 1;
         else m = world.get(ox + x, wy, wz);
         pad[row + x] = m;
@@ -92,6 +96,39 @@ function fillPad(world: VoxelWorld, cx: number, cy: number, cz: number): boolean
     }
   }
   return any;
+}
+
+/** La bordure du tampon (voisins immédiats du tronçon) est-elle entièrement opaque ? */
+function shellOpaque(): boolean {
+  for (let y = 0; y < P; y++) {
+    const edgeY = y === 0 || y === P - 1;
+    for (let z = 0; z < P; z++) {
+      const edgeZ = edgeY || z === 0 || z === P - 1;
+      const row = y * P2 + z * P;
+      if (edgeZ) {
+        for (let x = 0; x < P; x++) if (MAT_VISIBLE[pad[row + x]] !== 1) return false;
+      } else if (MAT_VISIBLE[pad[row]] !== 1 || MAT_VISIBLE[pad[row + P - 1]] !== 1) return false;
+    }
+  }
+  return true;
+}
+
+/** Un tronçon uniforme entièrement entouré de tronçons opaques n'a aucune face visible. */
+function buried(world: VoxelWorld, cx: number, cy: number, cz: number): boolean {
+  const near = [
+    [cx + 1, cy, cz],
+    [cx - 1, cy, cz],
+    [cx, cy + 1, cz],
+    [cx, cy - 1, cz],
+    [cx, cy, cz + 1],
+    [cx, cy, cz - 1],
+  ];
+  for (const [x, y, z] of near) {
+    if (y < 0) continue; // sous le monde : plein
+    const u = world.uniformOf(x, y, z);
+    if (u <= 0 || MAT_VISIBLE[u] !== 1) return false;
+  }
+  return true;
 }
 
 // axes : pour chaque axe a, (u, v) tels que u × v = a
@@ -103,8 +140,13 @@ const AX = [
 const STRIDE = [1, P2, P]; // x, y, z dans pad
 
 export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number, out: MeshBuffers): void {
-  if (world.getChunk(cx, cy, cz) === null) return;
-  if (!fillPad(world, cx, cy, cz)) return;
+  if (world.getChunk(cx, cy, cz) === null) {
+    const u = world.fillMat[world.chunkIndex(cx, cy, cz)];
+    if (u === 0 || MAT_VISIBLE[u] !== 1) return;
+    if (buried(world, cx, cy, cz)) return;
+    fillPad(world, cx, cy, cz);
+    if (shellOpaque()) return;
+  } else if (!fillPad(world, cx, cy, cz)) return;
   const base = [cx * CHUNK, cy * CHUNK, cz * CHUNK];
   const v = new Array<number>(12);
   for (let a = 0; a < 3; a++) {

@@ -1,7 +1,7 @@
 // Chargement du monde : génération dans un worker (repli sur le fil principal si besoin).
 import type { BuildingInfo, LightSource, PropPlacement } from '../../shared/city/gen/context';
 import { generateCity } from '../../shared/city/gen/city';
-import { RIVER_Z } from '../../shared/city/plan';
+import { buildCityNav } from '../../shared/city/navBuild';
 import { NavGrid } from '../../shared/nav';
 import { VoxelWorld } from '../../shared/voxel';
 import { computeLightVolume, type LightVolume } from '../render/lightVolume';
@@ -59,7 +59,8 @@ export function loadWorld(): Promise<WorldData> {
         const [sx, sy, sz] = m.dims as number[];
         const world = new VoxelWorld(sx, sy, sz);
         for (let i = 0; i < world.chunks.length; i++) world.chunks[i] = m.chunks[i] ?? null;
-        const nav = NavGrid.fromArrays(m.nav.w, m.nav.d, m.nav.floor, m.nav.clear);
+        world.fillMat.set(m.fillMat);
+        const nav = NavGrid.deserialize(m.nav);
         progress('Londres est prête.', 1);
         resolve({
           world,
@@ -91,7 +92,7 @@ function loadOnMainThread(): WorldData {
   const t0 = performance.now();
   const city = generateCity();
   const light = computeLightVolume(city.world, city.ctx.lights);
-  const nav = NavGrid.build(city.world, RIVER_Z);
+  const nav = buildCityNav(city);
   const regions = meshRegions(city.world);
   progress('Londres est prête.', 1);
   return {

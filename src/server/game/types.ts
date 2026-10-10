@@ -7,9 +7,11 @@ import type { Slot } from '../../shared/protocol';
 export type Role = 'boss' | 'gangster' | 'lieutenant' | 'thug' | 'police' | 'guard' | 'barman';
 export type Mode = 'pool' | 'escort' | 'squad' | 'guard' | 'patrol' | 'flee' | 'hold' | 'idle';
 
+/** Point au sol ; y = altitude du sol visé (m), 0 (la rue) par défaut. */
 export interface Vec2 {
   x: number;
   z: number;
+  y?: number;
 }
 
 export interface AiState {
@@ -25,11 +27,14 @@ export interface AiState {
   /** Bâtiment d'attache (voyous, gardes) ou -1. */
   home: number;
   leash: number;
-  // déplacement
+  // déplacement (chemin : points [x, z, y, portail])
   path: number[] | null;
   pathI: number;
   pathGoalX: number;
   pathGoalZ: number;
+  pathGoalY: number;
+  /** Trajet en ascenseur en cours : arrivée à cet instant au point indiqué. */
+  ride: { until: number; x: number; y: number; z: number } | null;
   repathAt: number;
   stuck: number;
   lastX: number;

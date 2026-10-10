@@ -44,8 +44,9 @@ section('Navigation');
 const hqD = w.byId.get(HQ_BUILDING.dadou.id)!;
 let navFails = 0;
 for (const b of w.buildings) {
-  const p = w.nav.findPath(hqD.doors[0].out.x, hqD.doors[0].out.z, b.center.x, b.center.z, 200000);
-  const ok = !!p && Math.hypot(p[p.length - 2] - b.center.x, p[p.length - 1] - b.center.z) < 2;
+  const p = w.nav.findPath(hqD.doors[0].out.x, hqD.doors[0].out.z, 0, b.center.x, b.center.z, b.center.y ?? b.floorY, 200000);
+  const e = p ? p.length - 4 : 0;
+  const ok = !!p && Math.hypot(p[e] - b.center.x, p[e + 1] - b.center.z) < 2;
   if (!ok) {
     navFails++;
     console.log(`    inaccessible : ${b.def.name}`);

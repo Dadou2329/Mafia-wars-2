@@ -6,6 +6,7 @@ import { GROUND_VY, INV_VOXEL, VOXEL, VoxelWorld } from '../../voxel';
 import { PROP_DEFS, PROP_INDEX, type PropKind } from '../props';
 import type { BuildingDef, Side } from '../plan';
 import { Rng } from '../../util';
+import type { PortalDef } from '../../nav';
 
 export interface PropPlacement {
   kind: number; // index dans PROP_KINDS
@@ -32,6 +33,8 @@ export interface LightSource {
 export interface Pt {
   x: number;
   z: number;
+  /** Altitude du sol (m) ; la rue (0) si absente. */
+  y?: number;
 }
 
 export interface DoorInfo {
@@ -84,6 +87,8 @@ export class GenContext {
   readonly buildings: BuildingInfo[] = [];
   /** Empreintes au sol des bâtiments (m) pour éviter d'y poser des objets de rue. */
   readonly footprints: [number, number, number, number][] = [];
+  /** Ascenseurs et autres liens de navigation. */
+  readonly portals: PortalDef[] = [];
   /** Cheminées fumantes (pour les particules côté client). */
   readonly smokes: { x: number; y: number; z: number; big: boolean }[] = [];
   readonly rng: Rng;
