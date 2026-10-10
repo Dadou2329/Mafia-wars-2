@@ -538,8 +538,8 @@ export class GameClient {
           const vd = VEHICLES[def];
           this.hud.setHint(
             vd.cls === 'vtol'
-              ? `${actionKey(settings.bindings, 'forward')}/${actionKey(settings.bindings, 'back')} : poussée — ${actionKey(settings.bindings, 'left')}/${actionKey(settings.bindings, 'right')} : virer — ${actionKey(settings.bindings, 'jump')} : monter — ${actionKey(settings.bindings, 'crouch')} : descendre — ${actionKey(settings.bindings, 'interact')} : descendre de l’aéronef`
-              : `${actionKey(settings.bindings, 'forward')} : accélérer — ${actionKey(settings.bindings, 'back')} : freiner — ${actionKey(settings.bindings, 'jump')} : frein à main — clic droit : tirer par la vitre — ${actionKey(settings.bindings, 'interact')} : descendre`,
+              ? `${actionKey(settings.bindings, 'forward')}/${actionKey(settings.bindings, 'back')} : poussée — ${actionKey(settings.bindings, 'left')}/${actionKey(settings.bindings, 'right')} : virer — ${actionKey(settings.bindings, 'jump')} : prendre de l’altitude — ${actionKey(settings.bindings, 'crouch')} : en perdre — ${actionKey(settings.bindings, 'interact')} : quitter l’aéronef (posé)`
+              : `${actionKey(settings.bindings, 'forward')} : accélérer — ${actionKey(settings.bindings, 'back')} : freiner — ${actionKey(settings.bindings, 'jump')} : frein à main — ${actionKey(settings.bindings, 'aim')} : tirer par la vitre — ${actionKey(settings.bindings, 'interact')} : descendre`,
           );
           setTimeout(() => this.hud.setHint(''), 7000);
         } else if (this.player.drive && this.player.drive.id === e.id && e.driver !== this.selfId) {

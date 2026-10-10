@@ -153,7 +153,8 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
 - **Police** : coups de feu en public, passants abattus, intrusions filmées et braquages font
   monter le niveau de recherche ; le NYPD envoie ses agents, puis des croiseurs qui foncent dans
   les rues toutes sirènes hurlantes et déposent leurs équipes. Semez-les pour qu’ils perdent
-  votre trace (et pourquoi pas, volez un croiseur).
+  votre trace : vos propres bâtiments sont autant de **planques sûres** où l’on se fait oublier
+  bien plus vite (et pourquoi pas, volez un croiseur).
 - **Ville vivante** : passants, circulation (voitures à coussin magnétique, taxis jaunes) et
   couloirs aériens de voitures volantes, métro, ponts, écrans géants de Times Square qui
   affichent la propagande du parrain qui tient le quartier, hologrammes, pluie et orages, cycle
@@ -197,7 +198,7 @@ tests/                 tests automatiques
 
 ```bash
 npm run typecheck      # vérification TypeScript stricte
-npm test               # 128 contrôles sans navigateur : génération, navigation, simulation
+npm test               # 129 contrôles sans navigateur : génération, navigation, simulation
                        # (ordres → combats → captures), ascension, véhicules, sécurité,
                        # braquages, drones, convois, verre, NYPD, grenades, événements,
                        # victoire, textes

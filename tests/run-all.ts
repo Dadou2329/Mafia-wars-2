@@ -404,6 +404,24 @@ section('NYPD 2085');
   }
   D.heat = 0;
   for (const e of g.ents.values()) if (e.role === 'police') e.ai!.aggro.clear();
+  // planque sûre : caché dans un de ses bâtiments, le parrain sème la police bien plus vite
+  {
+    const hide = g.hq('dadou');
+    const p = hide.defend.find((d) => Math.abs((d.y ?? hide.floorY) - hide.floorY) < 0.6) ?? hide.center;
+    D.heat = 3;
+    D.heatSeenAt = g.time - 20;
+    boss.lastDamageAt = g.time - 20;
+    for (let i = 0; i < 20 * 3; i++) {
+      boss.x = p.x;
+      boss.z = p.z;
+      boss.y = p.y ?? hide.floorY;
+      D.heatSeenAt = Math.min(D.heatSeenAt, g.time - 4);
+      g.step();
+    }
+    drain();
+    check('caché dans sa planque, le parrain sème la police', D.heat < 1.5, `3 → ${D.heat.toFixed(2)}`);
+    D.heat = 0;
+  }
 }
 
 section('Grenades');

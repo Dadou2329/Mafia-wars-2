@@ -84,6 +84,8 @@ for (const s of SHOTS) {
     gc.player.yaw = s.yaw;
     gc.player.pitch = s.pitch ?? 0;
     if (typeof s.rain === 'number' && gc.rain) gc.rain.intensity = s.rain;
+    // l'heure du client rejoint celle du serveur en douceur : on l'impose pour la photo
+    if (typeof s.t === 'number') gc.dayTimeSmooth = s.t;
   }, s);
   await sleep(2500);
   await A.screenshot({ path: `${OUT}-${s.name}.png`, timeout: 120000 });

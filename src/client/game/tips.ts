@@ -29,7 +29,7 @@ export class Tips {
     return this.gc.settings.tips !== false;
   }
 
-  private key(a: 'interact' | 'map' | 'wheel' | 'phone' | 'view' | 'reload'): string {
+  private key(a: 'interact' | 'map' | 'wheel' | 'phone' | 'view' | 'reload' | 'grenade'): string {
     return actionKey(settings.bindings, a);
   }
 
@@ -69,6 +69,9 @@ export class Tips {
     if (this.t > 50) this.tip('wheel', `${this.key('wheel')} près de vos hommes : ordres rapides (« Suivez-moi », « Attaquez »…). ${this.key('view')} : vue à la première ou à la troisième personne.`);
     if (this.t > 80) this.tip('phone', `${this.key('phone')} : votre téléphone — alertes, taxi volant vers le QG, véhicules et ordres rapides.`);
     if (this.t > 140) this.tip('free', 'Aucune mission imposée : braquages, convois, conquête… New York est à vous, faites-en ce que vous voulez.');
+    if (this.t > 200) this.tip('grenade', `${this.key('grenade')} : lancer une grenade. Son souffle disperse les défenseurs… et fait voler les vitrines en éclats.`);
+    if (this.t > 270) this.tip('heist', `Banques, bourse, casino : piratez leur terminal de sécurité (${this.key('interact')}) pour couper caméras et tourelles, puis videz le coffre avant l’arrivée du NYPD.`);
+    if (this.t > 340) this.tip('convoys', 'Téléphone → Convois : envoyez vos camions blindés, escortez-les, ou interceptez ceux de votre rival. Téléphone → Immobilier : emménagez plus haut, jusqu’à la tour.');
   }
 
   onKill(ent: ClientEnt): void {

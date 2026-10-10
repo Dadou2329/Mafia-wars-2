@@ -1662,10 +1662,25 @@ export class Game {
         this.hqAlertAt[slot] = this.time;
         this.notify(slot, `Attention ! ${BOSS_NAME[otherSlot(slot)]} approche de votre quartier général !`, 'alert');
       }
+      // planque sûre : caché dans un de ses propres bâtiments (hors combat), on sème la police
+      // bien plus vite — les agents ne viennent pas vous y chercher
+      let safe: BuildingInfo | null = null;
+      if (f.heat > 0) {
+        const boss = this.ents.get(f.bossId)!;
+        if (boss.alive && f.vehicle < 0 && this.time - boss.lastDamageAt > 6) {
+          for (const b of this.w.buildings) {
+            const fp = b.footprint;
+            if (boss.x < fp[0] || boss.x > fp[2] || boss.z < fp[1] || boss.z > fp[3]) continue;
+            if (this.bstate.get(b.id)?.owner === f.faction && this.inBuildingArea(b, boss.x, boss.y, boss.z)) safe = b;
+            break;
+          }
+        }
+        if (safe) this.notify(slot, `Vous vous cachez ${aNom(safe.def.name)} : la police va perdre votre trace.`, 'info', 'safehouse', 40);
+      }
       // recherche policière : décroissance
-      if (f.heat > 0 && this.time - f.heatSeenAt > 12) {
+      if (f.heat > 0 && this.time - f.heatSeenAt > (safe ? 3 : 12)) {
         const before = Math.ceil(f.heat);
-        f.heat = Math.max(0, f.heat - dt / 7);
+        f.heat = Math.max(0, f.heat - dt / (safe ? 1.5 : 7));
         if (Math.ceil(f.heat) < before) this.emitTo(slot, { t: 'wanted', level: Math.ceil(f.heat) });
         if (f.heat === 0) this.notify(slot, 'La police a perdu votre trace.', 'good', 'lost-police', 10);
       }
