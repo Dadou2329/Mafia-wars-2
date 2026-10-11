@@ -33,8 +33,10 @@ Téléchargez [`release/MafiaWars.exe`](release/MafiaWars.exe) (environ 90 Mo ; 
 (le serveur du jeu) s’ouvre, puis le jeu s’ouvre dans votre navigateur ; gardez la fenêtre noire
 ouverte pendant la partie. Windows peut afficher « Windows a protégé votre ordinateur » (le
 programme n’est pas signé) : « Informations complémentaires » puis « Exécuter quand même ».
-Pour jouer à deux, un seul joueur lance l’exécutable et envoie le lien d’invitation du salon à
-l’autre, qui l’ouvre dans son navigateur. Détails : [release/LISEZMOI.txt](release/LISEZMOI.txt).
+Pour jouer à deux, le code ne suffit pas : il n’existe que sur l’ordinateur qui a créé la
+partie. L’hôte envoie son lien d’invitation (ou le code et l’« Adresse pour votre ami » affichée
+dans son salon) ; l’invité ouvre le lien, ou saisit code et adresse dans « Rejoindre une
+partie ». Détails, et jeu à distance : [release/LISEZMOI.txt](release/LISEZMOI.txt).
 
 ## Démarrage rapide (développement)
 
@@ -75,9 +77,18 @@ puis le jeu y est intégré.
 
 ## Jouer en réseau local ou par Internet
 
-- **Réseau local** : `npm run build && npm start` sur l’ordinateur hôte ; le serveur affiche son
-  adresse locale (par exemple `http://192.168.1.20:3000`) que l’autre joueur ouvre dans son
-  navigateur. Autorisez Node.js dans le pare-feu si la page ne s’ouvre pas.
+- **Un seul serveur par partie** : chaque exécutable (ou `npm start`) fait tourner son propre
+  serveur, et un code de salon n’existe que sur l’ordinateur qui l’a créé. L’invité doit donc
+  rejoindre **l’ordinateur de l’hôte**, pas le sien.
+- **Réseau local** : l’hôte crée la partie ; son salon affiche le code et, dessous, « Adresse pour
+  votre ami » (par exemple `192.168.1.20:3000`). L’invité ouvre le lien d’invitation, ou dans son
+  propre jeu « Rejoindre une partie » avec le code **et** cette adresse (coller le lien remplit
+  les deux) ; le jeu vérifie que l’ordinateur de l’hôte répond et que le code y existe, puis y
+  conduit l’invité. Si l’ordinateur ne répond pas : autorisez MafiaWars (ou Node.js) dans le
+  pare-feu de l’hôte, sur les réseaux privés.
+- **À distance sans configuration** : un réseau local virtuel gratuit (Radmin VPN, ZeroTier,
+  Tailscale) relie les deux PC ; le salon de l’hôte affiche cette adresse sous « Autres
+  adresses ».
 - **Par Internet** : déployez la version de production chez n’importe quel hébergeur Node, ou
   redirigez le port TCP 3000 de votre box. Derrière un proxy inverse, activez les WebSockets pour
   `/socket.io/`. Un client servi ailleurs peut viser un serveur avec `?server=https://…`.
@@ -310,6 +321,7 @@ node tests/cyber-ui.mjs      # écran CYBERNÉTIQUE : achat, amélioration, inst
 npx tsx tests/plan-check.ts  # cohérence et symétrie du plan de la ville
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
 node tests/rematch.mjs # réseau : salon, reconnexion (implants compris), pause, fin, revanche
+node tests/join-lan.mjs # deux serveurs (deux exécutables) : rejoindre l’hôte avec code + adresse
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
 node tests/tour.mjs    # visite photographique de la ville (heures, pluie, tirs)
 node tests/audio/smoke.mjs  # moteur audio

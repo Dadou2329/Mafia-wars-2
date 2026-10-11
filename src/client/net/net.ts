@@ -102,7 +102,15 @@ export class Net {
 
   private request<T>(ev: string, data: unknown): Promise<T> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Le serveur ne répond pas.')), 8000);
+      // au lancement, la génération de la ville occupe la page : la réponse peut être lue en
+      // retard. Tant que la connexion tient, on patiente (jusqu'à 30 s) ; coupée, on abandonne.
+      const t0 = performance.now();
+      let timer = 0;
+      const check = (): void => {
+        if (this.socket.connected && performance.now() - t0 < 30000) timer = window.setTimeout(check, 4000);
+        else reject(new Error('Le serveur ne répond pas.'));
+      };
+      timer = window.setTimeout(check, 8000);
       this.socket.emit(ev, data, (r: T) => {
         clearTimeout(timer);
         resolve(r);

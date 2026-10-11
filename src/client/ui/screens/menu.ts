@@ -6,6 +6,7 @@ import type { Slot } from '../../../shared/protocol';
 import { saveSettings, settings } from '../../settings';
 import { onWorldProgress } from '../../world/worldLoader';
 import { h } from '../dom';
+import { hostInfo, isThisServer, parseHost } from '../../net/hostInfo';
 
 // ============================================================================ outils partagés
 
@@ -174,6 +175,9 @@ export function closeOnEscape(app: AppApi, el: HTMLElement, close: () => void): 
 }
 
 /** Attend la connexion au serveur (au plus `ms` millisecondes). */
+/** Dernière adresse d'hôte saisie dans « Rejoindre une partie ». */
+const LAST_HOST_KEY = 'mafiawars2.lastHost';
+
 export function whenConnected(app: AppApi, ms = 8000): Promise<boolean> {
   if (app.net.connected) return Promise.resolve(true);
   return new Promise((resolve) => {
@@ -500,6 +504,9 @@ export function mainMenu(app: AppApi): HTMLElement {
   root.append(ambience(), main, profile, corner, footer);
 
   // ------------------------------------------------------------ rejoindre une partie
+  // Chaque exécutable a son propre serveur : le code n'existe que sur l'ordinateur de l'hôte.
+  // L'invité donne donc aussi l'adresse de cet ordinateur (affichée dans son salon), ou colle
+  // son lien d'invitation ; son navigateur part alors sur l'ordinateur de l'hôte.
   function openJoin(): void {
     if (busy || root.querySelector('.mw-modal')) return;
     const input = h('input', {
@@ -513,6 +520,19 @@ export function mainMenu(app: AppApi): HTMLElement {
       'aria-label': 'Code de la partie',
     });
     input.value = inviteCode;
+    const addr = h('input', {
+      type: 'text',
+      class: 'mw-addr-input',
+      spellcheck: false,
+      autocomplete: 'off',
+      placeholder: 'ex. 192.168.1.20:3000',
+      'aria-label': 'Adresse de l’ordinateur de votre ami',
+    });
+    try {
+      addr.value = localStorage.getItem(LAST_HOST_KEY) ?? '';
+    } catch {
+      /* stockage indisponible */
+    }
     const err = h('div', { class: 'mw-join-error', role: 'alert' });
     const go = button(app, 'Rejoindre', 'btn', () => void submit());
     const cancel = button(app, 'Annuler', 'btn ghost', () => close());
@@ -520,29 +540,44 @@ export function mainMenu(app: AppApi): HTMLElement {
       go.disabled = input.value.length !== 4 || pending;
     };
     let pending = false;
+    /** Un lien d'invitation collé dans l'un des champs : code et adresse de l'hôte. */
+    const takeLink = (text: string): boolean => {
+      if (!/[?&]code=[a-z]{4}/i.test(text)) return false;
+      const p = parseHost(text);
+      if (!p?.code) return false;
+      input.value = p.code;
+      addr.value = isThisServer(p.origin) ? '' : p.origin.replace(/^http:\/\//, '');
+      err.textContent = '';
+      sync();
+      return true;
+    };
     input.addEventListener('input', () => {
-      // un lien d'invitation collé : on garde son code
-      const m = /[?&]code=([a-z]{4})/i.exec(input.value);
-      const raw = m ? m[1] : input.value;
-      input.value = raw.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+      if (takeLink(input.value)) return;
+      input.value = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
       err.textContent = '';
       sync();
     });
-    input.addEventListener('paste', (e) => {
-      const text = e.clipboardData?.getData('text') ?? '';
-      const m = /[?&]code=([a-z]{4})/i.exec(text);
-      if (m) {
-        e.preventDefault();
-        input.value = m[1].toUpperCase();
-        sync();
-      }
+    addr.addEventListener('input', () => {
+      if (!takeLink(addr.value)) err.textContent = '';
     });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        void submit();
-      }
-    });
+    for (const el of [input, addr]) {
+      el.addEventListener('paste', (e) => {
+        if (takeLink(e.clipboardData?.getData('text') ?? '')) e.preventDefault();
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void submit();
+        }
+      });
+    }
+    const fail = (text: string): void => {
+      pending = false;
+      go.textContent = 'Rejoindre';
+      sync();
+      err.textContent = fr(text);
+      app.audio.play('ui_error');
+    };
     async function submit(): Promise<void> {
       if (pending) return;
       if (input.value.length !== 4) {
@@ -550,26 +585,41 @@ export function mainMenu(app: AppApi): HTMLElement {
         app.audio.play('ui_error');
         return;
       }
+      const code = input.value;
+      const host = addr.value.trim() ? parseHost(addr.value) : null;
+      if (addr.value.trim() && !host) return fail('Adresse illisible : écrivez-la comme dans le salon de votre ami, par exemple 192.168.1.20:3000.');
       pending = true;
       sync();
       go.textContent = 'Connexion…';
       err.textContent = '';
-      if (!(await whenConnected(app, 9000))) {
-        pending = false;
-        go.textContent = 'Rejoindre';
-        sync();
-        err.textContent = fr('Impossible de joindre le serveur de jeu. Réessayez dans un instant.');
-        app.audio.play('ui_error');
+      // partie sur un autre ordinateur : on vérifie qu'il répond et que le code y existe, puis on y va
+      if (host && !isThisServer(host.origin)) {
+        const shown = host.origin.replace(/^http:\/\//, '');
+        const info = await hostInfo(host.origin, code, 6000);
+        if (!root.isConnected) return;
+        if (!info)
+          return fail(
+            `L’ordinateur de votre ami (${shown}) ne répond pas. Vérifiez que son jeu est lancé, que vous êtes sur le même réseau (même box ou Wi-Fi) et que le pare-feu Windows de votre ami autorise MafiaWars sur les réseaux privés.`,
+          );
+        if (!info.room) return fail(`Aucune partie ${code} sur l’ordinateur de votre ami : vérifiez le code affiché dans son salon.`);
+        try {
+          localStorage.setItem(LAST_HOST_KEY, addr.value.trim());
+        } catch {
+          /* stockage indisponible */
+        }
+        go.textContent = 'Départ vers la partie…';
+        location.href = `${host.origin}/?code=${code}`;
         return;
       }
-      const e = await app.joinRoom(input.value);
+      if (!(await whenConnected(app, 9000))) return fail('Impossible de joindre le serveur de jeu. Réessayez dans un instant.');
+      const e = await app.joinRoom(code);
       if (!root.isConnected) return; // le salon s'affiche
-      pending = false;
-      go.textContent = 'Rejoindre';
-      sync();
       if (e) {
-        err.textContent = fr(e);
-        app.audio.play('ui_error');
+        fail(
+          /aucune partie/i.test(e)
+            ? 'Aucune partie avec ce code sur cet ordinateur. Le code n’existe que sur l’ordinateur qui a créé la partie : indiquez aussi l’adresse de votre ami (affichée dans son salon), ou collez son lien d’invitation.'
+            : e,
+        );
         input.select();
       } else close();
     }
@@ -580,9 +630,16 @@ export function mainMenu(app: AppApi): HTMLElement {
       h('div', { class: 'divider' }),
       h('p', { class: 'mw-modal-text' }, fr('Saisissez le code de 4 lettres que votre adversaire vous a transmis.')),
       h('div', { class: 'mw-code-plate' }, input),
+      h(
+        'label',
+        { class: 'mw-addr' },
+        h('span', { class: 'mw-addr-label' }, fr('Adresse de l’ordinateur de votre ami')),
+        addr,
+        h('span', { class: 'mw-addr-help dim' }, fr('Affichée dans son salon, sous le code. Laissez vide si la partie est sur cet ordinateur.')),
+      ),
       err,
       h('div', { class: 'mw-modal-actions' }, cancel, go),
-      h('p', { class: 'mw-join-hint dim' }, fr('Astuce : vous pouvez aussi coller le lien d’invitation.')),
+      h('p', { class: 'mw-join-hint dim' }, fr('Astuce : collez simplement le lien d’invitation de votre ami, le code et l’adresse se remplissent seuls.')),
     );
     const close = openOverlay(app, root, box, () => close());
     sync();

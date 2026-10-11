@@ -8,6 +8,7 @@ import { onWorldProgress } from '../../world/worldLoader';
 import { clear, h } from '../dom';
 import { BRAND, TITLE, ambience, button, choose, fr, icon, pct, shieldPointer, withSounds } from './menu';
 import { currentPortraits } from './settings';
+import { hostInfo, onLocalhost, shareableOrigin, type HostInfo } from '../../net/hostInfo';
 
 const SLOTS: Slot[] = ['dadou', 'even'];
 
@@ -135,13 +136,13 @@ function describeChanges(prev: RoomState | null, s: RoomState, me: string): stri
   return out;
 }
 
-/** Lien d'invitation (on garde un éventuel ?server=…). */
-function inviteLink(code: string): string {
+/** Lien d'invitation (on garde un éventuel ?server=…) ; « localhost » remplacé par l'adresse locale. */
+function inviteLink(code: string, info: HostInfo | null): string {
   const params = new URLSearchParams();
   const server = new URLSearchParams(location.search).get('server');
   if (server) params.set('server', server);
   params.set('code', code);
-  return `${location.origin}${location.pathname}?${params.toString()}`;
+  return `${shareableOrigin(info)}${location.pathname}?${params.toString()}`;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -197,6 +198,7 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
   // ------------------------------------------------------------ en-tête : logo, titre, code
   const codeValue = h('div', { class: 'mw-code-value', title: 'Code du salon' }, '····');
   const copyMsg = h('span', { class: 'mw-copy-msg', role: 'status' });
+  const hostLine = h('div', { class: 'mw-host' });
   const copyBtn = button(app, [icon('link'), 'Copier le lien d’invitation'], 'btn small ghost mw-copy', () => void copyInvite());
   const header = h(
     'header',
@@ -208,13 +210,40 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
       h('h1', { class: 'title-l' }, 'Choisissez votre parrain'),
       h('p', { class: 'mw-lobby-sub' }, fr('Chaque joueur incarne un parrain. La partie commence dès que les deux sont prêts.')),
     ),
-    h('div', { class: 'mw-code' }, h('div', { class: 'label' }, 'Code du salon'), codeValue, h('div', { class: 'mw-copy-row' }, copyBtn, copyMsg)),
+    h('div', { class: 'mw-code' }, h('div', { class: 'label' }, 'Code du salon'), codeValue, h('div', { class: 'mw-copy-row' }, copyBtn, copyMsg), hostLine),
   );
+
+  // adresse de cet ordinateur : l'invité la saisit avec le code (chaque exécutable a son serveur)
+  let host: HostInfo | null = null;
+  void hostInfo().then((info) => {
+    if (disposed) return;
+    host = info;
+    const origin = shareableOrigin(info);
+    if (onLocalhost() && !info?.lan) {
+      hostLine.textContent = fr('Aucun réseau local détecté : votre adversaire ne pourra pas vous rejoindre.');
+      hostLine.classList.add('is-warn');
+      return;
+    }
+    clear(hostLine);
+    hostLine.append(h('span', { class: 'label' }, 'Adresse pour votre ami'), h('span', { class: 'mw-host-value' }, origin.replace(/^https?:\/\//, '')));
+    // autres adresses (réseau virtuel Radmin VPN, ZeroTier, Tailscale… pour jouer à distance)
+    const port = location.port ? `:${location.port}` : '';
+    const others = (info?.addresses ?? []).filter((a) => a.address !== info?.lan && !origin.includes(a.address));
+    if (others.length)
+      hostLine.after(
+        h(
+          'div',
+          { class: 'mw-host-more' },
+          fr(`Autres adresses : ${others.map((a) => `${a.address}${port} (${a.name})`).join(' · ')}`),
+        ),
+      );
+    hostLine.title = fr('Votre ami clique sur « Rejoindre une partie » et saisit le code et cette adresse (ou ouvre le lien d’invitation). Vous devez être sur le même réseau.');
+  });
 
   async function copyInvite(): Promise<void> {
     const code = net.room?.code;
     if (!code) return;
-    const link = inviteLink(code);
+    const link = inviteLink(code, host);
     if (await copyText(link)) {
       copyMsg.textContent = fr('Lien copié !');
       copyMsg.classList.add('is-visible');

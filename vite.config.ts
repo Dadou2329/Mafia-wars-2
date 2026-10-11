@@ -18,6 +18,7 @@ export default defineConfig({
     // NO_HMR=1 : pas de rechargement automatique (tests automatisés)
     hmr: process.env.NO_HMR ? false : undefined,
     proxy: {
+      '/api': `http://localhost:${SERVER_PORT}`,
       '/socket.io': {
         target: `http://localhost:${SERVER_PORT}`,
         ws: true,

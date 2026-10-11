@@ -13,10 +13,26 @@ LANCER LE JEU
    Gardez la fenêtre noire ouverte pendant toute la partie : la fermer arrête le jeu.
 
 JOUER À DEUX
-- Sur le même réseau (même box, Wi-Fi ou câble) : un seul joueur lance MafiaWars.exe,
-  clique sur « Créer une partie », puis « Copier le lien d'invitation » et envoie ce lien
-  à son adversaire, qui l'ouvre simplement dans son navigateur (rien à installer).
-- Par Internet : voir le README du projet (redirection du port 3000 ou hébergement).
+Important : chaque MafiaWars.exe fait tourner sa propre partie. Le code de 4 lettres
+n'existe QUE sur l'ordinateur de celui qui a créé la partie : il faut donc aussi son adresse.
+
+- Sur le même réseau (même box, Wi-Fi ou câble) :
+  1. L'hôte lance MafiaWars.exe et clique sur « Créer une partie ». Son salon affiche le
+     code ET, juste en dessous, « Adresse pour votre ami » (par exemple 192.168.1.20:3000).
+  2. L'hôte envoie le lien d'invitation (bouton « Copier le lien d'invitation »), ou bien le
+     code et l'adresse.
+  3. L'invité ouvre ce lien dans son navigateur — ou, dans son jeu, clique sur « Rejoindre
+     une partie » et saisit le code ET l'adresse (coller le lien remplit les deux).
+  Si « l'ordinateur de votre ami ne répond pas » : l'hôte doit autoriser MafiaWars dans le
+  pare-feu Windows (« réseaux privés » ; sinon Paramètres > Pare-feu > Autoriser une
+  application), et les deux PC doivent être sur la même box.
+
+- À distance (chacun chez soi) : l'adresse du réseau local ne marche pas par Internet.
+  Le plus simple : installez tous les deux un logiciel gratuit de « réseau local virtuel »
+  (Radmin VPN, ZeroTier ou Tailscale) et rejoignez le même réseau. L'hôte lance ensuite le
+  jeu : son salon affiche, sous « Autres adresses », l'adresse de ce réseau virtuel
+  (par exemple 26.12.34.56:3000 avec Radmin VPN) ; l'invité la saisit avec le code.
+  Autre solution : rediriger le port TCP 3000 de la box de l'hôte (voir le README).
 
 BON À SAVOIR
 - Navigateur conseillé : Chrome, Edge ou Firefox récent. Une carte graphique est

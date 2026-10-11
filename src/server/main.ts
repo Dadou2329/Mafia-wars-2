@@ -102,6 +102,24 @@ const http = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, rooms: rooms.size }));
     return;
   }
+  // adresse de cet ordinateur pour l'adversaire, et existence d'un salon (?code=ABCD) : lu par
+  // le salon de l'hôte et par la fenêtre « Rejoindre » de l'invité (depuis un autre ordinateur)
+  if (req.url?.startsWith('/api/hote')) {
+    const code = (new URL(req.url, 'http://localhost').searchParams.get('code') ?? '').toUpperCase().trim();
+    const room = code ? rooms.get(code) : undefined;
+    res
+      .writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
+      .end(
+        JSON.stringify({
+          ok: true,
+          port: PORT,
+          lan: lanAddress(),
+          addresses: allAddresses(),
+          room: code ? (room ? { phase: room.phase, players: room.members.size } : null) : undefined,
+        }),
+      );
+    return;
+  }
   void serveStatic(req, res);
 });
 
@@ -260,6 +278,15 @@ function lanAddress(): string | null {
     }
   }
   return best;
+}
+
+/** Toutes les adresses IPv4 de cet ordinateur (réseau local, VPN type Radmin, ZeroTier, Tailscale…). */
+function allAddresses(): { name: string; address: string }[] {
+  const out: { name: string; address: string }[] = [];
+  for (const [name, list] of Object.entries(networkInterfaces())) {
+    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) out.push({ name, address: a.address });
+  }
+  return out;
 }
 
 http.on('error', (e: NodeJS.ErrnoException) => {
