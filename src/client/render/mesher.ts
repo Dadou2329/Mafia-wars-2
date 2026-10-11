@@ -251,10 +251,12 @@ export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number,
             const ao1 = (raw >> 10) & 3;
             const ao2 = (raw >> 12) & 3;
             const ao3 = (raw >> 14) & 3;
+            // fusion : dans les deux sens si l'AO est uniforme, sinon seulement le long du sens où
+            // elle ne varie pas (bandes le long des arêtes : interpolation identique)
             let wd = 1;
             let ht = 1;
-            if (ao0 === ao1 && ao1 === ao2 && ao2 === ao3) {
-              while (i + wd < CHUNK && mask[j * CHUNK + i + wd] === key) wd++;
+            if (ao0 === ao1 && ao3 === ao2) while (i + wd < CHUNK && mask[j * CHUNK + i + wd] === key) wd++;
+            if (ao0 === ao3 && ao1 === ao2) {
               outer: while (j + ht < CHUNK) {
                 const r = (j + ht) * CHUNK + i;
                 for (let t = 0; t < wd; t++) if (mask[r + t] !== key) break outer;
