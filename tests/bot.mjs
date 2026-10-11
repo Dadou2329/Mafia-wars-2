@@ -1,6 +1,6 @@
 // Second joueur sans navigateur (Socket.IO) pour les tests : rejoint un salon, choisit un
 // parrain, se déclare prêt, puis reste connecté (et répond aux revanches).
-// Usage : node tests/bot.mjs CODE [even|dadou] [http://localhost:3000]
+// Usage : node tests/bot.mjs CODE [even|dadou] [http://localhost:3000]   (BOT_CMDS=1 : voir plus bas)
 import { io } from 'socket.io-client';
 
 const [code, slot = 'even', server = 'http://localhost:3000'] = process.argv.slice(2);
@@ -31,4 +31,23 @@ socket.on('ev', (evs) => {
     }
 });
 socket.on('disconnect', () => log('déconnecté'));
+// BOT_CMDS=1 : le test pilote le robot, une action JSON par ligne sur l'entrée standard
+// (serveur MW_DEBUG=1 pour les actions de test), par exemple {"a":"debugTp","x":10,"z":20,"yaw":0}
+if (process.env.BOT_CMDS === '1') {
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => {
+    buf += d;
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      try {
+        socket.emit('act', JSON.parse(line));
+      } catch {
+        log('commande illisible :', line);
+      }
+    }
+  });
+}
 process.on('SIGTERM', () => process.exit(0));

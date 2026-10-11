@@ -65,7 +65,9 @@ await A.waitForSelector('text=Créer une partie', { timeout: 120000 });
 await A.click('text=Créer une partie');
 await A.waitForFunction(() => window.__app?.net?.room?.code, null, { timeout: 180000, polling: 250 });
 const code = await A.evaluate(() => window.__app.net.room.code);
-const bot = spawn(process.execPath, ['tests/bot.mjs', code, 'even', new globalThis.URL(URL).origin], { stdio: 'inherit' });
+// le robot (Even) reçoit des ordres du test sur son entrée standard (BOT_CMDS=1)
+const bot = spawn(process.execPath, ['tests/bot.mjs', code, 'even', new globalThis.URL(URL).origin], { stdio: ['pipe', 'inherit', 'inherit'], env: { ...process.env, BOT_CMDS: '1' } });
+const botAct = (a) => bot.stdin.write(JSON.stringify(a) + '\n');
 await A.waitForFunction(() => Object.keys(window.__app.net.room?.players ?? {}).length === 2, null, { timeout: 180000, polling: 250 });
 await A.evaluate(() => window.__app.net.pick('dadou'));
 await sleep(500);
@@ -272,8 +274,63 @@ await sleep(300);
 await A.keyboard.press('KeyV');
 await sleep(1500);
 await shot('07-third-person.png');
-const hud = await A.evaluate(() => (window.__app.game.cyber, document.querySelector('.ab-hud, .mw-ab, [class*="ability"]')?.textContent ?? ''));
-console.log('HUD des capacités :', hud.slice(0, 200));
+const chips = await A.evaluate(() => document.querySelectorAll('.ab-bar:not(.hidden) .ab-chip').length);
+check('HUD des capacités : une pastille par commande', chips >= 8, `${chips} pastille(s)`);
+
+console.log('=== Implants de l’adversaire, vus chez moi');
+// Even (le robot) s'équipe, sort sa lame et vient se placer à 4 m devant mon parrain, face à moi :
+// mon navigateur doit recevoir son apparence et construire ses implants
+await A.keyboard.press('KeyV'); // retour en vue subjective
+await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', x: s.x, z: s.z, yaw: s.yaw }), lane);
+await A.waitForFunction((s) => Math.hypot(window.__app.game.player.pos.x - s.x, window.__app.game.player.pos.z - s.z) < 1, lane, { timeout: 180000, polling: 250 });
+const rivalKit = [
+  ['grappin', 3, 'brasG'],
+  ['lame', 2, 'brasD'],
+  ['esquive', 2, 'jambes1'],
+  ['doubleSaut', 1, 'jambes2'],
+  ['blindage', 3, 'torse1'],
+  ['treuil', 1, 'colonne'],
+  ['thermique', 2, 'yeux1'],
+];
+botAct({ a: 'debugMoney', n: 50000 });
+for (const [id, lv, slot] of rivalKit) botAct({ a: 'debugCyber', id, lv, slot });
+const front = { x: lane.x + Math.sin(lane.yaw) * 4, z: lane.z + Math.cos(lane.yaw) * 4, yaw: lane.yaw + Math.PI };
+botAct({ a: 'debugTp', x: front.x, z: front.z, yaw: front.yaw });
+await sleep(1500);
+botAct({ a: 'ab', id: 'bras', slot: 'brasD' });
+const rival = await A.waitForFunction(
+  () => {
+    const g = window.__app.game;
+    for (const e of g.store.ents.values()) {
+      if (e.info?.kind !== 1 || !e.view.cyber?.some((x) => x.startsWith('brasD=lame'))) continue;
+      const st = g.chars.states.get(e.id);
+      const near = Math.hypot(e.x - g.player.pos.x, e.z - g.player.pos.z);
+      if (!st?.cy || near > 8 || !(e.view.fx & 16)) return false;
+      return { id: e.id, look: e.view.cyber.join(' '), sig: String(st.cy.sig), near: near.toFixed(1), fx: e.view.fx };
+    }
+    return false;
+  },
+  null,
+  { timeout: 240000, polling: 500 },
+)
+  .then((h) => h.jsonValue())
+  .catch(() => null);
+if (!rival)
+  console.log('diagnostic Even :', JSON.stringify(await A.evaluate(() => {
+    const g = window.__app.game;
+    return [...g.store.ents.values()].filter((e) => e.info?.kind === 1).map((e) => ({ id: e.id, cyber: e.view.cyber, fx: e.view.fx, d: Math.hypot(e.x - g.player.pos.x, e.z - g.player.pos.z).toFixed(1), cy: !!g.chars.states.get(e.id)?.cy, pending: !!g.chars.states.get(e.id)?.cyPending }));
+  })));
+check('apparence d’Even reçue (bras, jambes, torse, yeux)', !!rival && /brasG=grappin/.test(rival.look) && /jambes1=esquive/.test(rival.look) && /yeux1=thermique/.test(rival.look), rival ? rival.look : 'Even introuvable près de moi');
+check('implants d’Even construits par mon rendu', !!rival?.sig, rival ? `signature ${rival.sig.slice(0, 60)}` : '');
+check('lame d’Even sortie, visible chez moi (bit du bras droit)', !!rival && (rival.fx & 16) !== 0, rival ? `fx ${rival.fx}` : '');
+// regard vers Even, un peu vers le bas
+await A.evaluate((f) => {
+  const p = window.__app.game.player;
+  p.yaw = Math.atan2(f.x - p.pos.x, f.z - p.pos.z);
+  p.pitch = -0.12;
+}, front);
+await waitGame(() => false, null, 0.6);
+await shot('08-rival-implants.png');
 
 check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 3).join(' | '));
 bot.kill();

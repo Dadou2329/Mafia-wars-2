@@ -35,6 +35,8 @@ export interface CharacterPreviewOptions {
   background?: number | null;
   /** Couleur de la surbrillance des emplacements (sRGB). Défaut : 0x46d8ff. */
   highlightColor?: number;
+  /** Anticrénelage (plus coûteux). Défaut : vrai. */
+  antialias?: boolean;
 }
 
 export interface CharacterPreview {
@@ -82,7 +84,7 @@ export function createCharacterPreview(canvas: HTMLCanvasElement, opts: Characte
   const interactive = opts.interactive ?? true;
   const rotate = opts.rotate ?? true;
   const bg = opts.background ?? null;
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: opts.antialias ?? true });
   renderer.setPixelRatio(1);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;

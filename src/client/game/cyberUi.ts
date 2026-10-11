@@ -321,6 +321,8 @@ export class CyberUi implements ClientModule {
   private preview: CharacterPreview | null = null;
   /** L'aperçu 3D a échoué (contexte WebGL refusé…) : silhouette jusqu'à la fin de la partie. */
   private previewFailed = false;
+  /** Temps écoulé depuis la dernière image de l'aperçu (cadence réduite en qualité « basse »). */
+  private previewAcc = 0;
   private lookSig = '';
   private drag: { x: number; rot: number } | null = null;
   private figRot = 0;
@@ -461,9 +463,12 @@ export class CyberUi implements ClientModule {
       }
     }
     if (!this.opened) return;
-    if (this.preview) {
+    this.previewAcc += dt;
+    if (this.preview && (settings.quality !== 'basse' || this.previewAcc >= 0.05)) {
+      const pdt = this.previewAcc;
+      this.previewAcc = 0;
       try {
-        this.preview.render(dt);
+        this.preview.render(pdt);
       } catch (err) {
         console.warn('Aperçu 3D : rendu impossible, retour à la silhouette.', err);
         this.previewFailed = true;
@@ -862,18 +867,18 @@ export class CyberUi implements ClientModule {
   // ======================================================================= aperçu
 
   /**
-   * Aperçu 3D du parrain (characters/preview.ts) dans un canevas neuf ; silhouette en cas d'échec,
-   * et en qualité « basse » (machines modestes : pas de second contexte WebGL).
+   * Aperçu 3D du parrain (characters/preview.ts) dans un canevas neuf, le temps que l'écran est
+   * ouvert ; silhouette en cas d'échec. En qualité « basse » : sans anticrénelage, 20 images/s.
    */
   private ensurePreview(): void {
-    if (this.preview || this.previewFailed || this.host.noPreview || settings.quality === 'basse') return;
+    if (this.preview || this.previewFailed || this.host.noPreview) return;
     const canvas = h('canvas', { class: 'cy-canvas' });
     // sous les légendes de la scène (indice, aperçu), au-dessus de la grille
     this.stage.insertBefore(canvas, this.figure.nextSibling);
     this.canvas = canvas;
     this.resizeCanvas();
     try {
-      this.preview = createCharacterPreview(canvas, { interactive: true, rotate: true, background: null });
+      this.preview = createCharacterPreview(canvas, { interactive: true, rotate: true, background: null, antialias: settings.quality !== 'basse' });
       this.figure.classList.add('hidden');
       this.lookSig = '';
       if (!this.resizeObs) {

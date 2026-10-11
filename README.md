@@ -294,7 +294,8 @@ npm test               # sans navigateur : moteur (compression des voxels, maill
                        # électrique, roquettes, camouflage, chutes, armes de bras, drone)
 npx tsx tests/conquest.ts    # prise de contrôle : étapes, lieutenants, défense, piratage, QG
 npx tsx tests/hq.ts          # améliorations du QG et cliniques
-node tests/cyber-moves.mjs   # implants en partie (grappin, esquive, glissade, armes, visions)
+node tests/cyber-moves.mjs   # implants en partie (grappin, esquive, glissade, armes, visions,
+                             # implants et lame de l’adversaire vus chez soi)
 node tests/cyber-ui.mjs      # écran CYBERNÉTIQUE : achat, amélioration, installation
 npx tsx tests/plan-check.ts  # cohérence et symétrie du plan de la ville
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
