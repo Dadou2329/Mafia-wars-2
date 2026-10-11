@@ -21,6 +21,7 @@ import { audio } from '../audio/AudioEngine';
 import { meshModel } from '../models/modelMesher';
 import type { VoxelModel } from '../models/voxelModel';
 import {
+  KIOSK_ZONE,
   OPS_ZONE,
   SURVEIL_ZONE,
   TROPHY_SLOTS,
@@ -256,6 +257,158 @@ function ahead(a: HqAnchor, d: number): { x: number; z: number } {
   return { x: a.x + Math.sin(a.yaw) * d, z: a.z + Math.cos(a.yaw) * d };
 }
 
+/** Hasard déterministe [0, 1). */
+function rnd(k: number): number {
+  const s = Math.sin(k * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** Image d'une caméra de surveillance (scène simplifiée, tons froids) : 0 entrée, 1 rue, 2 toit, 3 hall, 4 bureau. */
+function cctv(c: CanvasRenderingContext2D, X: number, Y: number, w: number, h: number, kind: number, t: number): void {
+  const cx = X + w / 2;
+  const hz = Y + h * 0.45;
+  const g = c.createLinearGradient(0, Y, 0, Y + h);
+  g.addColorStop(0, kind === 1 || kind === 2 ? '#5f7d88' : '#7a9296');
+  g.addColorStop(kind === 1 || kind === 2 ? 0.45 : 1, kind === 1 || kind === 2 ? '#93acb0' : '#566d71');
+  if (kind === 1 || kind === 2) g.addColorStop(1, '#3f555a');
+  c.fillStyle = g;
+  c.fillRect(X, Y, w, h);
+  if (kind === 1) {
+    // rue : façades éclairées, chaussée, voiture qui passe
+    const n = 6;
+    for (let k = 0; k < n; k++) {
+      const bx = X + (k * w) / n;
+      const bh = h * (0.2 + 0.25 * rnd(k + 1));
+      c.fillStyle = k % 2 ? '#3f5459' : '#4c6368';
+      c.fillRect(bx, hz - bh, w / n + 1, bh);
+      c.fillStyle = 'rgba(255,236,170,0.85)';
+      for (let wy = hz - bh + 4; wy < hz - 5; wy += 7) for (let wx = bx + 3; wx < bx + w / n - 4; wx += 6) if (rnd(wx * 0.37 + wy * 1.7) > 0.5) c.fillRect(wx, wy, 3, 3);
+    }
+    c.fillStyle = '#3a4e52';
+    c.fillRect(X, hz, w, Y + h - hz);
+    c.fillStyle = '#26363a';
+    c.beginPath();
+    c.moveTo(X - w * 0.2, Y + h);
+    c.lineTo(cx - w * 0.06, hz);
+    c.lineTo(cx + w * 0.06, hz);
+    c.lineTo(X + w * 1.2, Y + h);
+    c.closePath();
+    c.fill();
+    c.strokeStyle = 'rgba(240,220,140,0.85)';
+    c.lineWidth = 2;
+    c.setLineDash([5, 7]);
+    c.lineDashOffset = -t * 25;
+    c.beginPath();
+    c.moveTo(cx, hz);
+    c.lineTo(cx, Y + h);
+    c.stroke();
+    c.setLineDash([]);
+    c.lineWidth = 1;
+    const u = ((t * 0.18) % 1.5) - 0.25;
+    const vy = hz + (Y + h - hz) * 0.5;
+    const vx = X + u * w;
+    c.fillStyle = '#182124';
+    c.fillRect(vx, vy - 8, 36, 10);
+    c.fillRect(vx + 7, vy - 14, 20, 7);
+    c.fillStyle = '#fff4c4';
+    c.fillRect(vx + 33, vy - 6, 3, 3);
+    c.fillStyle = '#ff5050';
+    c.fillRect(vx, vy - 6, 2, 3);
+  } else if (kind === 2) {
+    // toit : silhouette de la ville, parapet, antenne à feu clignotant
+    for (let x = X, k = 0; x < X + w; k++) {
+      const bw = 10 + rnd(k + 7) * 22;
+      const bh = h * (0.14 + rnd(k + 3) * 0.32);
+      const top = hz + h * 0.12 - bh;
+      c.fillStyle = '#33474b';
+      c.fillRect(x, top, bw, bh);
+      c.fillStyle = 'rgba(255,230,160,0.8)';
+      for (let wy = top + 3; wy < top + bh - 3; wy += 6) for (let wx = x + 2; wx < x + bw - 3; wx += 5) if (rnd(wx * 0.91 + wy * 0.13) > 0.62) c.fillRect(wx, wy, 2, 2);
+      x += bw + 1;
+    }
+    c.fillStyle = '#44595e';
+    c.fillRect(X, Y + h * 0.7, w, h * 0.3);
+    c.fillStyle = '#62797e';
+    c.fillRect(X, Y + h * 0.68, w, 4);
+    c.fillStyle = '#1d2a2d';
+    c.fillRect(X + w * 0.78, Y + h * 0.3, 2, h * 0.4);
+    if (Math.sin(t * 4) > 0) {
+      c.fillStyle = '#ff3a3a';
+      c.fillRect(X + w * 0.78 - 1, Y + h * 0.28, 4, 4);
+    }
+  } else {
+    // intérieur en perspective : mur du fond, sol carrelé, plafonniers
+    const bw = w * 0.36;
+    const bh = h * 0.42;
+    const bx = cx - bw / 2 + (kind - 3) * w * 0.08;
+    const by = Y + h * 0.22;
+    c.fillStyle = '#617a7e';
+    c.beginPath();
+    c.moveTo(X, Y + h);
+    c.lineTo(bx, by + bh);
+    c.lineTo(bx + bw, by + bh);
+    c.lineTo(X + w, Y + h);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#879fa2';
+    c.beginPath();
+    c.moveTo(X, Y);
+    c.lineTo(bx, by);
+    c.lineTo(bx + bw, by);
+    c.lineTo(X + w, Y);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#98aeb0';
+    c.fillRect(bx, by, bw, bh);
+    c.strokeStyle = 'rgba(20,30,32,0.45)';
+    c.beginPath();
+    for (const [x0, y0, x1, y1] of [
+      [X, Y, bx, by],
+      [X + w, Y, bx + bw, by],
+      [X, Y + h, bx, by + bh],
+      [X + w, Y + h, bx + bw, by + bh],
+    ]) {
+      c.moveTo(x0, y0);
+      c.lineTo(x1, y1);
+    }
+    for (let k = 1; k < 5; k++) {
+      const f = (k / 5) ** 1.6;
+      const yy = by + bh + (Y + h - by - bh) * f;
+      c.moveTo(bx - (bx - X) * f, yy);
+      c.lineTo(bx + bw + (X + w - bx - bw) * f, yy);
+    }
+    c.stroke();
+    c.fillStyle = 'rgba(255,255,232,0.95)';
+    c.fillRect(cx - 10, Y + h * 0.08, 20, 3);
+    c.fillRect(bx + bw / 2 - 6, by - 6, 12, 2);
+    if (kind === 0) {
+      // porte d'entrée, lumière de la rue
+      c.fillStyle = '#d6e4e4';
+      c.fillRect(bx + bw * 0.38, by + bh * 0.25, bw * 0.24, bh * 0.75);
+      c.fillStyle = '#26363a';
+      c.fillRect(bx + bw * 0.36, by + bh * 0.22, 2, bh * 0.78);
+      c.fillRect(bx + bw * 0.62, by + bh * 0.22, 2, bh * 0.78);
+    } else if (kind === 3) {
+      // hall : colonnes et escalier
+      c.fillStyle = '#4a5f63';
+      c.fillRect(X + w * 0.14, Y + h * 0.12, 8, h * 0.8);
+      c.fillRect(X + w * 0.82, Y + h * 0.12, 8, h * 0.8);
+      c.fillStyle = '#6f8589';
+      for (let k = 0; k < 5; k++) c.fillRect(bx + bw * 0.55, by + bh - k * 5 - 5, bw * 0.4, 3);
+    } else {
+      // bureau : table, fauteuil, écran allumé
+      c.fillStyle = '#1e2a2c';
+      c.fillRect(cx - 7, Y + h * 0.5, 14, h * 0.16);
+      c.fillStyle = '#2c3a3d';
+      c.fillRect(cx - w * 0.18, Y + h * 0.66, w * 0.36, 8);
+      c.fillRect(cx - w * 0.16, Y + h * 0.66 + 8, 4, h * 0.18);
+      c.fillRect(cx + w * 0.16 - 4, Y + h * 0.66 + 8, 4, h * 0.18);
+      c.fillStyle = '#b8f0ff';
+      c.fillRect(cx - 9, Y + h * 0.66 - 12, 18, 11);
+    }
+  }
+}
+
 export class HqVisuals implements ClientModule {
   readonly group = new THREE.Group();
   private gc: GameClient;
@@ -485,6 +638,7 @@ export class HqVisuals implements ClientModule {
         break;
       case 'autorecruit':
         this.decorateKiosk(p);
+        this.decorateScreens(p, KIOSK_ZONE, 112, 208, (c, w, h, t) => this.drawKiosk(p, c, w, h, t));
         break;
     }
     if (HQ_FOOTPRINT[id]) this.pendingVox.push(p);
@@ -954,24 +1108,33 @@ export class HqVisuals implements ClientModule {
       }
       if (i === 5) {
         // radar : intrus autour du QG
-        c.fillStyle = '#03140c';
+        c.fillStyle = '#0c2a1d';
         c.fillRect(X, Y, w, h);
         const cx = X + w / 2;
         const cy = Y + h / 2;
         const R = Math.min(w, h) * 0.46;
-        c.strokeStyle = 'rgba(80,255,150,0.5)';
+        c.strokeStyle = 'rgba(110,255,170,0.55)';
         for (const r of [R, R * 0.66, R * 0.33]) {
           c.beginPath();
           c.arc(cx, cy, r, 0, Math.PI * 2);
           c.stroke();
         }
         const a = t * 2;
-        c.strokeStyle = 'rgba(80,255,150,0.9)';
+        const sweep = c.createRadialGradient(cx, cy, 0, cx, cy, R);
+        sweep.addColorStop(0, 'rgba(110,255,170,0.35)');
+        sweep.addColorStop(1, 'rgba(110,255,170,0.05)');
+        c.fillStyle = sweep;
+        c.beginPath();
+        c.moveTo(cx, cy);
+        c.arc(cx, cy, R, a - 0.6, a);
+        c.closePath();
+        c.fill();
+        c.strokeStyle = 'rgba(140,255,190,0.95)';
         c.beginPath();
         c.moveTo(cx, cy);
         c.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
         c.stroke();
-        c.fillStyle = '#50ff96';
+        c.fillStyle = '#7dffb0';
         c.fillRect(cx - 3, cy - 3, 6, 6);
         for (const wv of watch) {
           const dx = (wv.x - hq.center.x) / 50;
@@ -983,46 +1146,48 @@ export class HqVisuals implements ClientModule {
           c.fill();
         }
       } else {
-        // vue de caméra : sol en perspective, passants, intrus repérés
-        const g = c.createLinearGradient(0, Y, 0, Y + h);
-        g.addColorStop(0, '#0b1a22');
-        g.addColorStop(1, '#162f38');
-        c.fillStyle = g;
-        c.fillRect(X, Y, w, h);
-        c.strokeStyle = 'rgba(120,200,220,0.25)';
-        for (let k = -4; k <= 4; k++) {
-          c.beginPath();
-          c.moveTo(X + w / 2 + k * 6, Y + h * 0.35);
-          c.lineTo(X + w / 2 + k * w * 0.3, Y + h);
-          c.stroke();
-        }
+        // vue de caméra (scène selon l'emplacement), intrus repérés encadrés
+        cctv(c, X, Y, w, h, i, t);
         const seen = watch.filter((wv) => (i < 2 || i === 3 ? wv.site === 'QG' : wv.site !== 'QG'));
         const show = seen.slice(0, 3);
         show.forEach((wv, k) => {
           const px = X + w * (0.25 + 0.25 * k) + Math.sin(t * 0.7 + k) * 4;
-          const py = Y + h * 0.78;
-          c.fillStyle = '#101418';
-          c.fillRect(px - 5, py - 26, 10, 26);
+          const py = Y + h * 0.86;
+          c.fillStyle = '#0d1214';
+          c.fillRect(px - 5, py - 24, 10, 24);
           c.beginPath();
-          c.arc(px, py - 31, 5, 0, Math.PI * 2);
+          c.arc(px, py - 29, 5, 0, Math.PI * 2);
           c.fill();
           c.strokeStyle = '#ff3a3a';
           c.lineWidth = 2;
-          c.strokeRect(px - 10, py - 40, 20, 42);
+          c.strokeRect(px - 10, py - 38, 20, 40);
           c.lineWidth = 1;
-          c.fillStyle = '#ff5a5a';
-          c.font = `700 10px ${MAP_FONT_TITLE}`;
-          c.fillText('INTRUS', px - 16, py - 44);
+          c.fillStyle = '#ff4a4a';
+          c.font = `800 10px ${MAP_FONT_TITLE}`;
+          c.fillText('INTRUS', px - 17, py - 42);
           void wv;
         });
-        if (show.length === 0) {
-          c.fillStyle = 'rgba(160,255,200,0.7)';
-          c.font = `700 11px ${MAP_FONT_TITLE}`;
-          c.fillText('RAS', X + w - 30, Y + h - 8);
+        // grain, ligne de balayage, vignettage, teinte des caméras
+        c.fillStyle = 'rgba(255,255,255,0.08)';
+        c.fillRect(X, Y + ((t * 40 + i * 13) % h), w, 4);
+        for (let k = 0; k < 36; k++) {
+          c.fillStyle = `rgba(255,255,255,${(Math.random() * 0.14).toFixed(3)})`;
+          c.fillRect(X + Math.random() * w, Y + Math.random() * h, 2, 1);
         }
-        // grain et ligne de balayage
-        c.fillStyle = 'rgba(255,255,255,0.05)';
-        c.fillRect(X, Y + ((t * 40 + i * 13) % h), w, 3);
+        const v = c.createRadialGradient(X + w / 2, Y + h / 2, Math.min(w, h) * 0.35, X + w / 2, Y + h / 2, Math.max(w, h) * 0.72);
+        v.addColorStop(0, 'rgba(0,0,0,0)');
+        v.addColorStop(1, 'rgba(0,0,0,0.5)');
+        c.fillStyle = v;
+        c.fillRect(X, Y, w, h);
+        c.fillStyle = 'rgba(70,255,170,0.07)';
+        c.fillRect(X, Y, w, h);
+        const s = Math.floor(this.gc.pub.elapsed);
+        c.fillStyle = show.length ? '#ff7070' : 'rgba(190,255,215,0.9)';
+        c.font = `700 10px ${MAP_FONT_TITLE}`;
+        c.fillText(show.length ? `ALERTE · ${seen.length}` : 'RAS', X + 4, Y + h - 5);
+        c.fillStyle = 'rgba(230,245,255,0.85)';
+        c.font = `600 10px ${MAP_FONT}`;
+        c.fillText(`${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`, X + w - 50, Y + h - 5);
       }
       c.fillStyle = 'rgba(0,0,0,0.55)';
       c.fillRect(X, Y, w, 14);
@@ -1039,12 +1204,73 @@ export class HqVisuals implements ClientModule {
     });
   }
 
+  /** Écran de la borne de recrutement : réserve du QG, recrue suivante, compteur. */
+  private drawKiosk(p: Placed, c: CanvasRenderingContext2D, W: number, H: number, t: number): void {
+    const mine = p.slot === this.gc.you;
+    const dadou = p.slot === 'dadou';
+    const accent = dadou ? '#ff6474' : '#7fb4ff';
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, dadou ? '#5a1621' : '#16305a');
+    g.addColorStop(1, '#0b0f16');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    c.textAlign = 'center';
+    c.fillStyle = accent;
+    c.font = `900 14px ${MAP_FONT_TITLE}`;
+    c.fillText('RECRUTEMENT', W / 2, 20);
+    c.fillRect(10, 27, W - 20, 2);
+    if (!mine) {
+      c.fillStyle = '#ff5060';
+      c.font = `800 14px ${MAP_FONT_TITLE}`;
+      c.fillText('ACCÈS', W / 2, H / 2 - 4);
+      c.fillText('REFUSÉ', W / 2, H / 2 + 14);
+      c.textAlign = 'left';
+      return;
+    }
+    const priv = this.gc.priv;
+    const pool = priv.pool;
+    const full = pool >= 4;
+    const broke = priv.money < 500;
+    // silhouette au chapeau
+    c.fillStyle = '#eef3f8';
+    c.fillRect(W / 2 - 15, 41, 30, 4);
+    c.fillRect(W / 2 - 9, 34, 18, 8);
+    c.beginPath();
+    c.arc(W / 2, 53, 8, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath();
+    c.moveTo(W / 2 - 20, 86);
+    c.lineTo(W / 2 - 13, 64);
+    c.lineTo(W / 2 + 13, 64);
+    c.lineTo(W / 2 + 20, 86);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#d8e4ee';
+    c.font = `800 11px ${MAP_FONT_TITLE}`;
+    c.fillText('RÉSERVE DU QG', W / 2, 104);
+    c.fillStyle = full ? '#7dffb0' : '#ffd24a';
+    c.font = `900 30px ${MAP_FONT_TITLE}`;
+    c.fillText(String(Math.min(pool, 999)), W / 2, 136);
+    c.fillStyle = 'rgba(255,255,255,0.16)';
+    c.fillRect(12, 146, W - 24, 9);
+    c.fillStyle = full ? '#7dffb0' : broke ? '#ff5060' : accent;
+    c.fillRect(12, 146, (W - 24) * (full ? 1 : broke ? 0.08 : (t / 15) % 1), 9);
+    c.fillStyle = '#d8e4ee';
+    c.font = `700 10px ${MAP_FONT}`;
+    c.fillText(full ? 'Réserve complète' : broke ? 'Fonds insuffisants' : 'Recrue suivante…', W / 2, 170);
+    const n = priv.hqUp?.recruits ?? 0;
+    c.fillText(`${n} recrue${n > 1 ? 's' : ''} · 80 $`, W / 2, 186);
+    c.fillStyle = 'rgba(216,228,238,0.6)';
+    c.fillText('seuil : 4 hommes', W / 2, 200);
+    c.textAlign = 'left';
+  }
+
   private drawOps(p: Placed, c: CanvasRenderingContext2D, W: number, H: number, t: number): void {
     const mine = p.slot === this.gc.you;
     const z = OPS_ZONE;
     const sx = W / (z.x1 - z.x0);
     const sy = H / (z.y1 - z.y0);
-    c.fillStyle = '#03060c';
+    c.fillStyle = '#0a1420';
     c.fillRect(0, 0, W, H);
     const ops = mine ? (this.gc.priv.hqUp?.ops ?? []) : [];
     const accent = p.slot === 'dadou' ? '#ff5a6a' : '#7fb0ff';
@@ -1057,7 +1283,7 @@ export class HqVisuals implements ClientModule {
       c.beginPath();
       c.rect(X, Y, w, h);
       c.clip();
-      c.fillStyle = '#071220';
+      c.fillStyle = '#10263c';
       c.fillRect(X, Y, w, h);
       if (!mine) {
         c.fillStyle = '#ff5060';

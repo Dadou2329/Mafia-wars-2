@@ -129,8 +129,21 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
   matraque électrique et poings ; **grenades** (touche G, en vente à l’armurerie du QG) dont le
   souffle blesse vos ennemis et brise les vitres. On se bat dans la rue, à l’intérieur, dans
   les étages, sur les toits et dans le métro.
-- **Capturer un bâtiment** : éliminez ses défenseurs et restez à l’intérieur avec vos hommes.
-  Les bâtiments neutres sans défenseurs peuvent aussi être achetés.
+- **Prendre le contrôle d’un bâtiment** : plus de capture par simple présence. Chaque bâtiment a
+  son opération, menée sur place, dont la difficulté suit son importance : un objectif court pour
+  une boutique (prendre le comptoir), deux ou trois étapes pour un bâtiment clé, l’assaut le plus
+  long pour un QG. La banque : forcer la chambre forte, récupérer l’acte de propriété et le
+  porter au bureau du directeur ; le casino : le réseau de contrôle, le bureau de la direction,
+  le salon VIP ; la boîte de nuit : le bureau de la direction ; le dépôt : les quais puis la salle
+  de contrôle logistique ; la casse : le registre des épaves ; le marché tech, les centres de
+  données et les usines : le serveur, avec un court piratage interactif ; les tours de bureaux :
+  un assaut vertical, du hall jusqu’au toit. Des repères holographiques montrent les objectifs
+  (à travers les murs) ; vos lieutenants vident le bâtiment puis mènent chaque étape pendant que
+  leurs hommes les couvrent, et vous pouvez les rejoindre (**E** à l’objectif) pour aller plus
+  vite. Un ennemi près de l’objectif le conteste, abattre l’opérateur l’interrompt, et le
+  propriétaire peut reprendre une étape volée. Les bâtiments neutres sans défenseurs peuvent
+  aussi être achetés. Un **braquage** ne rapporte que de l’argent : le bâtiment ne change pas
+  de mains.
 - **Ordres rapides** : maintenez **Q** près de vos hommes : « Suivez-moi », « Attaquez »,
   « Défendez », « Repliez-vous ».
 - **Recrutement** : auprès du rabatteur du QG (« Recruter 1 / 5 / 10 »), lieutenants

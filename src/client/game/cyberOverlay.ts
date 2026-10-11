@@ -116,6 +116,8 @@ export class CyberOverlay {
   private speedK = 0;
   private lines: SpeedLine[] = [];
   private reveals: Reveal[] = [];
+  /** Étiquettes de scan posées dans cette image (x, y, largeur) : évite qu'elles se chevauchent. */
+  private placed: number[] = [];
   private pulses: { t: number; dur: number }[] = [];
   private vision: OverlayVision = 'normal';
   private visionT = 0;
@@ -145,6 +147,8 @@ export class CyberOverlay {
     };
     this.flashEl = mk('cy-flash');
     this.cv = document.createElement('canvas');
+    // masqué au repos : pas de calque plein écran à composer pour rien
+    this.cv.style.display = 'none';
     this.el.appendChild(this.cv);
     this.g = this.cv.getContext('2d')!;
     parent.insertBefore(this.el, parent.firstChild);
@@ -307,11 +311,15 @@ export class CyberOverlay {
       this.reveals.length > 0;
     if (!busy) {
       if (this.dirty) {
+        // effacé puis masqué (un canevas vidé mais affiché peut montrer un ancien tampon)
+        this.g.setTransform(1, 0, 0, 1, 0, 0);
         this.g.clearRect(0, 0, this.cv.width, this.cv.height);
+        this.cv.style.display = 'none';
         this.dirty = false;
       }
       return;
     }
+    if (!this.dirty) this.cv.style.display = '';
     this.resize(viewportW, viewportH);
     const g = this.g;
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -323,6 +331,7 @@ export class CyberOverlay {
     if (this.speedK > 0.01) this.drawSpeed(dt);
     if (this.visionK > 0.01 || this.visionT > 0) this.drawVision();
     for (const p of this.pulses) this.drawPulse(p.t / p.dur);
+    this.placed.length = 0;
     for (const r of this.reveals) this.drawReveal(r, camera);
     for (const s of this.marks.values()) this.drawMark(s, camera);
     for (const t of this.threats) this.drawThreat(t.a, t.k);
@@ -440,8 +449,9 @@ export class CyberOverlay {
     }
     g.restore();
     g.globalAlpha = a;
-    this.label(`${Math.round(dist)} m`, x, y + r + 9, '#ffd0d6', 12);
-    if (m.label) this.label(m.label, x, y - r - 9, '#ffb3bf', 11);
+    const d = `${Math.round(dist)} m`;
+    this.label(d, x, this.free(x, y + r + 9, d.length * 7, 12), '#ffd0d6', 12);
+    if (m.label) this.label(m.label, x, this.free(x, y - r - 9, m.label.length * 6.5, -12), '#ffb3bf', 11);
     g.globalAlpha = 1;
   }
 
@@ -475,9 +485,29 @@ export class CyberOverlay {
     }
     g.stroke();
     const dist = Math.hypot(rv.x - _c.x, rv.y - _c.y, rv.z - _c.z);
-    this.label(rv.label ?? KIND_LABEL[rv.kind ?? 'enemy'], x0, cy - hgt / 2 - 8, '#bfffc8', 11);
-    this.label(`${Math.round(dist)} m`, x0, cy + hgt / 2 + 8, '#9cffaa', 11);
+    const name = rv.label ?? KIND_LABEL[rv.kind ?? 'enemy'];
+    const d = `${Math.round(dist)} m`;
+    this.label(name, x0, this.free(x0, cy - hgt / 2 - 8, name.length * 6.5, -12), '#bfffc8', 11);
+    this.label(d, x0, this.free(x0, cy + hgt / 2 + 8, d.length * 6.5, 12), '#9cffaa', 11);
     g.globalAlpha = 1;
+  }
+
+  /** Première hauteur libre pour une étiquette (décalée de `step` tant qu'elle en chevauche une autre). */
+  private free(x: number, y: number, w: number, step: number): number {
+    const P = this.placed;
+    for (let n = 0; n < 4; n++) {
+      let hit = false;
+      for (let i = 0; i < P.length; i += 3) {
+        if (Math.abs(P[i] - x) < (P[i + 2] + w) / 2 + 2 && Math.abs(P[i + 1] - y) < 11) {
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) break;
+      y += step;
+    }
+    P.push(x, y, w);
+    return y;
   }
 
   private drawPulse(k: number): void {

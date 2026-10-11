@@ -162,6 +162,8 @@ interface Rig {
   support: THREE.Object3D[];
   /** Main d'appoint : groupe (main + objet tenu), objet, avant-bras. */
   helper: { group: THREE.Group; item: THREE.Mesh | null; fore: THREE.Mesh; anim: AnimDef } | null;
+  /** Arme de bras : haut du bras (du coude vers l'épaule). */
+  upper?: THREE.Mesh;
 }
 
 const S = VM.VM_RES;
@@ -383,7 +385,7 @@ const RIGS: Record<Weapon, RigDef> = {
     meta: armMeta([0, 0.063, -0.11]),
     armSide: 'R',
     hip: { pos: [0.18, -0.12, -0.43], rot: [0.42, 0.4, 0.05] },
-    ads: { pos: [0, -0.1, -0.46], rot: [0.06, 0.15, 0.04] },
+    ads: { pos: [0, -0.1, -0.48], rot: [0.35, 0.12, 0.04] },
     sprint: { pos: [0.16, -0.2, -0.34], rot: [-0.2, 0.5, 0.4] },
     hands: [],
     recoil: { back: 0.03, climb: 0.2, up: 0.008, roll: 0.03 },
@@ -392,7 +394,7 @@ const RIGS: Record<Weapon, RigDef> = {
   [Weapon.ARM_BLADE]: {
     meta: armMeta([0.05, 0, -0.28]),
     armSide: 'R',
-    hip: { pos: [0.17, -0.12, -0.4], rot: [0.44, 0.39, -0.2] },
+    hip: { pos: [0.17, -0.12, -0.4], rot: [0.44, 0.39, 0.25] },
     sprint: { pos: [0.15, -0.2, -0.33], rot: [0.7, 0.4, 0.25] },
     hands: [],
     recoil: { back: 0, climb: 0, up: 0, roll: 0 },
@@ -428,6 +430,9 @@ function mirrorPose(p: PoseDef): PoseDef {
   return { pos: [-p.pos[0], p.pos[1], p.pos[2]], rot: [p.rot[0], -p.rot[1], -p.rot[2]] };
 }
 
+/** Coude des armes de bras dans le repère du poignet (pivot des coups), m. */
+const ARM_ELBOW = 0.3;
+
 /** Pose de visée d'une arme de bras : le point de mire (repère du poignet) sur l'axe de la vue. */
 function alignAds(p: PoseDef, sight: V3): PoseDef {
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rot[0], p.rot[1], p.rot[2], 'YXZ'));
@@ -455,16 +460,20 @@ function armRigDef(w: Weapon, side: 'L' | 'R', muzzle: V3 | null, sight: V3 | nu
   };
 }
 
-/** Armes de bras : coups (repère du bras droit ; le gauche est mis en miroir). */
+/**
+ * Armes de bras : coups (repère du bras droit ; le gauche est mis en miroir). Les rotations des
+ * images clés tournent l'avant-bras autour du coude (le poing décrit un arc, le coude reste hors
+ * champ) ; les translations déplacent le coude.
+ */
 const ARM_SWING: Partial<Record<Weapon, { dur: number; keys: Key[] }>> = {
-  // poing hydraulique : armé un instant, puis le poing traverse l'écran
+  // poing hydraulique : armé un instant, puis le poing part droit vers le centre en vrillant
   [Weapon.ARM_FIST]: {
     dur: 0.42,
     keys: [
       [0, 0, 0, 0, 0, 0, 0],
-      [0.14, 0.02, -0.02, 0.06, 0.12, -0.05, 0.1, 'out'],
-      [0.34, -0.1, 0.075, -0.24, 0.28, 0.25, 0.5, 'out'],
-      [0.5, -0.1, 0.075, -0.235, 0.28, 0.25, 0.5, 'lin'],
+      [0.14, 0.015, 0.0, 0.05, 0.15, -0.05, 0.1, 'out'],
+      [0.34, -0.14, 0.065, -0.175, -0.09, -0.19, 0.3, 'out'],
+      [0.5, -0.14, 0.065, -0.17, -0.09, -0.19, 0.3, 'lin'],
       [1, 0, 0, 0, 0, 0, 0, 'io'],
     ],
   },
@@ -473,35 +482,35 @@ const ARM_SWING: Partial<Record<Weapon, { dur: number; keys: Key[] }>> = {
     dur: 0.55,
     keys: [
       [0, 0, 0, 0, 0, 0, 0],
-      [0.2, 0.07, 0.07, 0.05, 0.35, -0.5, 0.45, 'out'],
-      [0.52, -0.26, -0.03, -0.1, -0.15, 0.95, -0.35, 'in'],
-      [0.66, -0.28, -0.04, -0.09, -0.2, 1.0, -0.4, 'out'],
+      [0.2, 0.02, 0.025, 0.03, 0.2, -0.3, 0.25, 'out'],
+      [0.52, -0.08, -0.02, -0.06, -0.15, 0.75, -0.3, 'in'],
+      [0.66, -0.09, -0.03, -0.05, -0.2, 0.8, -0.35, 'out'],
       [1, 0, 0, 0, 0, 0, 0, 'io'],
     ],
   },
 };
 
-/** Lame Mantis : trois tailles enchaînées (diagonale, revers horizontal, remontante). */
+/** Lame Mantis : trois tailles enchaînées (diagonale, revers horizontal, remontante), autour du coude. */
 const BLADE_COMBO: Key[][] = [
   [
     [0, 0, 0, 0, 0, 0, 0],
-    [0.16, 0.05, 0.1, 0.05, 0.5, -0.35, -0.6, 'out'],
-    [0.42, -0.24, -0.09, -0.12, -0.45, 0.9, 0.9, 'in'],
-    [0.56, -0.26, -0.11, -0.1, -0.5, 0.95, 0.95, 'out'],
+    [0.16, 0.0, 0.02, 0.03, 0.2, -0.25, -0.3, 'out'],
+    [0.42, -0.05, -0.02, -0.05, -0.3, 0.55, 0.5, 'in'],
+    [0.56, -0.05, -0.025, -0.04, -0.33, 0.58, 0.52, 'out'],
     [1, 0, 0, 0, 0, 0, 0, 'io'],
   ],
   [
     [0, 0, 0, 0, 0, 0, 0],
-    [0.16, -0.16, 0.03, 0.03, 0.1, 0.85, 1.35, 'out'],
-    [0.44, 0.1, 0.0, -0.13, 0.05, -0.75, 1.2, 'in'],
-    [0.58, 0.12, -0.01, -0.12, 0.05, -0.8, 1.2, 'out'],
+    [0.16, -0.04, 0.02, 0.02, 0.05, 0.5, 0.7, 'out'],
+    [0.44, 0.04, 0.0, -0.05, 0.0, -0.45, 0.6, 'in'],
+    [0.58, 0.045, -0.005, -0.04, 0.0, -0.48, 0.6, 'out'],
     [1, 0, 0, 0, 0, 0, 0, 'io'],
   ],
   [
     [0, 0, 0, 0, 0, 0, 0],
-    [0.16, 0.02, -0.11, 0.04, -0.7, 0.1, 0.1, 'out'],
-    [0.44, -0.09, 0.13, -0.13, 0.95, 0.3, 0.25, 'in'],
-    [0.58, -0.1, 0.14, -0.12, 1.0, 0.32, 0.25, 'out'],
+    [0.16, 0.01, -0.05, 0.03, -0.38, 0.05, 0.1, 'out'],
+    [0.44, -0.04, 0.05, -0.06, 0.45, 0.25, 0.2, 'in'],
+    [0.58, -0.045, 0.055, -0.055, 0.48, 0.27, 0.2, 'out'],
     [1, 0, 0, 0, 0, 0, 0, 'io'],
   ],
 ];
@@ -510,8 +519,8 @@ const BLADE_COMBO: Key[][] = [
 const ARM_PISTOL_RELOAD: AnimDef = {
   keys: [
     [0, 0, 0, 0, 0, 0, 0],
-    [0.16, -0.03, 0.05, 0.03, -0.35, 0.3, 0.55, 'io'],
-    [0.75, -0.03, 0.055, 0.03, -0.38, 0.32, 0.58, 'io'],
+    [0.16, -0.02, 0.03, 0.03, -0.15, 0.2, 0.45, 'io'],
+    [0.75, -0.02, 0.035, 0.03, -0.17, 0.22, 0.48, 'io'],
     [0.86, -0.01, 0.01, 0.0, -0.05, 0.08, 0.1, 'out'],
     [1, 0, 0, 0, 0, 0, 0, 'io'],
   ],
@@ -906,6 +915,8 @@ interface FreeArm {
   hands: Map<VM.HandPose, THREE.Object3D>;
   fore: THREE.Object3D | null;
   cy: CyFore | null;
+  /** Haut du bras (du coude vers l'épaule). */
+  upper: THREE.Mesh | null;
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   /** Présence (0 caché sous l'écran, 1 en place). */
@@ -923,8 +934,6 @@ interface FreeArm {
 /** Poses de la main des bras libres. */
 const FREE_POSES: VM.HandPose[] = ['open', 'grab', 'relax', 'wfist'];
 
-const _fq = new THREE.Quaternion();
-const _fe = new THREE.Euler(0, 0, 0, 'YXZ');
 const _fm = new THREE.Matrix4();
 const _fx = new THREE.Vector3();
 const _fy = new THREE.Vector3();
@@ -994,10 +1003,10 @@ export class Viewmodel {
   private slideW = 0;
   private dashW = 0;
   private wallW = 0;
-  private climbW = 0;
   private lowerW = 0;
   private grappleTarget: THREE.Vector3 | null = null;
   private whipSegs: THREE.Mesh[] = [];
+  private uppers: THREE.Mesh[] = [];
   private whipHist: { t: number; p: THREE.Vector3 }[] = Array.from({ length: 24 }, () => ({ t: -10, p: new THREE.Vector3() }));
   private whipHead = 0;
   private whipT = -1;
@@ -1082,6 +1091,7 @@ export class Viewmodel {
         hands: new Map(),
         fore: null,
         cy: null,
+        upper: null,
         pos: new THREE.Vector3(),
         quat: new THREE.Quaternion(),
         w: 0,
@@ -1340,6 +1350,17 @@ export class Viewmodel {
         rig.forearms.push({ mesh: fo, slot: { pose: hd.pose, side: 'L', pos: [0, 0, 0], rot: [0, 0, 0], roll: 0 }, parent: group });
       }
     }
+    // haut du bras (armes de bras, bras libres)
+    for (const u of this.uppers) u.removeFromParent();
+    this.uppers = [];
+    const upperGeo = own(meshModel(VM.upperSleeveModel(look)));
+    const upper = () => {
+      const m = this.mesh(upperGeo);
+      m.visible = false;
+      this.root.add(m);
+      this.uppers.push(m);
+      return m;
+    };
     // armes de bras : le repère de l'arme est le poignet, l'avant-bras mécanique en fait partie
     for (const r of this.armRigs.values()) r.root.removeFromParent();
     this.armRigs.clear();
@@ -1358,7 +1379,9 @@ export class Viewmodel {
         ret.name = 'reticle';
         statics.push(ret);
       }
-      this.armRigs.set(`${w}:${side}`, this.makeRig(def, statics));
+      const rig = this.makeRig(def, statics);
+      rig.upper = upper();
+      this.armRigs.set(`${w}:${side}`, rig);
     }
     // bras libres : mains dans les poses libres, avant-bras rigide
     for (const fa of this.free) {
@@ -1375,6 +1398,7 @@ export class Viewmodel {
       fa.cy = this.cy[fa.side].id ? makeCyFore(fa.side) : null;
       fa.fore = fa.cy ? fa.cy.group : fore(side);
       fa.root.add(fa.fore);
+      fa.upper = upper();
     }
     // filament du fouet
     for (const m of this.whipSegs) m.removeFromParent();
@@ -1677,6 +1701,8 @@ export class Viewmodel {
     this.solveArms(rig);
     if (this.fistL.root.visible) this.solveArms(this.fistL);
     this.placeFree(dt, pl.camera ?? this.lastCam, pl.grapple?.anchor ?? pl.hook?.anchor ?? this.grappleTarget, sp);
+    for (const r of this.armRigs.values()) this.placeUpper(r.upper, r.root, r.def.armSide === 'L' ? 0 : 1, r.root.visible);
+    for (const fa of this.free) this.placeUpper(fa.upper, fa.root, fa.side, fa.root.visible);
     this.updateWhip(dt, rig);
     this.animateCyber(dt, w, armSide, reloadT);
     this.updateCasings(dt);
@@ -1691,7 +1717,6 @@ export class Viewmodel {
     this.wallW = ap(this.wallW, ms === 'wallrunL' || ms === 'wallrunR', 0.15, 0.22);
     if (ms === 'wallrunL') this.wallSide = -1;
     else if (ms === 'wallrunR') this.wallSide = 1;
-    this.climbW = ap(this.climbW, ms === 'climb', 0.12, 0.25);
     this.landW = ap(this.landW, ms === 'land', 0.05, 0.3);
     this.airW = ap(this.airW, ms === 'air', 0.22, 0.12);
     // grappin : l'état du joueur fait foi quand il est connu
@@ -1891,7 +1916,22 @@ export class Viewmodel {
     // --- coups
     const keys = this.swingKeys ?? SWING[w]?.keys;
     const activeSwing = this.swingT >= 0 && !!keys && (!fists || armW || isLeftFist === this.punchLeft);
-    if (activeSwing && keys) {
+    if (activeSwing && keys && armW) {
+      // arme de bras : l'avant-bras tourne autour du coude, puis le coude se déplace
+      sampleN(keys, 6, this.swingT, ko);
+      const s = this.swingScale;
+      const el = this.fD.set(0, 0, ARM_ELBOW).applyQuaternion(this.qA.setFromEuler(this.e.set(rx, ry, rz, 'YXZ')));
+      const ex = px + el.x;
+      const ey = py + el.y;
+      const ez = pz + el.z;
+      rx += ko[3] * s;
+      ry += ko[4] * mir * s;
+      rz += ko[5] * mir * s;
+      el.set(0, 0, ARM_ELBOW).applyQuaternion(this.qA.setFromEuler(this.e.set(rx, ry, rz, 'YXZ')));
+      px = ex - el.x + ko[0] * mir * s;
+      py = ey - el.y + ko[1] * s;
+      pz = ez - el.z + ko[2] * s;
+    } else if (activeSwing && keys) {
       sampleN(keys, 6, this.swingT, ko);
       const s = this.swingScale;
       px += ko[0] * mir * s;
@@ -2025,6 +2065,20 @@ export class Viewmodel {
     }
   }
 
+  /** Haut du bras : du coude (bout de l'avant-bras rigide) jusqu'à l'épaule. */
+  private placeUpper(up: THREE.Mesh | null | undefined, root: THREE.Object3D, side: 0 | 1, on: boolean): void {
+    if (!up) return;
+    up.visible = on;
+    if (!on) return;
+    const e = this.fD.set(0, 0, VM.FOREARM_LENGTH).applyQuaternion(root.quaternion).add(root.position);
+    const sh = side === 0 ? SHOULDER_L : SHOULDER_R;
+    const d = this.fF.set(sh[0] - e.x, sh[1] - e.y, sh[2] - e.z);
+    const len = d.length();
+    up.position.copy(e);
+    this.armQuat([d.x, d.y, d.z], 0, up.quaternion);
+    up.scale.set(1, 1, Math.max(0.2, len / VM.UPPER_ARM_LENGTH));
+  }
+
   /** Direction (repère de la vue subjective, normée) d'un point du monde, à défaut l'axe de visée. */
   private dirToView(p: THREE.Vector3 | null, cam: THREE.Camera | null, out: THREE.Vector3): THREE.Vector3 {
     if (!p || !cam) return out.set(0, 0.2, -1).normalize();
@@ -2067,8 +2121,8 @@ export class Viewmodel {
       case 'wall': {
         // main à plat contre le mur, doigts vers l'avant et le haut ; elle glisse au rythme de la course
         const g = Math.sin(t * 9);
-        P.set(0.33, -0.05 + g * 0.008, -0.37 + g * 0.01);
-        Z.set(-0.3, -0.55, 0.78);
+        P.set(0.27, -0.07 + g * 0.008, -0.42 + g * 0.01);
+        Z.set(-0.25, -0.6, 0.76);
         Y.set(-1, 0.25, 0);
         pose = 'open';
         break;
@@ -2099,10 +2153,10 @@ export class Viewmodel {
         break;
       }
       case 'shield': {
-        // avant-bras levé en travers, émetteur face à l'avant
-        P.set(0.03, -0.14 + Math.sin(t * 2.2) * 0.003, -0.37);
-        Z.set(0.8, -0.32, 0.52).normalize();
-        diagUp(Z, this.fD.set(0, 0.12, -1), Y);
+        // avant-bras dressé devant soi, poing en haut, émetteur face à l'avant
+        P.set(0.1, -0.035 + Math.sin(t * 2.2) * 0.003, -0.39);
+        Z.set(0.22, -0.9, 0.38).normalize();
+        diagUp(Z, this.fD.set(0, 0.1, -1), Y);
         pose = 'wfist';
         break;
       }
@@ -2319,8 +2373,9 @@ export class Viewmodel {
       sparks.forEach((m, k) => {
         m.visible = on && Math.random() < 0.6;
         if (!m.visible) return;
-        m.position.set((k - 1.5) * 0.017 * (fa.side === 0 ? -1 : 1), -0.008, -0.16);
-        m.rotation.set((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, Math.random() * 6.28);
+        m.position.set((k - 1.5) * 0.017 * (fa.side === 0 ? -1 : 1), -0.008, -0.165);
+        m.rotation.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, Math.random() * 6.28);
+        m.scale.setScalar(1.6 + Math.random() * 0.8);
       });
     }
     cd.flush();

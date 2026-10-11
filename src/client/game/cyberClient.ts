@@ -864,13 +864,13 @@ export class CyberClient {
           this.reviveUntil = now + (e.v ?? 2);
           this.overlay?.flash?.('revive', 1);
           break;
-        case 'choc':
-          if ((e.v ?? 0) > 0) this.overlay?.flash?.('emp', 0.6);
-          break;
+
       }
       // déjà joués à l'appui (prévision locale)
       if (['doubleSaut', 'sautMural', 'bond', 'esquive', 'glissade', 'grappin', 'grappin-fin', 'escalade', 'atterrissage', 'bras-sortie', 'bras-rentre'].includes(e.ab)) return;
     }
+    // frappé par une impulsion électromagnétique
+    if (e.ab === 'choc' && (e.v ?? 0) >= 1 && (e.targets ?? []).includes(gc.selfId)) this.overlay?.flash?.('emp', 1);
     // positions des cibles (arc électrique, fouet…)
     const targets: V3[] = [];
     for (const id of e.targets ?? []) {

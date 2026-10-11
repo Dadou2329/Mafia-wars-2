@@ -66,7 +66,8 @@ void main() {
   vUv = aUv;
   vDash = aDash;
   vec4 mv = viewMatrix * vec4(position, 1.0);
-  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45);
+  // brouillard au loin ; tout près de l'œil, le trait s'efface (bras en vue subjective)
+  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45) * smoothstep(0.04, 0.22, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -183,7 +184,8 @@ export class RibbonBatch {
       }
       const dist = Math.hypot(vx, vy, vz);
       const want = w * (wk ? wk[i] : 1);
-      const ww = Math.max(want, dist * this.minWidthPerMeter);
+      // ≥ ~2 pixels au loin ; tout près de la caméra, pas plus large qu'un doigt à l'écran
+      const ww = Math.min(Math.max(want, dist * this.minWidthPerMeter), Math.max(0.004, dist * 0.06));
       // un trait élargi au loin garde la même énergie
       const kc = (ck ? ck[i] : 1) * (want > 0 ? Math.max(0.2, want / ww) : 0);
       const hw = ww * 0.5;
@@ -265,7 +267,7 @@ void main() {
   vUv = position.xy;
   vCol = iCol.rgb * keep;
   vShape = iCol.a;
-  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45);
+  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45) * smoothstep(0.1, 0.45, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -524,7 +526,7 @@ void main() {
   vRing = iRing;
   vColor = iColor;
   vec4 mv = viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
-  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45);
+  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45) * smoothstep(0.45, 1.8, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -691,7 +693,7 @@ void main() {
   vPar = iPar;
   vLocal = position;
   vec4 mv = viewMatrix * wp;
-  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45);
+  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45) * smoothstep(0.3, 1.3, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -806,7 +808,7 @@ void main() {
   vLocal = position;
   vCol = iCol;
   vec4 mv = viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
-  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45);
+  vFog = exp(-length(mv.xyz) * uFogDensity * 0.45) * smoothstep(0.3, 1.0, -mv.z);
   gl_Position = projectionMatrix * mv;
 }`;
 

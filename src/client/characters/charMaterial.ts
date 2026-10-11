@@ -297,7 +297,7 @@ if (vFx.x > 0.0) {
   // surbrillance : liseré pulsé (cible, emplacement d'implant survolé)
   vec3 hlv = normalize(cameraPosition - vWPos);
   float hlf = pow(1.0 - max(dot(hlv, wn), 0.0), 2.0);
-  totalEmissiveRadiance += uHlColor * vFx.x * (0.6 + 0.4 * sin(uTime * 5.5)) * (0.22 + 1.2 * hlf);
+  totalEmissiveRadiance += uHlColor * vFx.x * (0.65 + 0.35 * sin(uTime * 5.5)) * (0.06 + 1.15 * hlf);
 }`,
       )
       .replace(

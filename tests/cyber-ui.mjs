@@ -24,6 +24,7 @@ let failures = 0;
 let bot = null;
 // le robot ne doit jamais survivre au test (il garderait la sortie ouverte)
 process.on('exit', () => bot?.kill('SIGTERM'));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(1));
 const check = (name, ok, extra = '') => {
   console.log(`${ok ? 'OK    ' : 'ÉCHEC '} ${name}${extra ? ` — ${extra}` : ''}`);
   if (!ok) failures++;
@@ -36,7 +37,7 @@ if (process.env.LOWGFX)
     try {
       const k = 'mafiawars2.settings.v1';
       const cur = JSON.parse(localStorage.getItem(k) || '{}');
-      localStorage.setItem(k, JSON.stringify({ ...cur, quality: 'basse', renderScale: 0.5, bloom: false }));
+      localStorage.setItem(k, JSON.stringify({ ...cur, quality: 'basse', renderScale: 0.35, bloom: false }));
     } catch {
       /* stockage indisponible */
     }
@@ -66,8 +67,12 @@ const waitCyber = async (name, cond, timeout = 60000) => {
   check(name, ok, ok ? '' : `${JSON.stringify(await cyber().catch(() => null))} ${await diag()}`);
   return ok;
 };
+// clic réel à la souris ; « force » saute les contrôles de stabilité de Playwright, très lents
+// quand la page ne dessine qu'une image par seconde (le clic passe toujours par le DOM réel)
 const click = async (sel, opts = {}) => {
-  await A.locator(sel).first().click({ timeout: 90000, ...opts });
+  const loc = A.locator(sel).first();
+  await loc.waitFor({ state: 'visible', timeout: 90000 });
+  await loc.click({ timeout: 90000, force: true, ...opts });
   await sleep(400);
 };
 /** Touche puis attente de l'état de l'écran (ouvert ou fermé). */
@@ -108,19 +113,59 @@ await sleep(3000);
 check('écran CYBERNÉTIQUE monté (module)', await A.evaluate(() => !!document.querySelector('.cy-root')));
 
 // ------------------------------------------------------------------ fauteuil d'une clinique
-await A.evaluate(() => window.__app.net.act({ a: 'debugMoney', n: 60000 }));
+/** Argent de test : une action envoyée pendant une coupure peut se perdre, on vérifie. */
+const ensureMoney = async () => {
+  for (let i = 0; i < 4; i++) {
+    if ((await A.evaluate(() => window.__app.game?.priv.money ?? 0)) >= 30000) return true;
+    await A.waitForFunction(() => window.__app.net.connected, null, WAIT).catch(() => {});
+    await A.evaluate(() => window.__app.net.act({ a: 'debugMoney', n: 60000 }));
+    const ok = await A.waitForFunction(() => (window.__app.game?.priv.money ?? 0) >= 30000, null, { timeout: 30000, polling: 300 })
+      .then(() => true)
+      .catch(() => false);
+    if (ok) return true;
+  }
+  return false;
+};
+check('argent de test reçu (debugMoney)', await ensureMoney());
 const clinic = await A.evaluate(() => {
   const g = window.__app.game;
   const rival = g.you === 'dadou' ? 2 : 1;
-  const b = g.world.buildings.find((x) => x.clinic && g.pub.buildings[x.id]?.owner !== rival);
+  // une clinique sans défenseurs (sinon les gardes abattent le parrain, immobile dans le menu)
+  const list = g.world.buildings.filter((x) => x.clinic && g.pub.buildings[x.id]?.owner !== rival);
+  list.sort((a, b) => (g.pub.buildings[a.id]?.guards ?? 99) - (g.pub.buildings[b.id]?.guards ?? 99));
+  const b = list[0];
   if (!b) return null;
   const c = b.clinic;
   // devant le fauteuil (côté patient), à portée de la station
-  return { bid: b.id, name: c.name, x: c.x + Math.sin(c.yaw) * 2.1, y: c.y, z: c.z + Math.cos(c.yaw) * 2.1, yaw: c.yaw + Math.PI };
+  return { bid: b.id, name: c.name, guards: g.pub.buildings[b.id]?.guards ?? -1, x: c.x + Math.sin(c.yaw) * 2.1, y: c.y, z: c.z + Math.cos(c.yaw) * 2.1, yaw: c.yaw + Math.PI };
 });
-check('une clinique existe dans la ville', !!clinic, JSON.stringify(clinic));
-if (clinic) await A.evaluate((c) => window.__app.net.act({ a: 'debugTp', x: c.x, z: c.z, y: c.y, yaw: c.yaw }), clinic);
-await waitCyber('en station à la clinique (priv.cyber.station)', '(c) => typeof c.station === "string" && c.station.startsWith("clinique:")', 30000);
+check('une clinique accessible existe dans la ville', !!clinic, JSON.stringify(clinic));
+/**
+ * En station à la clinique, connecté, écran ouvert : sous forte charge (rendu logiciel), la page
+ * peut perdre la connexion ; la reconnexion remet le parrain au QG et referme l'écran.
+ */
+const inStation = '(c) => typeof c.station === "string" && c.station.startsWith("clinique:")';
+let reconnects = 0;
+const ready = async (open = true) => {
+  for (let i = 0; i < 4; i++) {
+    await A.waitForFunction(() => window.__app.net.connected && window.__app.game?.placed, null, WAIT).catch(() => {});
+    const here = await A.evaluate(new Function(`const c = window.__app.game.priv.cyber; return (${inStation})(c);`));
+    if (here) break;
+    if (i > 0) reconnects++;
+    if (clinic) await A.evaluate((c) => window.__app.net.act({ a: 'debugTp', x: c.x, z: c.z, y: c.y, yaw: c.yaw }), clinic);
+    const ok = await A.waitForFunction(new Function(`const c = window.__app.game.priv.cyber; return (${inStation})(c);`), null, { timeout: 45000, polling: 300 })
+      .then(() => true)
+      .catch(() => false);
+    if (ok) break;
+  }
+  if (open && !(await isOpen())) {
+    await A.keyboard.press('KeyI');
+    await A.waitForFunction(() => !document.querySelector('.cy-root')?.classList.contains('hidden'), null, WAIT).catch(() => {});
+    await sleep(600);
+  }
+};
+await ready(false);
+await waitCyber('en station à la clinique (priv.cyber.station)', inStation, 30000);
 const money0 = await A.evaluate(() => window.__app.game.priv.money);
 
 // ------------------------------------------------------------------ ouverture (touche I)
@@ -131,25 +176,32 @@ check('bandeau « Station : … — installation possible »', /installation pos
 await shot('cyber-01-ouvert.png');
 
 // achat du grappin : il se pose tout seul au bras gauche
+await ready();
 await click('.cy-slot[data-slot="brasG"]');
 await click('.cy-item[data-id="grappin"]');
 await click(action('Acheter'));
 await waitCyber('achat : grappin niveau 1, posé au bras gauche', '(c) => c.owned.grappin === 1 && c.equip.brasG === "grappin"');
 const money1 = await A.evaluate(() => window.__app.game.priv.money);
-check('le prix a été débité (650 $)', money0 - money1 === 650, `${money0} → ${money1}`);
+// (les revenus continuent de tomber pendant ce temps : quelques dollars de tolérance)
+check('le prix a été débité (650 $)', Math.abs(money0 - money1 - 650) < 40, `${money0} → ${money1}`);
 await sleep(600);
 await shot('cyber-02-achat.png');
 
 // amélioration
+await ready();
+await click('.cy-item[data-id="grappin"]');
 await click(action('Améliorer'));
 await waitCyber('amélioration : grappin niveau 2', '(c) => c.owned.grappin === 2');
 await sleep(600);
 await shot('cyber-03-amelioration.png');
 
 // la lame : achat (posée au bras droit, libre), puis déplacée au bras gauche à la place du grappin
+await ready();
+await click('.cy-slot[data-slot="brasG"]');
 await click('.cy-item[data-id="lame"]');
 await click(action('Acheter'));
 await waitCyber('achat : lame posée au bras droit', '(c) => c.owned.lame === 1 && c.equip.brasD === "lame"');
+await ready();
 await click('.cy-slot[data-slot="brasG"]');
 await click('.cy-item[data-id="lame"]');
 check('remplacement annoncé (« Remplace : Grappin… »)', /Remplace : Grappin/.test((await A.textContent('.cy-actions')) ?? ''));
@@ -158,25 +210,34 @@ await click(action('Déplacer'));
 await waitCyber('déplacement : lame au bras gauche, bras droit libre, grappin en réserve', '(c) => c.equip.brasG === "lame" && !c.equip.brasD && c.owned.grappin === 2');
 
 // retrait
+await ready();
+await click('.cy-slot[data-slot="brasG"]');
 await click(action('Retirer'));
 await waitCyber('retrait : bras gauche libre', '(c) => !c.equip.brasG');
 await sleep(500);
 await shot('cyber-05-retrait.png');
 
 // configurations : grappin au bras gauche → « Combat » enregistrée → retrait → appliquée
+await ready();
+await click('.cy-slot[data-slot="brasG"]');
 await click('.cy-item[data-id="grappin"]');
 await click(action('Installer'));
 await waitCyber('installation : grappin au bras gauche', '(c) => c.equip.brasG === "grappin"');
+await ready();
 await click('.cy-lo >> nth=0 >> .btn:has-text("Enregistrer")');
 await waitCyber('configuration « Combat » enregistrée', '(c) => !!c.loadouts[0] && c.loadouts[0].brasG === "grappin"');
+await ready();
+await click('.cy-slot[data-slot="brasG"]');
 await click(action('Retirer'));
 await waitCyber('retrait avant d’appliquer', '(c) => !c.equip.brasG');
+await ready();
 await click('.cy-lo >> nth=0 >> .btn:has-text("Appliquer")');
 await waitCyber('configuration « Combat » appliquée', '(c) => c.equip.brasG === "grappin"');
 await sleep(600);
 await shot('cyber-06-configuration.png');
 
 // fermeture (Échap) : pas de pause, HUD des capacités visible
+await ready();
 await pressFor('Escape', false, 'Échap : écran fermé');
 await sleep(800);
 check('Échap : pas de menu de pause', await A.evaluate(() => !document.querySelector('.modal-layer')));
@@ -220,6 +281,7 @@ await A.keyboard.press('Escape');
 await sleep(500);
 
 console.log('\npriv.cyber final :', JSON.stringify(await cyber()));
+if (reconnects) console.log(`(re-téléportations après reconnexion : ${reconnects})`);
 console.log('erreurs de la page :', errors.length ? errors : 'aucune');
 bot?.kill('SIGTERM');
 await browser.close();

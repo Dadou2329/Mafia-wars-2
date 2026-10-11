@@ -220,7 +220,8 @@ void main() {
   float fres = pow(1.0 - abs(dot(n, v)), 2.2);
   float border = uArc < 3.1 ? smoothstep(uArc - 0.14, uArc, aa) : 0.0;
   float bottom = ss(-0.6, -0.74, p.y);
-  float k = 0.06 + edge * (0.2 + 0.18 * wave) + fres * 0.85 + twinkle * 0.45 + border * 0.9 + bottom * 0.35 + openEdge * 1.4;
+  float inner = mix(1.0, 0.55, uInside);
+  float k = 0.06 + edge * (0.2 + 0.18 * wave) * inner + fres * 0.85 + twinkle * 0.45 * inner + border * 0.9 + bottom * 0.35 + openEdge * 1.4;
   float hit = 0.0;
   for (int i = 0; i < 4; i++) {
     vec4 H = uHits[i];
@@ -283,12 +284,15 @@ const CONE_VERT = /* glsl */ `
 varying vec3 vP;
 varying vec3 vN;
 varying vec3 vW;
+varying float vNear;
 void main() {
   vP = position;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vW = wp.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  vec4 mv = viewMatrix * wp;
+  vNear = smoothstep(0.6, 2.2, -mv.z);
+  gl_Position = projectionMatrix * mv;
 }`;
 
 const CONE_FRAG = /* glsl */ `
@@ -300,6 +304,7 @@ uniform vec3 uColor;
 varying vec3 vP;
 varying vec3 vN;
 varying vec3 vW;
+varying float vNear;
 ${SS}
 ${NOISE_GLSL}
 void main() {
@@ -315,7 +320,7 @@ void main() {
   float fade = ss(1.02, 0.6, z) * smoothstep(0.0, 0.12, z);
   // fronts d'onde nets, voile intérieur à peine visible (l'air déformé)
   float k = (b1 * (0.3 + 0.7 * n) * 0.45 + (b2 + b3) * n * 0.2) * fade;
-  k *= gl_FrontFacing ? 1.0 : 0.45;
+  k *= (gl_FrontFacing ? 1.0 : 0.45) * vNear;
   gl_FragColor = vec4(uColor * k * uI, 1.0);
 }`;
 
@@ -616,7 +621,7 @@ export class CyberFx {
         break;
       case 'escalade':
         this.sfx('mantle_grab', p, 1, 1, o.local);
-        if (lod > 0) this.mantle(p, lod);
+        if (lod > 0) this.mantle(p, caster ? caster.yaw : null, lod);
         break;
       // ------------------------------------------------------------ combat
       case 'bras-sortie':
@@ -1769,8 +1774,9 @@ export class CyberFx {
         this.wk[i] = 1;
         this.ck[i] = 1 - k * 0.6;
       }
-      const [r, g, bb] = rgb(col, 1.2);
-      this.ribbons.strip(P, n, 0.04, r, g, bb, this.wk, this.ck, 2, -12);
+      const [r, g, bb] = rgb(col, 1.5);
+      this.ribbons.strip(P, n, 0.14, r * 0.16, g * 0.16, bb * 0.16, this.wk, this.ck);
+      this.ribbons.strip(P, n, 0.045, r, g, bb, this.wk, this.ck, 2, -12);
       if (Math.random() < lod) this.parts.emit(_v1.x + rnd(-0.2, 0.2), _v1.y + rnd(-0.5, 0.5), _v1.z + rnd(-0.2, 0.2), (a.x - b0.x) * 0.5, 0, (a.z - b0.z) * 0.5, SP.streak, col);
     });
   }
@@ -1934,12 +1940,32 @@ export class CyberFx {
     for (let i = 0; i < 4 * lod; i++) this.effects?.addSmoke(p.x + rnd(-0.2, 0.2), p.y + 0.1, p.z + rnd(-0.2, 0.2), -ux * rnd(0.5, 1.2), 0.3, -uz * rnd(0.5, 1.2), 1, 0.1, 0.45, 0.62, 0.4);
   }
 
-  private mantle(p: Vec3Like, lod: number): void {
+  private mantle(p: Vec3Like, yaw: number | null, lod: number): void {
+    // mains de part et d'autre du regard (axe x si l'entité est inconnue)
+    const rx = yaw === null ? 1 : -Math.cos(yaw);
+    const rz = yaw === null ? 0 : Math.sin(yaw);
     for (let i = 0; i < 3 * lod; i++) this.effects?.addSmoke(p.x + rnd(-0.3, 0.3), p.y + 0.05, p.z + rnd(-0.3, 0.3), rnd(-0.3, 0.3), 0.3, rnd(-0.3, 0.3), 0.8, 0.07, 0.35, 0.62, 0.35);
+    // trait d'adhérence : éclair bref le long du rebord, d'une main à l'autre
+    this.addActive(0.16, (s) => {
+      const P = this.bp;
+      for (let i = 0; i < 2; i++) {
+        const side = i ? 0.32 : -0.32;
+        P[i * 3] = p.x + rx * side;
+        P[i * 3 + 1] = p.y + 0.04;
+        P[i * 3 + 2] = p.z + rz * side;
+        this.wk[i] = 1;
+        this.ck[i] = 1 - s.t / 0.16;
+      }
+      const [r, g, b] = rgb(COL.grip, 1.2);
+      this.ribbons.strip(P, 2, 0.05, r, g, b, this.wk, this.ck);
+    });
     for (const side of [-0.25, 0.25]) {
-      this.parts.emit(p.x + side, p.y + 0.05, p.z, 0, 0, 0, SP.glow, COL.grip, 0.5);
-      this.burst({ x: p.x + side, y: p.y + 0.05, z: p.z }, COL.grip, 3 * lod, 1.5, SP.sparkHot);
+      const q = { x: p.x + rx * side, y: p.y + 0.05, z: p.z + rz * side };
+      this.parts.emit(q.x, q.y, q.z, 0, 0, 0, SP.glow, COL.grip, 0.75);
+      this.burst(q, COL.grip, 3 * lod, 1.5, SP.sparkHot);
     }
+    // éclats de béton arrachés au rebord
+    this.effects?.spray(p, 0, 0.6, 0, 0.9, Math.round(5 * lod), [0x6c6a66, 0x8a8782, 0x55524e], 0.04, 0.7);
   }
 
   private slash(p: Vec3Like, p2: Vec3Like | null | undefined, targets: Vec3Like[] | undefined, col: number, lod: number): void {

@@ -33,6 +33,7 @@ import {
 } from '../../shared/implants';
 import type { ClientAction, CyberState, GameEvent, PrivateState, PublicState, Slot } from '../../shared/protocol';
 import { formatMoney } from '../../shared/util';
+import { createMaterialTexture } from '../render/env';
 import { h } from '../ui/dom';
 import { AbilityHud } from '../game/abilityHud';
 import { CyberUi, type CyberHost } from '../game/cyberUi';
@@ -137,6 +138,8 @@ export function startCyberUiLab(root: HTMLElement): void {
   let station: string | null = stationParam === 'off' ? null : stationParam === 'qg' ? 'qg' : `clinique:${clinicId}`;
   priv.cyber.station = station;
   const player = { x: 0, y: 0, z: 0 };
+  // matières des voxels (l'aperçu 3D du parrain en a besoin, comme en partie)
+  if (!params.has('nopreview')) createMaterialTexture();
 
   // décor : la ville derrière, assombrie par l'écran
   root.style.cssText = `background:#05060d url('/brand/menu-backdrop.jpg') center / cover no-repeat;`;

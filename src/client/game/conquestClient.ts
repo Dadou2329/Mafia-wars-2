@@ -71,7 +71,8 @@ class OpMarker {
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false, fog: false, toneMapped: false }));
-    this.label.scale.set(0.26, 0.065, 1);
+    // taille constante à l'écran (environ 5 % de la hauteur), lisible de loin
+    this.label.scale.set(0.42, 0.105, 1);
     this.label.center.set(0.5, 0);
     for (const o of [this.ring, this.beam, this.gem, this.label]) {
       o.renderOrder = 60;
@@ -97,10 +98,10 @@ class OpMarker {
     const w2 = l2 ? c.measureText(l2).width : 0;
     const bw = Math.min(508, Math.max(w1, w2) + 34);
     const bx = (512 - bw) / 2;
-    c.fillStyle = 'rgba(4, 6, 14, 0.78)';
+    c.fillStyle = 'rgba(4, 6, 14, 0.86)';
     c.fillRect(bx, l2 ? 4 : 40, bw, l2 ? 120 : 84);
     c.strokeStyle = css;
-    c.lineWidth = 3;
+    c.lineWidth = 5;
     c.strokeRect(bx + 1.5, (l2 ? 4 : 40) + 1.5, bw - 3, (l2 ? 120 : 84) - 3);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
@@ -169,6 +170,7 @@ class HackGame {
   private need = 4;
   private endAt = 0;
   private sent = false;
+  private last = 0;
   failAt = -100;
 
   constructor(
@@ -210,6 +212,7 @@ class HackGame {
     this.locks = 0;
     this.need = 4;
     this.sent = false;
+    this.last = nowS();
     // le bras tactique élargit la fenêtre (piratage plus facile)
     this.zw = Math.min(0.3, 0.15 * Math.max(1, Math.sqrt(hackMul)));
     this.newZone();
@@ -287,8 +290,12 @@ class HackGame {
     this.onClose();
   }
 
-  update(dt: number): void {
+  update(): void {
     if (!this.open) return;
+    // horloge réelle (le pas de la boucle de jeu est plafonné quand les images ralentissent)
+    const now = nowS();
+    const dt = Math.min(0.25, Math.max(0, now - this.last));
+    this.last = now;
     this.t += dt;
     if (this.phase === 'play') {
       this.x += this.dir * this.speed * dt;
@@ -518,8 +525,10 @@ export class ConquestClient implements ClientModule {
       text = `${step.label} — ${pct(this.prog(v!))}`;
       sub = step.kind === 'hold' ? 'Restez dans la pièce' : 'Restez près de l’objectif';
     } else if (step.kind === 'minigame') sub = `${stage} — piratage interactif (moins de ${OP_MINIGAME_MAX} s)`;
-    if (op?.contested) sub = 'CONTESTÉ : éliminez les ennemis autour de l’objectif';
     const guards = gc.pub.buildings[b]?.guards ?? 0;
+    // bâtiment à vendre : la prise par la force n'empêche pas l'achat (ailleurs dans le bâtiment)
+    if (!working && !def.residence && def.price > 0 && guards === 0 && this.owner(b) === Faction.NEUTRAL) sub = `Prise par la force — ou achat : ${formatMoney(def.price)}`;
+    if (op?.contested) sub = 'CONTESTÉ : éliminez les ennemis autour de l’objectif';
     if (idx === n - 1 && guards > 0 && this.owner(b) === Faction.NEUTRAL) sub = `Éliminez d’abord les défenseurs du gang (${guards})`;
     return {
       d,
@@ -548,7 +557,7 @@ export class ConquestClient implements ClientModule {
   // ------------------------------------------------------------------ boucle
 
   update(dt: number, now: number): void {
-    this.hack.update(dt);
+    this.hack.update();
     for (const m of this.markers) m.update(now);
     this.acc += dt;
     if (this.acc < 0.1) return;

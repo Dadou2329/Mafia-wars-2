@@ -264,28 +264,32 @@ export function cyberForearmFP(id: ArmImplant, q: number, side: 'L' | 'R', look:
       break;
     }
     case 'lame': {
-      // fourreau sur le flanc extérieur, fente lumineuse ; lame courbe à tranchant chauffé
+      // fourreau haut sur le flanc extérieur (visible de l'œil du parrain), fente lumineuse ;
+      // lame à tranchant chauffé sur le dessus
+      const ly = 2.2;
       s.add((x, y, z) => {
         if (z < 3 || z > 33) return -1;
-        const ox = outer(z);
-        if (x < ox - 0.6 || x > ox + 3.2 || Math.abs(y) > 3.2) return -1;
-        if (x > ox + 0.5 && x < ox + 1.9 && Math.abs(y) < 2.6 && z < 31) return -1;
-        if (x > ox + 2.2 && Math.abs(y) < 0.6) return g.act;
-        return z < 5 || z > 31 ? GR : y > 1.6 ? AL : AL_DK;
+        const ox = outer(z) - 0.4;
+        const yy = y - ly;
+        if (x < ox - 0.6 || x > ox + 3.4 || Math.abs(yy) > 3.4) return -1;
+        if (x > ox + 0.5 && x < ox + 2.1 && Math.abs(yy) < 2.8 && z < 31) return -1;
+        if (x > ox + 2.4 && Math.abs(yy) < 0.6) return g.act;
+        return z < 5 || z > 31 ? GR : yy > 1.6 ? AL_HI : yy > -1 ? AL : AL_DK;
       });
-      const bx = outer(18) + 1.2;
-      part('blade', [bx, 0, 0], (x, y, z) => {
-        if (Math.abs(x - bx) > 0.7 || z < -2 || z > 42) return -1;
+      const bx = outer(18) + 0.9;
+      part('blade', [bx, ly, 0], (x, y, z) => {
+        if (Math.abs(x - bx) > 0.85 || z < -2 || z > 42) return -1;
+        const yy = y - ly;
         const t = Math.max(0, 6 - z);
-        const yTop = 2.6 - t * 0.35;
-        const yBot = -2.6 + t * 0.05 - (z < 2 ? (2 - z) * 0.5 : 0);
-        if (y > yTop || y < yBot) return -1;
-        if (y < yBot + 1.2) return g.heat;
-        if (y > yTop - 0.9) return AL_HI;
-        return Math.abs(y - 0.4) < 0.5 ? BLADE_DK : BLADE;
+        const yTop = 2.7 - t * 0.12 - (z < 2 ? (2 - z) * 0.55 : 0);
+        const yBot = -2.7 + t * 0.42;
+        if (yy > yTop || yy < yBot) return -1;
+        if (yy > yTop - 1.2) return g.heat;
+        if (yy < yBot + 0.9) return AL_HI;
+        return Math.abs(yy + 0.3) < 0.5 ? BLADE_DK : BLADE;
       });
       travel.blade = 34 * R;
-      points.tip = [bx * R, 0, (-2 - 34) * R];
+      points.tip = [bx * R, ly * R, (-2 - 34) * R];
       break;
     }
     case 'poing': {

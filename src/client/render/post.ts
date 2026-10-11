@@ -193,7 +193,7 @@ void main() {
     // surcharge : chaleur rouge qui bat sur les bords
     float pulse = 0.65 + 0.35 * sin(uTime * 7.0);
     vec3 oc = c * vec3(1.12, 0.9, 0.85);
-    oc += vec3(0.55, 0.06, 0.02) * ss(0.5, 1.15, r) * pulse;
+    oc += vec3(0.38, 0.04, 0.015) * ss(0.5, 1.15, r) * pulse;
     c = mix(c, oc, uOver);
   }
   if (uCamo > 0.0) {

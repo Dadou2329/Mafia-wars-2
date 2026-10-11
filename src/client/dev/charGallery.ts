@@ -21,8 +21,9 @@
 
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
-import { CFX } from '../../shared/implants';
+import { CFX, type SlotId } from '../../shared/implants';
 import { CharacterRenderer, type CharView } from '../characters/characterRenderer';
+import { createCharacterPreview } from '../characters/preview';
 import { createCharMaterial, CyberShaderData } from '../characters/charMaterial';
 import { meshChar } from '../characters/charMesher';
 import { buildPart } from '../characters/parts';
@@ -152,6 +153,10 @@ export function startCharGallery(root: HTMLElement): void {
   createMaterialTexture();
   if (params.has('inspect')) {
     startInspect(root, params);
+    return;
+  }
+  if (params.has('preview')) {
+    startPreviewTest(root, params);
     return;
   }
   const data = new Uint8Array(16).fill(190);
@@ -923,4 +928,46 @@ function startInspect(root: HTMLElement, params: URLSearchParams): void {
   label.textContent = names.map((n) => `${n}: ${quads[n]} quads`).join('\n');
   document.body.appendChild(label);
   (window as unknown as { __viewer: object }).__viewer = { quads, render: () => renderer.render(scene, camera) };
+}
+
+/**
+ * Banc d'essai de l'aperçu 3D de l'écran des implants (characters/preview.ts) :
+ * ?chars&preview=combat (préréglage ou liste « emplacement=identifiant:niveau » séparée par des
+ * virgules) &kind=even &slot=brasG &still (pas de boucle : __viewer.step(s)).
+ */
+function startPreviewTest(root: HTMLElement, params: URLSearchParams): void {
+  root.style.cssText = 'position:fixed;inset:0;background:radial-gradient(circle at 50% 40%,#26303f,#0b0d12 70%);';
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+  root.appendChild(canvas);
+  const size = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  };
+  size();
+  window.addEventListener('resize', size);
+  const still = params.has('still');
+  const preview = createCharacterPreview(canvas, { interactive: true, rotate: !still, background: null });
+  const kind = params.get('kind') === 'even' ? CharKind.BOSS_EVEN : CharKind.BOSS_DADOU;
+  const preset = params.get('preview') || 'combat';
+  const look = (p: string) => CYBER_PRESETS[p] ?? p.split(',').filter(Boolean);
+  preview.setLook(kind, {}, look(preset));
+  preview.highlightSlot((params.get('slot') as SlotId | null) ?? null);
+  let last = performance.now();
+  const loop = (t: number) => {
+    preview.render((t - last) / 1000);
+    last = t;
+    requestAnimationFrame(loop);
+  };
+  if (!still) requestAnimationFrame(loop);
+  else preview.render(1 / 60);
+  (window as unknown as { __viewer: object }).__viewer = {
+    preview,
+    step(sec: number) {
+      const n = Math.max(1, Math.round(sec * 60));
+      for (let i = 0; i < n; i++) preview.render(1 / 60);
+    },
+    slot: (s: SlotId | null) => preview.highlightSlot(s),
+    look: (p: string, k?: 'dadou' | 'even') => preview.setLook(k === 'even' ? CharKind.BOSS_EVEN : CharKind.BOSS_DADOU, {}, look(p)),
+  };
 }

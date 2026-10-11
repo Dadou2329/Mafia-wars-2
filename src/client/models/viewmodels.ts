@@ -1137,6 +1137,47 @@ export function mechHandModel(side: 'R' | 'L', pose: HandPose, look: ArmLook, me
   return { hand, wrist };
 }
 
+/** Longueur du haut du bras (m) : manche du coude vers l'épaule. */
+export const UPPER_ARM_LENGTH = 0.36;
+
+/**
+ * Haut du bras (manche du manteau, 1/128 m) : origine au coude (arrondi), s'étend selon +Z vers
+ * l'épaule ; dessus en +Y. Sert aux bras qui ne tiennent pas d'arme (gestes, armes de bras) :
+ * le bras reste continu jusqu'au bord de l'écran.
+ */
+export function upperSleeveModel(look: ArmLook): VoxelModel {
+  const len = Math.round(UPPER_ARM_LENGTH / HAND_RES);
+  const m = new VoxelModel(21, 21, len + 9, HAND_RES);
+  m.setOrigin(10.5, 10.5, 8);
+  const sl = look.sleeve;
+  const slHi = mix(sl, 0xa4a4b0, look.boss === 'dadou' ? 0.14 : 0.1);
+  const slDk = shade(sl, 0.7);
+  for (let z = 0; z < m.sz; z++) {
+    const zz = z - 8 + 0.5;
+    for (let y = 0; y < m.sy; y++)
+      for (let x = 0; x < m.sx; x++) {
+        const px = x + 0.5 - 10.5;
+        const py = y + 0.5 - 10.5;
+        let c = -1;
+        if (zz < 0) {
+          // coude arrondi
+          if ((px / 8.4) ** 2 + (py / 7.8) ** 2 + (zz / 7.6) ** 2 <= 1) c = py > 4.2 ? slHi : py < -4.2 ? slDk : sl;
+        } else {
+          const k = Math.min(1, zz / len);
+          const ax = 8.4 + 0.8 * k;
+          const ay = 7.8 + 0.6 * k;
+          if (Math.abs(px / ax) ** 2.6 + Math.abs(py / ay) ** 2.6 <= 1) {
+            c = py > ay * 0.55 ? slHi : py < -ay * 0.55 ? slDk : sl;
+            // plis au creux du coude
+            if (zz < 9 && zz % 3 < 0.9 && py < ay * 0.2) c = slDk;
+          }
+        }
+        if (c >= 0) m.set(x, y, z, c);
+      }
+  }
+  return m;
+}
+
 /** Avant-bras de chair (manche du parrain) d'un côté, seul. */
 export function sleeveForearmModel(side: 'R' | 'L', look: ArmLook): VoxelModel {
   const f = forearmModel(look);

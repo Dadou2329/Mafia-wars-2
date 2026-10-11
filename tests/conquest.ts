@@ -8,7 +8,7 @@ import { getWorld } from '../src/server/world';
 import { Game } from '../src/server/game/Game';
 import { opOf } from '../src/server/game/conquest';
 import { BUILDINGS, BUILDING_BY_KEY, DISTRICTS, Faction, HQ_BUILDING, keyBuildings, mirrorRect } from '../src/shared/city/plan';
-import { HQ_CAPTURE_MIN_DISTRICTS } from '../src/shared/constants';
+import { HACK_TIME, HQ_CAPTURE_MIN_DISTRICTS } from '../src/shared/constants';
 import { OP_BUDGET, OP_MINIGAME_MIN, OP_RIVAL_TAKEOVER, opAnchor, opPlan, type OpStep } from '../src/shared/conquest';
 import type { GameEvent, OpPub, Slot } from '../src/shared/protocol';
 import type { Ent } from '../src/server/game/types';
@@ -520,6 +520,96 @@ section('Un lieutenant abattu interrompt l’opération');
 }
 
 // ---------------------------------------------------------------------------- QG
+// ---------------------------------------------------------------------------- caméras coupées
+section('« Couper les caméras » : le terminal de sécurité');
+{
+  const c = newGame();
+  const g = c.g;
+  const bid = B('tavern');
+  c.clearThugs(bid);
+  const steps = stepsOf(g, bid);
+  check('la taverne : les caméras d’abord', steps[0].key === 'terminal');
+  const info = w.byId.get(bid)!;
+  const boss = c.boss('dadou');
+  // le parrain pirate le terminal (action de sécurité habituelle)
+  c.place(boss, info.terminal!);
+  g.action('dadou', { a: 'hack', b: bid });
+  c.run(HACK_TIME + 1, () => void c.place(boss, info.terminal!));
+  check('sécurité coupée par le terminal', g.publicState().hacked.includes(bid));
+  c.place(boss, steps[1].anchor);
+  g.action('dadou', { a: 'op', b: bid, k: steps[1].key });
+  c.run(1, () => void c.place(boss, steps[1].anchor));
+  const op = c.pubOp(bid);
+  check('caméras déjà coupées : l’opération commence à l’étape 2', op?.step === 1 && op.who[0] === 'Dadou' && (op.by & 1) === 1, JSON.stringify(op));
+}
+
+// ---------------------------------------------------------------------------- piratage à distance
+section('Bras tactique : piratage à distance');
+{
+  const c = newGame();
+  const g = c.g;
+  const bid = B('museum');
+  c.clearThugs(bid);
+  const s0 = stepsOf(g, bid)[0];
+  check('le muséum : la salle de sécurité (console)', s0.key === 'security' && s0.kind === 'override');
+  // un point à 6–10 m de la console, au même étage, en vue
+  const a = s0.anchor;
+  let spot: { x: number; y: number; z: number } | null = null;
+  for (let r = 7; r <= 10 && !spot; r += 1)
+    for (let k = 0; k < 24 && !spot; k++) {
+      const x = a.x + Math.cos((k / 24) * Math.PI * 2) * r;
+      const z = a.z + Math.sin((k / 24) * Math.PI * 2) * r;
+      if (w.nav.walkable(x, z, a.y, 0.6) && w.city.world.lineOfSight(a.x, a.y + 1, a.z, x, a.y + 1.3, z)) spot = { x, y: a.y, z };
+    }
+  check('un poste de tir à distance dans la salle', !!spot);
+  if (spot) {
+    const boss = c.boss('dadou');
+    c.place(boss, spot);
+    g.action('dadou', { a: 'op', b: bid, k: s0.key });
+    c.run(1, () => void c.place(boss, spot!));
+    check('sans implant : trop loin', !c.pubOp(bid));
+    const cy = g.factions.dadou.cyber;
+    cy.owned.set('outils', 3);
+    cy.equip.brasG = 'outils';
+    g.action('dadou', { a: 'op', b: bid, k: s0.key });
+    c.run(2, () => void c.place(boss, spot!));
+    const op = c.pubOp(bid);
+    check('bras tactique (12 m) : piratage à distance, plus rapide', !!op && (op.by & 1) === 1 && op.rate > 2 / s0.time, JSON.stringify(op));
+  }
+}
+
+// ---------------------------------------------------------------------------- défense par un lieutenant
+section('Un lieutenant en défense court à l’objectif contesté');
+{
+  const c = newGame();
+  const g = c.g;
+  const E = g.factions.even;
+  E.money += 3000;
+  g.action('even', { a: 'recruit', n: 5 });
+  const bid = B('marche_astoria');
+  c.clearThugs(bid);
+  g.setOwner(bid, Faction.EVEN, 'even');
+  const ltId = E.lieutenants[0];
+  g.ents.get(ltId)!.invulnerable = true;
+  g.action('even', { a: 'order', lt: ltId, order: 'defend_building', target: bid, men: 6 });
+  c.run(120, () => g.squads.get(ltId)!.state === 'hold');
+  const s0 = stepsOf(g, bid)[0];
+  const boss = c.boss('dadou');
+  c.place(boss, s0.anchor);
+  g.action('dadou', { a: 'op', b: bid, k: s0.key });
+  let contested = false;
+  let status = '';
+  c.run(90, () => {
+    c.place(boss, s0.anchor);
+    const op = c.pubOp(bid);
+    status = g.privateState('even').lieutenants[0].state;
+    if (op?.contested) contested = true;
+    return contested && /Défend/.test(status);
+  });
+  check('le lieutenant d’Even vient contester l’objectif', contested, `${status} — ${JSON.stringify(c.pubOp(bid))}`);
+  check('rapport : « Défend … contre Dadou »', /Défend .* contre Dadou/.test(status), status);
+}
+
 section('Le QG : imprenable sans 7 quartiers, puis l’assaut final');
 {
   const c = newGame();
@@ -538,15 +628,20 @@ section('Le QG : imprenable sans 7 quartiers, puis l’assaut final');
   // la garde du QG ne gêne pas ce test : on la renvoie loin
   for (const e of g.ents.values()) if (e.slot === 'even' && e.role !== 'boss' && e.alive && !e.invulnerable && e.role !== 'barman') g.damage(e, 99999, null);
   c.place(c.boss('even'), { x: 5, z: 5 });
+  let rate0 = 0;
+  // porte blindée du QG (équipement « security », server/game/hq.ts) : la prise est plus lente
+  g.factions.even.upgrades.add('security');
   for (let i = 0; i < steps.length && !g.over; i++) {
     c.place(boss, steps[i].anchor);
     g.action('dadou', { a: 'op', b: hqId, k: steps[i].key });
-    c.run(steps[i].time + 3, () => {
+    c.run(steps[i].time / 0.67 + 4, () => {
       c.place(boss, steps[i].anchor);
       c.place(c.boss('even'), { x: 5, z: 5 });
+      if (i === 0 && (c.pubOp(hqId)?.rate ?? 0) > 0) rate0 = c.pubOp(hqId)!.rate;
       return !!g.over || (c.pubOp(hqId)?.step ?? 0) > i;
     });
   }
+  check('porte blindée du QG : progression ×0,67', Math.abs(rate0 - (1 / steps[0].time) * 0.67) < 0.004, `${rate0} contre ${(1 / steps[0].time).toFixed(3)}`);
   check(`l’assaut du QG en ${steps.length} étapes donne la victoire à Dadou`, g.over?.winner === 'dadou', JSON.stringify(g.over));
 }
 

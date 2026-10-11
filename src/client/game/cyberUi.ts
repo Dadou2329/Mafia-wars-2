@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import '../ui/cyber.css';
 import { CharKind } from '../../shared/characters';
+import { createCharacterPreview, type CharacterPreview } from '../characters/preview';
 import { BOSS_NAME } from '../../shared/constants';
 import type { BuildingInfo } from '../../shared/city/gen/context';
 import {
@@ -69,36 +70,6 @@ const SFX = new Set<string>(SFX_NAMES as readonly string[]);
 export function uiSfx(name: string, fallback: SfxName | null, volume = 0.6): void {
   const n = SFX.has(name) ? (name as SfxName) : fallback;
   if (n) audio.play(n, { volume });
-}
-
-// ---------------------------------------------------------------------------- aperçu 3D
-
-/** Aperçu 3D du parrain (characters/preview.ts, fourni par le moteur des personnages). */
-export interface CharacterPreview {
-  setLook(kind: CharKind, custom: Record<string, unknown> | undefined, cyber: string[]): void;
-  highlightSlot(slot: SlotId | null): void;
-  render(dt: number): void;
-  dispose(): void;
-}
-type PreviewFactory = (canvas: HTMLCanvasElement, opts?: Record<string, unknown>) => CharacterPreview;
-
-// le module est chargé s'il existe (sinon : silhouette holographique, sans erreur)
-const PREVIEW_MODULE = import.meta.glob('../characters/preview.ts');
-let previewFactory: Promise<PreviewFactory | null> | null = null;
-
-function loadPreviewFactory(): Promise<PreviewFactory | null> {
-  previewFactory ??= (async () => {
-    const load = Object.values(PREVIEW_MODULE)[0];
-    if (!load) return null;
-    try {
-      const m = (await load()) as { createCharacterPreview?: unknown };
-      return typeof m.createCharacterPreview === 'function' ? (m.createCharacterPreview as PreviewFactory) : null;
-    } catch (err) {
-      console.warn('Aperçu 3D du parrain indisponible :', err);
-      return null;
-    }
-  })();
-  return previewFactory;
 }
 
 // ------------------------------------------------------------------------- silhouette (repli)
@@ -248,6 +219,8 @@ class RouteBeam {
 /** Ce dont l'écran a besoin de la partie (le laboratoire ?cyberui en fournit une imitation). */
 export interface CyberHost {
   readonly you: Slot;
+  /** Entité du parrain local (blessures : l'écran se ferme pour rendre la main). */
+  readonly selfId?: number;
   priv(): PrivateState;
   pub(): PublicState;
   readonly world: { buildings: BuildingInfo[] } | null;
@@ -334,14 +307,16 @@ export class CyberUi implements ClientModule {
   private actionsEl: HTMLElement;
   private feedbackEl: HTMLElement;
   private stage: HTMLElement;
-  private canvas: HTMLCanvasElement;
+  /** Canevas de l'aperçu 3D (neuf à chaque ouverture : l'aperçu libère son contexte WebGL à la fermeture). */
+  private canvas: HTMLCanvasElement | null = null;
   private figure: HTMLElement;
   private stageLabel: HTMLElement;
   private controlsEl: HTMLElement;
   private loadoutsEl: HTMLElement;
   // aperçu 3D
   private preview: CharacterPreview | null = null;
-  private previewTried = false;
+  /** L'aperçu 3D a échoué (contexte WebGL refusé…) : silhouette jusqu'à la fin de la partie. */
+  private previewFailed = false;
   private lookSig = '';
   private drag: { x: number; rot: number } | null = null;
   private figRot = 0;
@@ -376,7 +351,6 @@ export class CyberUi implements ClientModule {
     this.slotsEl = h('div', { class: 'cy-slots scroll' });
     const left = h('div', { class: 'cy-col cy-left panel' }, h('div', { class: 'cy-colhead' }, h('span', null, 'Emplacements'), this.slotCount), this.slotsEl);
     // ---------------------------------------------------------------- centre : aperçu
-    this.canvas = h('canvas', { class: 'cy-canvas hidden' });
     this.figure = h('div', { class: 'cy-figwrap', html: figureSvg() });
     this.stageLabel = h('div', { class: 'cy-stage-label' });
     this.stage = h(
@@ -384,7 +358,6 @@ export class CyberUi implements ClientModule {
       { class: 'cy-stage' },
       h('div', { class: 'cy-stage-grid' }),
       this.figure,
-      this.canvas,
       h('div', { class: 'cy-stage-hint' }, '⟲ Glisser pour pivoter'),
       this.stageLabel,
     );
@@ -458,6 +431,12 @@ export class CyberUi implements ClientModule {
       this.close();
       return;
     }
+    // le parrain est immobile tant que l'écran est ouvert : attaqué, on lui rend la main
+    if (this.opened && this.host.selfId !== undefined && ((e.t === 'hit' && e.id === this.host.selfId) || (e.t === 'death' && e.id === this.host.selfId))) {
+      this.close();
+      this.host.notify?.(e.t === 'hit' ? 'Vous êtes attaqué ! L’écran CYBERNÉTIQUE se ferme.' : 'Vous êtes tombé : l’écran CYBERNÉTIQUE se ferme.', 'bad');
+      return;
+    }
     if (!this.opened || e.t !== 'notify') return;
     if (e.to && e.to !== this.host.you) return;
     this.setFeedback(e.text, e.kind);
@@ -483,6 +462,7 @@ export class CyberUi implements ClientModule {
         this.preview.render(dt);
       } catch (err) {
         console.warn('Aperçu 3D : rendu impossible, retour à la silhouette.', err);
+        this.previewFailed = true;
         this.dropPreview();
       }
     }
@@ -520,8 +500,7 @@ export class CyberUi implements ClientModule {
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointermove', this.onStageMove);
     this.resizeObs?.disconnect();
-    this.preview?.dispose();
-    this.preview = null;
+    this.dropPreview();
     this.beam?.dispose();
     this.mini?.remove();
     this.el.remove();
@@ -558,6 +537,7 @@ export class CyberUi implements ClientModule {
     this.el.classList.add('hidden');
     window.removeEventListener('keydown', this.onKeyCapture, true);
     this.drag = null;
+    this.dropPreview();
     this.host.setUiOpen(false);
     audio.play('ui_close', { volume: 0.5 });
   }
@@ -877,27 +857,30 @@ export class CyberUi implements ClientModule {
 
   // ======================================================================= aperçu
 
+  /** Aperçu 3D du parrain (characters/preview.ts) dans un canevas neuf ; silhouette en cas d'échec. */
   private ensurePreview(): void {
-    if (this.previewTried || this.host.noPreview) return;
-    this.previewTried = true;
-    void loadPreviewFactory().then((make) => {
-      if (!make) return;
-      try {
-        this.preview = make(this.canvas, { interactive: true, rotate: true, background: null });
-        this.canvas.classList.remove('hidden');
-        this.figure.classList.add('hidden');
-        this.lookSig = '';
-        this.resizeCanvas();
+    if (this.preview || this.previewFailed || this.host.noPreview) return;
+    const canvas = h('canvas', { class: 'cy-canvas' });
+    // sous les légendes de la scène (indice, aperçu), au-dessus de la grille
+    this.stage.insertBefore(canvas, this.figure.nextSibling);
+    this.canvas = canvas;
+    this.resizeCanvas();
+    try {
+      this.preview = createCharacterPreview(canvas, { interactive: true, rotate: true, background: null });
+      this.figure.classList.add('hidden');
+      this.lookSig = '';
+      if (!this.resizeObs) {
         this.resizeObs = new ResizeObserver(() => this.resizeCanvas());
         this.resizeObs.observe(this.stage);
-        if (this.opened) this.render(true);
-      } catch (err) {
-        console.warn('Aperçu 3D du parrain indisponible :', err);
-        this.dropPreview();
       }
-    });
+    } catch (err) {
+      console.warn('Aperçu 3D du parrain indisponible :', err);
+      this.previewFailed = true;
+      this.dropPreview();
+    }
   }
 
+  /** Libère l'aperçu 3D (contexte WebGL) et son canevas ; la silhouette reprend la place. */
   private dropPreview(): void {
     try {
       this.preview?.dispose();
@@ -905,18 +888,21 @@ export class CyberUi implements ClientModule {
       /* déjà libéré */
     }
     this.preview = null;
-    this.canvas.classList.add('hidden');
+    this.canvas?.remove();
+    this.canvas = null;
     this.figure.classList.remove('hidden');
   }
 
   private resizeCanvas(): void {
+    const c = this.canvas;
+    if (!c) return;
     const r = this.stage.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const w = Math.max(2, Math.round(r.width * dpr));
     const hh = Math.max(2, Math.round(r.height * dpr));
-    if (this.canvas.width !== w || this.canvas.height !== hh) {
-      this.canvas.width = w;
-      this.canvas.height = hh;
+    if (c.width !== w || c.height !== hh) {
+      c.width = w;
+      c.height = hh;
     }
   }
 
@@ -1428,6 +1414,7 @@ export class CyberUi implements ClientModule {
           this.preview.highlightSlot(this.selSlot);
         } catch (err) {
           console.warn('Aperçu 3D : apparence refusée.', err);
+          this.previewFailed = true;
           this.dropPreview();
         }
       }
@@ -1518,6 +1505,7 @@ export class CyberUi implements ClientModule {
 export function createCyberUi(gc: GameClient): CyberUi {
   return new CyberUi({
     you: gc.you,
+    selfId: gc.selfId,
     priv: () => gc.priv,
     pub: () => gc.pub,
     world: gc.world,

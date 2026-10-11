@@ -78,6 +78,8 @@ interface Work {
   step: number;
   undo: boolean;
   since: number;
+  /** Même instant en temps réel (ms) : un serveur surchargé prend du retard sur l'horloge. */
+  real: number;
   /** Piratage interactif en cours (le serveur attend son issue). */
   mini: boolean;
 }
@@ -410,7 +412,9 @@ function stepOp(g: Game, op: Op, dt: number): void {
   const cx = (info.footprint[0] + info.footprint[2]) / 2;
   const cz = (info.footprint[1] + info.footprint[3]) / 2;
   const rad = Math.hypot(info.footprint[2] - info.footprint[0], info.footprint[3] - info.footprint[1]) / 2 + 1;
-  let present = op.carrier >= 0;
+  // le porteur de l'objet compte comme présent… s'il ne s'est pas enfui à l'autre bout de la ville
+  const car = op.carrier >= 0 ? g.ents.get(op.carrier) : undefined;
+  let present = !!car && car.alive && Math.hypot(car.x - cx, car.z - cz) < 80;
   let rival = false;
   g.near(cx, cz, rad, (e) => {
     if ((present && (rival || rivalF < 0)) || !e.alive || e.flags & FLAG.HIDDEN || !isMan(e)) return;
@@ -556,7 +560,7 @@ function bossAction(g: Game, slot: Slot, act: Extract<ClientAction, { a: 'op' }>
     const prev = op && op.step > 0 ? op.plan.steps[op.step - 1] : null;
     if (!op || !prev || prev.key !== act.k || !prev.undo || prev.kind === 'secure') return;
     if (!bossCanWork(g, slot, prev.anchor, opRadius(prev.kind))) return g.notify(slot, 'Approchez-vous de l’objectif.', 'info', 'op-far', 3);
-    s.work[slot] = { b: bid, step: op.step - 1, undo: true, since: g.time, mini: false };
+    s.work[slot] = { b: bid, step: op.step - 1, undo: true, since: g.time, real: performance.now(), mini: false };
     g.notify(slot, `${prev.undo} : restez sur place.`, 'info', `op-undo-${bid}`, 5);
     return;
   }
@@ -579,9 +583,10 @@ function bossAction(g: Game, slot: Slot, act: Extract<ClientAction, { a: 'op' }>
   // issue du piratage interactif
   if (act.ok !== undefined) {
     const w = s.work[slot];
-    if (!op || !w || w.b !== bid || w.step !== op.step || !w.mini) return;
+    if (!op || !w || w.b !== bid || w.step !== op.step || !w.mini) return g.notify(slot, 'Piratage interrompu : recommencez.', 'info', 'op-mini-lost', 3);
     if (act.ok) {
-      if (g.time - w.since < OP_MINIGAME_MIN || op.locked) return;
+      // une réussite trop rapide pour être humaine est refusée (horloge du jeu ou horloge réelle)
+      if ((g.time - w.since < OP_MINIGAME_MIN && performance.now() - w.real < OP_MINIGAME_MIN * 1000) || op.locked) return;
       if (op.contested) return g.notify(slot, 'Impossible : l’objectif est contesté !', 'bad', 'op-contest-mini', 3);
       if (op.step === plan.steps.length - 1 && gangLeft(g, bid) > 0) return g.notify(slot, `Les derniers voyous tiennent encore ${leNom(def.name)} : éliminez-les d’abord.`, 'info', `op-gang-${bid}`, 5);
       s.work[slot] = null;
@@ -608,7 +613,7 @@ function bossAction(g: Game, slot: Slot, act: Extract<ClientAction, { a: 'op' }>
   if (!o) return;
   if (o.step < idx) completeStep(g, o, BOSS_NAME[slot], null);
   if (o.step !== idx) return;
-  s.work[slot] = { b: bid, step: o.step, undo: false, since: g.time, mini: step.kind === 'minigame' };
+  s.work[slot] = { b: bid, step: o.step, undo: false, since: g.time, real: performance.now(), mini: step.kind === 'minigame' };
   if (step.kind !== 'minigame') g.notify(slot, `${step.label} : restez près de l’objectif.`, 'info', `op-work-${bid}-${o.step}`, 8);
 }
 

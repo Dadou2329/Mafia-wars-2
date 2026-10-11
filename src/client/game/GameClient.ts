@@ -237,6 +237,7 @@ export class GameClient {
     this.scene.add(this.effects.group);
     this.cyberFx = new CyberFx(world.world, this.effects);
     this.cyberFx.selfId = this.selfId;
+    this.cyberFx.quality = fxQuality();
     this.scene.add(this.cyberFx.group);
     this.scene.add(this.marker.group);
     this.scene.add(this.lootMarker.group);
@@ -404,6 +405,7 @@ export class GameClient {
     this.strategic.close();
     for (const m of this.modules) m.reset?.();
     this.cyber.reset();
+    this.cyberFx.clear();
     this.settings = init.settings;
     this.applyPub(init.pub, true);
     this.applyPriv(init.priv);
@@ -841,6 +843,7 @@ export class GameClient {
     this.cullAcc = 1;
     this.post.setEnabled(settings.bloom && settings.quality !== 'basse');
     this.post.setSize(window.innerWidth, window.innerHeight);
+    this.cyberFx.quality = fxQuality();
     this.myView.custom = settings.custom[this.you];
     this.hud.setCrosshairStyle(settings.crosshair);
     this.viewmodel.setLook(this.you, settings.custom[this.you]);
@@ -1584,6 +1587,11 @@ export class GameClient {
 }
 
 export { formatTime };
+
+/** Densité des effets cybernétiques selon la qualité graphique. */
+function fxQuality(): number {
+  return settings.quality === 'basse' ? 0.5 : settings.quality === 'moyenne' ? 0.75 : 1;
+}
 
 /** Son du coup de feu selon l'arme. */
 function shotSfx(w: Weapon): SfxName {

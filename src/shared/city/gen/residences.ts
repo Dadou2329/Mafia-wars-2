@@ -340,7 +340,8 @@ function buildGarage(ctx: GenContext, def: BuildingDef): BuildingInfo {
   spot(upg, fu, 'trophies', off.x1 - 4, off.z1, Math.PI);
   streetSpot(upg, 'transport', bayX + bayW + 22, -6, Math.PI);
   fu.lv = l1;
-  spot(upg, fu, 'autorecruit', lounge.x0 + 37.2, lounge.z0 + 18, -HALF_PI);
+  // borne à côté du rabatteur (et non devant lui), face à l'escalier
+  spot(upg, fu, 'autorecruit', lounge.x0 + 36.4, lounge.z0 + 18, 0);
   spot(upg, fu, 'armory2', (arm.x0 + arm.x1) / 2 + 15, arm.z0, 0);
   f.prop('DOOR_LEAF', doorLx + doorW / 2, g0.floorTop, 1.5, 0, 0);
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, wallTop, wallTop + 8);
