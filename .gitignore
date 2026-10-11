@@ -6,6 +6,8 @@ test-output/
 *.tmp.*
 .cache/
 release/*.exe
+# l'exécutable Windows prêt à l'emploi est fourni dans le dépôt
+!release/MafiaWars.exe
 release/MafiaWars-linux
 release/MafiaWars-mac
 # scripts de mise au point jetables (tests/_*.ts, tests/_*.mjs)

@@ -2,7 +2,8 @@ MAFIA WARS II : Dadou vs Even — version Windows
 ===============================================
 
 LANCER LE JEU
-1. Décompressez l'archive (clic droit > « Extraire tout… »).
+1. Téléchargez MafiaWars.exe (rien d'autre à installer ; si vous avez reçu une archive .zip,
+   décompressez-la d'abord : clic droit > « Extraire tout… »).
 2. Double-cliquez sur MafiaWars.exe.
    - Windows peut afficher « Windows a protégé votre ordinateur » : le programme n'est pas
      signé. Cliquez sur « Informations complémentaires » puis « Exécuter quand même ».

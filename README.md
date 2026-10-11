@@ -26,6 +26,16 @@ en français. Suite de *MAFIA WARS : Dadou vs Even* (Londres, 1888), dont il rep
 
 ---
 
+## Installation sous Windows (le plus simple)
+
+Téléchargez [`release/MafiaWars.exe`](release/MafiaWars.exe) (environ 90 Mo ; sur GitHub, bouton
+« Download raw file »), puis double-cliquez dessus : rien d’autre à installer. Une fenêtre noire
+(le serveur du jeu) s’ouvre, puis le jeu s’ouvre dans votre navigateur ; gardez la fenêtre noire
+ouverte pendant la partie. Windows peut afficher « Windows a protégé votre ordinateur » (le
+programme n’est pas signé) : « Informations complémentaires » puis « Exécuter quand même ».
+Pour jouer à deux, un seul joueur lance l’exécutable et envoie le lien d’invitation du salon à
+l’autre, qui l’ouvre dans son navigateur. Détails : [release/LISEZMOI.txt](release/LISEZMOI.txt).
+
 ## Démarrage rapide (développement)
 
 Prérequis : **Node.js 20 ou plus récent** (testé avec Node 22) et un navigateur récent avec
@@ -61,7 +71,7 @@ client compilé, `dist/client` par défaut).
 
 `npm run build:exe` fabrique un exécutable autonome (`release/MafiaWars.exe`, ou
 `npm run build:exe -- linux`) : le binaire Node.js officiel est téléchargé depuis nodejs.org
-puis le jeu y est intégré. Aucun exécutable n’est fourni tout fait dans le dépôt.
+puis le jeu y est intégré.
 
 ## Jouer en réseau local ou par Internet
 
