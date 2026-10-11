@@ -7,6 +7,8 @@ export interface HostInfo {
   /** Adresse sur le réseau local (box, Wi-Fi), si l'ordinateur en a une. */
   lan: string | null;
   addresses: { name: string; address: string }[];
+  /** Lien Internet (tunnel Cloudflare lancé par l'exécutable). */
+  tunnel?: { state: 'off' | 'starting' | 'ready' | 'failed'; url: string | null };
   /** Salon demandé (?code=) : null s'il n'existe pas sur ce serveur. */
   room?: { phase: string; players: number } | null;
 }
@@ -46,14 +48,16 @@ export function shareableOrigin(info: HostInfo | null): string {
 export function parseHost(text: string): { origin: string; code: string | null } | null {
   let t = text.trim();
   if (!t) return null;
-  if (!/^https?:\/\//i.test(t)) t = `http://${t}`;
+  const bare = !/^https?:\/\//i.test(t);
+  if (bare) t = `http://${t}`;
   try {
     const u = new URL(t);
     if (!u.hostname) return null;
-    // port écrit tel quel (l'objet URL efface :80) ; sans port : celui du jeu, 3000
-    const port = /^https?:\/\/[^/?#]*:(\d+)/i.exec(t)?.[1] ?? '3000';
+    // port écrit tel quel (l'objet URL efface :80) ; adresse nue sans port : celui du jeu, 3000 ;
+    // lien complet sans port (lien Internet https://….trycloudflare.com) : aucun
+    const port = /^https?:\/\/[^/?#]*:(\d+)/i.exec(t)?.[1] ?? (bare && !/trycloudflare\.com$/i.test(u.hostname) ? '3000' : '');
     const code = /[?&]code=([a-z]{4})/i.exec(u.search)?.[1]?.toUpperCase() ?? null;
-    return { origin: `${u.protocol}//${u.hostname}:${port}`, code };
+    return { origin: `${bare && /trycloudflare\.com$/i.test(u.hostname) ? 'https:' : u.protocol}//${u.hostname}${port ? `:${port}` : ''}`, code };
   } catch {
     return null;
   }

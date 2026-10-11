@@ -12,27 +12,27 @@ LANCER LE JEU
 3. Une fenêtre noire (le serveur du jeu) s'ouvre, puis le jeu s'ouvre dans votre navigateur.
    Gardez la fenêtre noire ouverte pendant toute la partie : la fermer arrête le jeu.
 
-JOUER À DEUX
-Important : chaque MafiaWars.exe fait tourner sa propre partie. Le code de 4 lettres
-n'existe QUE sur l'ordinateur de celui qui a créé la partie : il faut donc aussi son adresse.
+JOUER À DEUX (même chacun chez soi)
+Un seul joueur lance MafiaWars.exe : l'hôte. Son adversaire n'a RIEN à lancer.
+1. L'hôte lance MafiaWars.exe et clique sur « Créer une partie ».
+2. Il attend « Lien Internet prêt » dans son salon (quelques secondes ; au tout premier
+   lancement, le jeu télécharge d'abord l'outil gratuit cloudflared de Cloudflare, environ
+   50 Mo), puis clique sur « Copier le lien d'invitation » et envoie ce LIEN à son ami
+   (Discord, SMS…). Le lien ressemble à : https://mots-au-hasard.trycloudflare.com/?code=ABCD
+3. L'ami ouvre simplement ce lien dans son navigateur (Chrome, Edge, Firefox) : il arrive
+   dans le salon. S'il a lancé son propre MafiaWars.exe, il peut aussi coller le lien dans
+   « Rejoindre une partie ».
 
-- Sur le même réseau (même box, Wi-Fi ou câble) :
-  1. L'hôte lance MafiaWars.exe et clique sur « Créer une partie ». Son salon affiche le
-     code ET, juste en dessous, « Adresse pour votre ami » (par exemple 192.168.1.20:3000).
-  2. L'hôte envoie le lien d'invitation (bouton « Copier le lien d'invitation »), ou bien le
-     code et l'adresse.
-  3. L'invité ouvre ce lien dans son navigateur — ou, dans son jeu, clique sur « Rejoindre
-     une partie » et saisit le code ET l'adresse (coller le lien remplit les deux).
-  Si « l'ordinateur de votre ami ne répond pas » : l'hôte doit autoriser MafiaWars dans le
-  pare-feu Windows (« réseaux privés » ; sinon Paramètres > Pare-feu > Autoriser une
-  application), et les deux PC doivent être sur la même box.
+ATTENTION : le code de 4 lettres seul ne suffit pas. Chaque MafiaWars.exe fait tourner sa
+propre partie ; le code n'existe que sur l'ordinateur de l'hôte. Il faut le LIEN.
 
-- À distance (chacun chez soi) : l'adresse du réseau local ne marche pas par Internet.
-  Le plus simple : installez tous les deux un logiciel gratuit de « réseau local virtuel »
-  (Radmin VPN, ZeroTier ou Tailscale) et rejoignez le même réseau. L'hôte lance ensuite le
-  jeu : son salon affiche, sous « Autres adresses », l'adresse de ce réseau virtuel
-  (par exemple 26.12.34.56:3000 avec Radmin VPN) ; l'invité la saisit avec le code.
-  Autre solution : rediriger le port TCP 3000 de la box de l'hôte (voir le README).
+Si le salon affiche « Lien Internet indisponible » (connexion de l'hôte qui bloque
+Cloudflare) : le lien ne marchera que sur le même réseau (même box ou Wi-Fi). Pour jouer
+à distance malgré tout : installez tous les deux un « réseau local virtuel » gratuit
+(Radmin VPN, ZeroTier ou Tailscale) ; le salon de l'hôte affiche alors cette adresse sous
+« Autres adresses », que l'ami colle dans « Rejoindre une partie » avec le code.
+Sur le même réseau, si l'ami n'arrive pas à se connecter : l'hôte doit autoriser
+MafiaWars dans le pare-feu Windows (« réseaux privés »).
 
 BON À SAVOIR
 - Navigateur conseillé : Chrome, Edge ou Firefox récent. Une carte graphique est

@@ -2069,6 +2069,25 @@ input[type='range'].mw-range:hover::-webkit-slider-thumb {
   color: var(--text-dim);
   user-select: text;
 }
+.mw-net-status {
+  max-width: 420px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}
+.mw-net-status:empty,
+.mw-host-more:empty {
+  display: none;
+}
+.mw-net-status.is-ok {
+  color: #7dffc4;
+}
+.mw-net-status.is-wait {
+  color: #ffd27d;
+}
+.mw-net-status.is-bad {
+  color: #ffb86b;
+}
 .mw-host.is-warn {
   color: #ffb86b;
   max-width: 320px;

@@ -136,12 +136,16 @@ function describeChanges(prev: RoomState | null, s: RoomState, me: string): stri
   return out;
 }
 
-/** Lien d'invitation (on garde un éventuel ?server=…) ; « localhost » remplacé par l'adresse locale. */
-function inviteLink(code: string, info: HostInfo | null): string {
+/**
+ * Lien d'invitation : adresse Internet du tunnel si elle est prête, sinon celle de la page
+ * (« localhost » remplacé par l'adresse locale) ; on garde un éventuel ?server=….
+ */
+function inviteLink(code: string, info: HostInfo | null, publicUrl: string | null): string {
   const params = new URLSearchParams();
   const server = new URLSearchParams(location.search).get('server');
   if (server) params.set('server', server);
   params.set('code', code);
+  if (publicUrl && !server) return `${publicUrl}/?${params.toString()}`;
   return `${shareableOrigin(info)}${location.pathname}?${params.toString()}`;
 }
 
@@ -213,37 +217,61 @@ export function lobbyScreen(app: AppApi): { el: HTMLElement; dispose(): void } {
     h('div', { class: 'mw-code' }, h('div', { class: 'label' }, 'Code du salon'), codeValue, h('div', { class: 'mw-copy-row' }, copyBtn, copyMsg), hostLine),
   );
 
-  // adresse de cet ordinateur : l'invité la saisit avec le code (chaque exécutable a son serveur)
+  // Où l'adversaire doit-il aller ? Chaque exécutable a son propre serveur : le code seul ne
+  // suffit pas. L'exécutable de l'hôte ouvre un lien Internet (tunnel Cloudflare) ; à défaut,
+  // l'adresse du réseau local. Seul l'hôte voit ces indications (c'est lui qui envoie le lien).
   let host: HostInfo | null = null;
-  void hostInfo().then((info) => {
-    if (disposed) return;
-    host = info;
-    const origin = shareableOrigin(info);
-    if (onLocalhost() && !info?.lan) {
-      hostLine.textContent = fr('Aucun réseau local détecté : votre adversaire ne pourra pas vous rejoindre.');
-      hostLine.classList.add('is-warn');
+  const netStatus = h('div', { class: 'mw-net-status', role: 'status' });
+  const hostMore = h('div', { class: 'mw-host-more' });
+  hostLine.after(hostMore, netStatus);
+  /** Lien Internet prêt (adresse publique du tunnel), sinon null. */
+  const publicUrl = (): string | null => (host?.tunnel?.state === 'ready' ? host.tunnel.url : null);
+  const showHost = (): void => {
+    clear(hostLine);
+    clear(hostMore);
+    netStatus.textContent = '';
+    netStatus.className = 'mw-net-status';
+    hostLine.classList.remove('is-warn');
+    if (!isHost() || !host) return;
+    const t = host.tunnel?.state ?? 'off';
+    const pub = publicUrl();
+    if (pub) {
+      hostLine.append(h('span', { class: 'label' }, 'Lien Internet'), h('span', { class: 'mw-host-value' }, pub.replace(/^https:\/\//, '')));
+      netStatus.textContent = fr('Lien Internet prêt : envoyez le LIEN d’invitation à votre ami (le code seul ne suffit pas). Il l’ouvre dans son navigateur, où qu’il soit.');
+      netStatus.classList.add('is-ok');
       return;
     }
-    clear(hostLine);
-    hostLine.append(h('span', { class: 'label' }, 'Adresse pour votre ami'), h('span', { class: 'mw-host-value' }, origin.replace(/^https?:\/\//, '')));
-    // autres adresses (réseau virtuel Radmin VPN, ZeroTier, Tailscale… pour jouer à distance)
+    const origin = shareableOrigin(host);
+    if (onLocalhost() && !host.lan) {
+      hostLine.textContent = fr('Aucun réseau local détecté.');
+      hostLine.classList.add('is-warn');
+    } else hostLine.append(h('span', { class: 'label' }, 'Adresse pour votre ami'), h('span', { class: 'mw-host-value' }, origin.replace(/^https?:\/\//, '')));
+    // autres adresses (réseau virtuel Radmin VPN, ZeroTier, Tailscale…)
     const port = location.port ? `:${location.port}` : '';
-    const others = (info?.addresses ?? []).filter((a) => a.address !== info?.lan && !origin.includes(a.address));
-    if (others.length)
-      hostLine.after(
-        h(
-          'div',
-          { class: 'mw-host-more' },
-          fr(`Autres adresses : ${others.map((a) => `${a.address}${port} (${a.name})`).join(' · ')}`),
-        ),
-      );
-    hostLine.title = fr('Votre ami clique sur « Rejoindre une partie » et saisit le code et cette adresse (ou ouvre le lien d’invitation). Vous devez être sur le même réseau.');
-  });
+    const others = host.addresses.filter((a) => a.address !== host?.lan && !origin.includes(a.address));
+    if (others.length) hostMore.textContent = fr(`Autres adresses : ${others.map((a) => `${a.address}${port} (${a.name})`).join(' · ')}`);
+    if (t === 'starting') {
+      netStatus.textContent = fr('Préparation du lien Internet… (au premier lancement, cela peut prendre une minute)');
+      netStatus.classList.add('is-wait');
+    } else if (t === 'failed') {
+      netStatus.textContent = fr('Lien Internet indisponible : le lien d’invitation ne marche que sur votre réseau (même box ou Wi-Fi).');
+      netStatus.classList.add('is-bad');
+    }
+  };
+  const pollHost = async (): Promise<void> => {
+    const info = await hostInfo();
+    if (disposed) return;
+    host = info;
+    showHost();
+    const t = info?.tunnel?.state;
+    if (t === 'starting' || t === 'ready') later(() => void pollHost(), t === 'starting' ? 1500 : 10000);
+  };
+  void pollHost();
 
   async function copyInvite(): Promise<void> {
     const code = net.room?.code;
     if (!code) return;
-    const link = inviteLink(code, host);
+    const link = inviteLink(code, host, publicUrl());
     if (await copyText(link)) {
       copyMsg.textContent = fr('Lien copié !');
       copyMsg.classList.add('is-visible');

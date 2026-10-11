@@ -525,8 +525,8 @@ export function mainMenu(app: AppApi): HTMLElement {
       class: 'mw-addr-input',
       spellcheck: false,
       autocomplete: 'off',
-      placeholder: 'ex. 192.168.1.20:3000',
-      'aria-label': 'Adresse de l’ordinateur de votre ami',
+      placeholder: 'https://….trycloudflare.com ou 192.168.1.20:3000',
+      'aria-label': 'Lien d’invitation ou adresse de votre ami',
     });
     try {
       addr.value = localStorage.getItem(LAST_HOST_KEY) ?? '';
@@ -599,7 +599,7 @@ export function mainMenu(app: AppApi): HTMLElement {
         if (!root.isConnected) return;
         if (!info)
           return fail(
-            `L’ordinateur de votre ami (${shown}) ne répond pas. Vérifiez que son jeu est lancé, que vous êtes sur le même réseau (même box ou Wi-Fi) et que le pare-feu Windows de votre ami autorise MafiaWars sur les réseaux privés.`,
+            `L’ordinateur de votre ami (${shown}) ne répond pas. Vérifiez que son jeu est toujours lancé et que le lien est complet. Avec une adresse du réseau local (192.168…), il faut être sur la même box et que le pare-feu Windows de votre ami autorise MafiaWars sur les réseaux privés.`,
           );
         if (!info.room) return fail(`Aucune partie ${code} sur l’ordinateur de votre ami : vérifiez le code affiché dans son salon.`);
         try {
@@ -617,7 +617,7 @@ export function mainMenu(app: AppApi): HTMLElement {
       if (e) {
         fail(
           /aucune partie/i.test(e)
-            ? 'Aucune partie avec ce code sur cet ordinateur. Le code n’existe que sur l’ordinateur qui a créé la partie : indiquez aussi l’adresse de votre ami (affichée dans son salon), ou collez son lien d’invitation.'
+            ? 'Aucune partie avec ce code sur cet ordinateur. Le code n’existe que sur l’ordinateur qui a créé la partie : demandez à votre ami son LIEN d’invitation (bouton « Copier le lien d’invitation » de son salon) et collez-le ci-dessous.'
             : e,
         );
         input.select();
@@ -633,13 +633,13 @@ export function mainMenu(app: AppApi): HTMLElement {
       h(
         'label',
         { class: 'mw-addr' },
-        h('span', { class: 'mw-addr-label' }, fr('Adresse de l’ordinateur de votre ami')),
+        h('span', { class: 'mw-addr-label' }, fr('Lien d’invitation de votre ami')),
         addr,
-        h('span', { class: 'mw-addr-help dim' }, fr('Affichée dans son salon, sous le code. Laissez vide si la partie est sur cet ordinateur.')),
+        h('span', { class: 'mw-addr-help dim' }, fr('Collez ici le lien qu’il vous a envoyé (ou l’adresse affichée dans son salon). Laissez vide si la partie est sur cet ordinateur.')),
       ),
       err,
       h('div', { class: 'mw-modal-actions' }, cancel, go),
-      h('p', { class: 'mw-join-hint dim' }, fr('Astuce : collez simplement le lien d’invitation de votre ami, le code et l’adresse se remplissent seuls.')),
+      h('p', { class: 'mw-join-hint dim' }, fr('Le plus simple : ouvrez directement le lien de votre ami dans votre navigateur. Pas besoin de lancer MafiaWars.exe pour rejoindre.')),
     );
     const close = openOverlay(app, root, box, () => close());
     sync();

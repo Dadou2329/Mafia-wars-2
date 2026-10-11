@@ -33,10 +33,10 @@ Téléchargez [`release/MafiaWars.exe`](release/MafiaWars.exe) (environ 90 Mo ; 
 (le serveur du jeu) s’ouvre, puis le jeu s’ouvre dans votre navigateur ; gardez la fenêtre noire
 ouverte pendant la partie. Windows peut afficher « Windows a protégé votre ordinateur » (le
 programme n’est pas signé) : « Informations complémentaires » puis « Exécuter quand même ».
-Pour jouer à deux, le code ne suffit pas : il n’existe que sur l’ordinateur qui a créé la
-partie. L’hôte envoie son lien d’invitation (ou le code et l’« Adresse pour votre ami » affichée
-dans son salon) ; l’invité ouvre le lien, ou saisit code et adresse dans « Rejoindre une
-partie ». Détails, et jeu à distance : [release/LISEZMOI.txt](release/LISEZMOI.txt).
+Pour jouer à deux, **un seul joueur lance l’exécutable** (l’hôte) : il crée la partie, attend
+« Lien Internet prêt » dans son salon, puis envoie le **lien d’invitation** (pas seulement le
+code) ; son ami l’ouvre dans son navigateur, même depuis chez lui, sans rien installer.
+Détails : [release/LISEZMOI.txt](release/LISEZMOI.txt).
 
 ## Démarrage rapide (développement)
 
@@ -86,7 +86,14 @@ puis le jeu y est intégré.
   les deux) ; le jeu vérifie que l’ordinateur de l’hôte répond et que le code y existe, puis y
   conduit l’invité. Si l’ordinateur ne répond pas : autorisez MafiaWars (ou Node.js) dans le
   pare-feu de l’hôte, sur les réseaux privés.
-- **À distance sans configuration** : un réseau local virtuel gratuit (Radmin VPN, ZeroTier,
+- **Par Internet, sans réglage** : l’exécutable ouvre un « quick tunnel » Cloudflare gratuit
+  (sans compte) : le lien d’invitation devient une adresse `https://….trycloudflare.com`
+  valable depuis n’importe où. Le programme officiel `cloudflared` (version figée, empreinte
+  SHA-256 vérifiée) est pris à côté de l’exécutable s’il s’y trouve, sinon téléchargé au premier
+  lancement dans le dossier de données du jeu (`%LOCALAPPDATA%\MafiaWars2`). En cas d’échec, le
+  salon le dit et le lien reste valable sur le réseau local. `MW_TUNNEL=1` l’active hors
+  exécutable, `MW_TUNNEL=0` le coupe, `CLOUDFLARED=…` désigne un autre `cloudflared`.
+- **À distance, autre solution** : un réseau local virtuel gratuit (Radmin VPN, ZeroTier,
   Tailscale) relie les deux PC ; le salon de l’hôte affiche cette adresse sous « Autres
   adresses ».
 - **Par Internet** : déployez la version de production chez n’importe quel hébergeur Node, ou
@@ -322,6 +329,7 @@ npx tsx tests/plan-check.ts  # cohérence et symétrie du plan de la ville
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
 node tests/rematch.mjs # réseau : salon, reconnexion (implants compris), pause, fin, revanche
 node tests/join-lan.mjs # deux serveurs (deux exécutables) : rejoindre l’hôte avec code + adresse
+node tests/tunnel.mjs   # lien Internet (faux cloudflared) : annoncé, copié, collé
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
 node tests/tour.mjs    # visite photographique de la ville (heures, pluie, tirs)
 node tests/audio/smoke.mjs  # moteur audio
