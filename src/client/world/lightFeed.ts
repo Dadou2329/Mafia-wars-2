@@ -67,14 +67,20 @@ abstract class BaseFeed implements LightFeed {
   }
 }
 
-/** Calculs dans un worker dédié (qui garde sa propre copie du monde). */
+/**
+ * Calculs dans deux workers dédiés (chacun avec sa copie du monde) : l'un répond aux demandes de
+ * la fenêtre fine, l'autre éclaire le reste de la ville en tâche de fond.
+ */
 export class WorkerLightFeed extends BaseFeed {
-  private worker: Worker;
+  private demand: Worker;
+  private background: Worker;
 
   constructor(dims: LightDims, sizes: [number, number, number], chunks: ChunkExport, lights: LightSource[]) {
     super(dims);
-    this.worker = new Worker(new URL('./lightWorker.ts', import.meta.url), { type: 'module' });
-    this.worker.onmessage = (e: MessageEvent) => {
+    const make = (): Worker => new Worker(new URL('./lightWorker.ts', import.meta.url), { type: 'module' });
+    this.demand = make();
+    this.background = make();
+    const onMessage = (e: MessageEvent) => {
       const m = e.data;
       if (m.type === 'coarse') {
         for (const it of m.items as { t: number; coarse: Uint8Array }[]) this.putCoarse(it.t, it.coarse);
@@ -84,22 +90,27 @@ export class WorkerLightFeed extends BaseFeed {
           this.onTile?.(it.t, it.fine);
         }
       } else if (m.type === 'idle') {
-        console.info(`[éclairage] ville entière calculée en ${(m.ms / 1000).toFixed(1)} s (cache ${(m.bytes / 1e6).toFixed(1)} Mo)`);
+        console.info(`[éclairage] ville entière calculée en ${(m.ms / 1000).toFixed(1)} s`);
       }
     };
-    this.worker.postMessage({ type: 'init', dims: sizes, chunks, lights }, chunkTransferables(chunks));
+    this.demand.onmessage = onMessage;
+    this.background.onmessage = onMessage;
+    this.demand.postMessage({ type: 'init', role: 'demand', dims: sizes, chunks, lights });
+    this.background.postMessage({ type: 'init', role: 'background', dims: sizes, chunks, lights }, chunkTransferables(chunks));
   }
 
   want(tiles: number[], camX: number, camZ: number): void {
-    this.worker.postMessage({ type: 'want', tiles, cam: [camX, camZ] });
+    this.demand.postMessage({ type: 'want', tiles, cam: [camX, camZ] });
+    this.background.postMessage({ type: 'focus', points: [[camX, camZ]] });
   }
 
   override focus(points: [number, number][]): void {
-    this.worker.postMessage({ type: 'focus', points });
+    this.demand.postMessage({ type: 'focus', points });
+    this.background.postMessage({ type: 'focus', points });
   }
 
   pump(): void {
-    /* le worker avance seul */
+    /* les workers avancent seuls */
   }
 }
 

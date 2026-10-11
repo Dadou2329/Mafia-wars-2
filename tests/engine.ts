@@ -235,6 +235,9 @@ section('Éclairage par tuiles');
   check('cache compressé des tuiles sans perte', rleOk, `${(svc.bytes / 1024).toFixed(0)} Ko`);
   check('volume grossier : maximum des cellules fines', coarseOk);
   check('cache compressé plus petit que les tuiles', svc.bytes * 2 < full.data.byteLength, `${svc.bytes} / ${full.data.byteLength}`);
+  const bg = new LightService(world, lights);
+  const bgTiles = bg.computeRect(0, 0, 2, 2, 'never');
+  check('tâche de fond : tuiles calculées sans encombrer le cache', bgTiles.length > 0 && bgTiles.every((r) => !bg.has(r.t)) && bg.bytes === 0);
 }
 
 console.log(`\n${passed} réussi(s), ${failed} échec(s)`);
