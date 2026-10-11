@@ -8,3 +8,5 @@ test-output/
 release/*.exe
 release/MafiaWars-linux
 release/MafiaWars-mac
+# scripts de mise au point jetables (tests/_*.ts, tests/_*.mjs)
+tests/_*
