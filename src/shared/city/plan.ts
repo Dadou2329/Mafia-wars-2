@@ -1274,7 +1274,7 @@ export interface AreaDef {
   fountain?: [number, number];
   /** Parcs : monument (arche de Washington Square, tombeau de Grant). */
   monument?: 'arch' | 'tomb';
-  /** Places : statue (taureau de bronze) ou fontaine. */
+  /** Places : statue (taureau de bronze) ou fontaine ; sans statue : bosquet d'arbres et bancs. */
   statue?: 'bull' | 'fountain';
   /** Terrains : parking, parc à conteneurs, terrain de basket, jardin partagé, marché en plein air. */
   style?: YardStyle;
@@ -1290,6 +1290,8 @@ const AREA_LIST: AreaDef[] = [
   { kind: 'promenade', name: 'Promenade de Battery Park', rect: [0, 474, 390, 480] },
   { kind: 'promenade', name: 'Gantry Plaza', rect: [RIVER_X1, 6, RIVER_X1 + 6, 232] },
   { kind: 'promenade', name: 'Domino Park', rect: [RIVER_X1, 248, RIVER_X1 + 6, 474] },
+  // square de Wall Street, entre la société de sécurité et le centre de données
+  { kind: 'square', name: 'Zuccotti Park', rect: [224, 350, 248, 362] },
 ];
 
 /** Espace public du nord et son jumeau du sud. */
@@ -1514,7 +1516,7 @@ export const STREETS: { name: string; x: number; z: number; vertical?: boolean }
   { name: 'Myrtle Avenue', x: 530, z: 432 },
   { name: 'Northern Boulevard', x: 530, z: 116 },
   { name: 'Flushing Avenue', x: 530, z: 364 },
-  { name: 'Newtown Creek', x: 530, z: 240 },
+  { name: 'Newtown Creek', x: 540, z: 240 },
   { name: 'East River', x: 410, z: 120, vertical: true },
   { name: 'East River', x: 410, z: 360, vertical: true },
   { name: 'Hudson', x: -6, z: 240, vertical: true },

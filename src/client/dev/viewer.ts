@@ -1,8 +1,11 @@
 // Visionneuse de développement : affiche la ville avec une caméra libre (utilisée pour les captures).
 import * as THREE from 'three';
 import { generateCity } from '../../shared/city/gen/city';
-import { computeLightVolume, computeTintVolume } from '../render/lightVolume';
-import { createLightTexture, createMaterialTexture, createTintTexture } from '../render/env';
+import { computeTintVolume } from '../render/lightVolume';
+import { createMaterialTexture, createTintTexture } from '../render/env';
+import { lightDims } from '../render/lightService';
+import { LightStream } from '../render/lightStream';
+import { WorkerLightFeed } from '../world/lightFeed';
 import { createWorldMaterial } from '../render/worldMaterial';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Atmosphere } from '../render/atmosphere';
@@ -14,11 +17,9 @@ export async function startViewer(root: HTMLElement): Promise<void> {
   const t0 = performance.now();
   const city = generateCity();
   const t1 = performance.now();
-  const lv = computeLightVolume(city.world, city.ctx.lights);
-  const t2 = performance.now();
   createMaterialTexture();
-  createLightTexture(lv);
   createTintTexture(computeTintVolume(city.world, city.ctx.lights));
+  const t2 = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(1);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -27,6 +28,9 @@ export async function startViewer(root: HTMLElement): Promise<void> {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   root.appendChild(renderer.domElement);
+  // éclairage en tuiles, comme en jeu (worker d'éclairage, fenêtre fine autour de la caméra)
+  const w = city.world;
+  const light = new LightStream(new WorkerLightFeed(lightDims(w), [w.sx, w.sy, w.sz], w.exportChunks(), city.ctx.lights), renderer);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 600);
   const mat = createWorldMaterial();
@@ -51,7 +55,18 @@ export async function startViewer(root: HTMLElement): Promise<void> {
       target.set(tx, ty, tz);
       camera.lookAt(target);
     },
+    /** Attend que l'éclairage fin entoure la caméra (à appeler avant une capture). */
+    async settle(maxMs = 60000): Promise<boolean> {
+      const until = performance.now() + maxMs;
+      while (performance.now() < until) {
+        light.update(camera.position.x, camera.position.z);
+        if (light.complete) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    },
     render() {
+      light.update(camera.position.x, camera.position.z);
       props.update(camera.position, true);
       atmo.update(0, performance.now() / 1000, target, camera);
       const wm = water.mat.uniforms;

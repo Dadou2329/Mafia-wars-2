@@ -428,11 +428,16 @@ export function buildSubway(ctx: GenContext): void {
   // rames : portails de navigation entre stations voisines d'une même ligne (les PNJ « prennent le
   // métro »). Toutes les rames d'une station partent du centre du quai (correspondances immédiates).
   const byKey = new Map(SUBWAY_STATIONS.map((s) => [s.key, s]));
+  const linked = new Set<string>();
   for (const line of SUBWAY_LINES) {
     for (let i = 0; i + 1 < line.stations.length; i++) {
       const a = byKey.get(line.stations[i]);
       const b = byKey.get(line.stations[i + 1]);
       if (!a || !b) continue;
+      // deux lignes sur le même tronçon (7 et L entre Times Square et Grand Central) : une seule rame
+      const pair = [a.key, b.key].sort().join('|');
+      if (linked.has(pair)) continue;
+      linked.add(pair);
       const pa = stationHub(a);
       const pb = stationHub(b);
       const dist = Math.hypot(pb.x - pa.x, pb.z - pa.z);

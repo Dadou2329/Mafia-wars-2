@@ -19,6 +19,8 @@ en français. Suite de *MAFIA WARS : Dadou vs Even* (Londres, 1888), dont il rep
 - Serveur : Node.js + Socket.IO, **serveur autoritaire** (IA, combats, captures, économie, convois…)
 - Graphismes voxel procéduraux, sons et musiques synthétisés : aucun fichier externe n’est
   téléchargé pendant le jeu.
+- Une ville de **576 × 480 m** : 13 quartiers, 89 bâtiments au plan, 5 ponts, 4 lignes de métro ;
+  personnages voxel fins (voxels de 1/64 m, visages détaillés, animation procédurale).
 
 ---
 
@@ -100,8 +102,10 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
 ## Comment jouer
 
 - **Objectif** : un quartier appartient à celui qui tient **tous ses bâtiments clés ★**. Il y a
-  7 quartiers : Harlem, Central Park, Times Square, Chinatown, Wall Street, le Queens et Brooklyn.
-  Avec au moins **4 quartiers**, le **QG actuel** de l’adversaire devient prenable : sa capture
+  13 quartiers : à Manhattan, Harlem, Upper West Side, Central Park, Upper East Side, Times
+  Square, Greenwich Village, Wall Street, Lower East Side et Chinatown ; sur la rive est,
+  Astoria, Long Island City, Williamsburg et Bushwick.
+  Avec au moins **7 quartiers**, le **QG actuel** de l’adversaire devient prenable : sa capture
   donne la victoire (« DADOU RÈGNE SUR NEW YORK ! » / « EVEN RÈGNE SUR NEW YORK ! »), puis
   « Revanche ». Une durée de partie peut être fixée dans le salon (victoire aux territoires).
 - **Départ** : une planque (Planque de Bushwick pour Dadou à Brooklyn, Planque d’Astoria pour
@@ -128,7 +132,7 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
   Le tableau de bord affiche Argent, Revenus, Hommes et Territoires.
 - **L’ascension** : on ne décore rien, le jeu meuble tout. Chaque parrain gravit cinq paliers en
   emménageant (téléphone → Immobilier) : planque → garage → loft → penthouse → tour.
-  - Dadou : Planque de Bushwick → Garage de Red Hook → Loft de Canal Street → Penthouse de
+  - Dadou : Planque de Bushwick → Garage de Williamsburg → Loft de Canal Street → Penthouse de
     Wall Street → Tour Méridien.
   - Even : Planque d’Astoria → Dépôt de Long Island City → Loft de Lenox Avenue → Penthouse de
     Central Park Sud → Tour Zénith.
@@ -172,10 +176,11 @@ système de quêtes ni de relations : la liberté du bac à sable, au service de
 ```
 src/
   shared/              code commun client/serveur
-    city/plan.ts       New York : 7 quartiers, 47 bâtiments, logements, rues, ponts, métro
+    city/plan.ts       New York : 13 quartiers, 89 bâtiments, logements, rues, ponts, métro
     city/gen/          génération voxel (façades, toits, intérieurs meublés, sécurité)
     city/roadGraph.ts  graphe des chaussées (convois en pilote automatique)
-    voxel.ts nav.ts    monde voxel (0,25 m), navigation multi-niveaux (étages, ascenseurs, métro)
+    voxel.ts nav.ts    monde voxel (0,25 m, tronçons compressés), navigation multi-niveaux
+                       (étages, ascenseurs, métro)
     glass.ts           verre destructible
     protocol.ts        messages réseau, instantanés binaires
     constants.ts       règles : économie, paliers, véhicules, améliorations, ordres
@@ -186,8 +191,10 @@ src/
     ui/screens/        menu, salon, paramètres, commandes, aide, chargement, pause, victoire
     game/              joueur, conduite, armes, HUD, téléphone, cartes, roue des ordres,
                        écrans géants, circulation, passants, portes, enseignes, verre
-    render/            maillage voxel, lumière précalculée, ciel, pluie, horizon, hologrammes, eau
-    characters/        personnages voxel et animation procédurale
+    render/            maillage voxel, éclairage en tuiles, ciel, pluie, horizon, hologrammes, eau
+    world/             chargement : workers de génération, de maillage et d’éclairage
+    characters/        personnages voxel fins (squelette, sculpture, visages, tenues), animation
+                       procédurale, niveaux de détail
     models/            accessoires (rue, logements, commerces, bureaux), véhicules, armes
     audio/             sons, boucles moteur et musiques synthétisés (Web Audio)
 public/brand/          logo, logo compact, icône, favicon, emblèmes (scripts/build-logo.mjs)
@@ -198,10 +205,12 @@ tests/                 tests automatiques
 
 ```bash
 npm run typecheck      # vérification TypeScript stricte
-npm test               # 129 contrôles sans navigateur : génération, navigation, simulation
-                       # (ordres → combats → captures), ascension, véhicules, sécurité,
-                       # braquages, drones, convois, verre, NYPD, grenades, événements,
-                       # victoire, textes
+npm test               # 147 contrôles sans navigateur : moteur (compression des voxels,
+                       # maillage, navigation et éclairage en tuiles comparés aux versions de
+                       # référence), génération, navigation, simulation (ordres → combats →
+                       # captures), ascension, véhicules, sécurité, braquages, drones, convois,
+                       # verre, NYPD, grenades, événements, victoire, textes
+npx tsx tests/plan-check.ts  # cohérence et symétrie du plan de la ville
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
 node tests/rematch.mjs # réseau : salon, reconnexion, pause, fin de partie, revanche
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
@@ -232,9 +241,11 @@ Limites actuelles, en toute transparence :
   vérifié en rendu logiciel (captures d’écran) : les performances sur une vraie carte graphique
   n’ont pas été mesurées ici. Les réglages « Basse »/« Moyenne » et une échelle de rendu réduite
   aident sur les petites configurations.
-- **Un New York condensé** : la zone jouable fait environ 290 × 240 m. Les quartiers, les
-  monuments (Empire State, Chrysler, One Times Square…) et la statue de la Liberté sont stylisés ;
-  la ligne d’horizon au-delà de la zone jouable n’est qu’un décor.
+- **Un New York stylisé** : la zone jouable fait 576 × 480 m (13 quartiers). Les quartiers, les
+  monuments (Empire State, Chrysler, One Times Square, Grand Central…) et la statue de la Liberté
+  sont stylisés ; la ligne d’horizon au-delà de la zone jouable n’est qu’un décor. Il n’y a pas
+  de Broadway en diagonale (les rues suivent la grille). Traverser la ville à pied est long :
+  véhicules, taxi volant et métro sont là pour ça.
 - Les **passants** et la **circulation** sont simulés par chaque navigateur : les deux joueurs ne
   voient pas exactement la même foule ni les mêmes voitures (les gangsters, lieutenants,
   policiers, tourelles, véhicules des parrains et convois sont, eux, synchronisés par le serveur).
@@ -245,7 +256,13 @@ Limites actuelles, en toute transparence :
   décoratives ; le seul engin volant pilotable est l’aéronef ADAV.
 - Les étages supérieurs des très hautes tours sont des volumes fermés (décor) ; les étages
   accessibles sont meublés.
-- La ville est générée par chaque client au démarrage (quelques secondes, dans un *worker*).
+- La ville est générée par chaque client au démarrage, en arrière-plan pendant le menu : une
+  dizaine de secondes (génération et navigation dans un *worker*, maillage réparti sur plusieurs
+  *workers*). Le serveur met autant de temps à démarrer.
+- **Éclairage** : précis (cellules de 0,5 m) dans un rayon de 50 à 60 m autour de la caméra,
+  plus grossier (1 m) au-delà ; le reste de la ville s’éclaire en tâche de fond pendant la
+  première minute. Au-dessus de 48 m, tout est considéré à l’air libre (seules les couronnes des
+  tours y montent).
 - Pas de voix enregistrées : tous les sons et musiques sont synthétisés.
 - Une partie oppose exactement deux joueurs humains (pas d’adversaire contrôlé par l’ordinateur).
 

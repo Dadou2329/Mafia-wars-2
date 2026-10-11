@@ -35,38 +35,57 @@ l'emporte.
 
 ## 3. La carte (monde voxel)
 
-- Voxel de 0,25 m (inchangé). Monde de **288 m (X, ouest→est) × 240 m (Z, nord→sud)**.
+- Voxel de 0,25 m (inchangé). Monde de **576 m (X, ouest→est) × 480 m (Z, nord→sud)** : quatre
+  fois la première version de New York 2085, environ neuf fois le Londres de 1888.
 - Hauteur stockée : de −8,5 m (sous-sol, métro) à +63,5 m. Rue à y = 0 (`GROUND_VY = 34`).
-- Les intérieurs s’arrêtent sous 48 m (limite du volume d’éclairage précalculé) ; au-dessus, seules
-  les couronnes et antennes des tours. L’Empire State et le Chrysler sont des monuments voxel de
-  63 m (non capturables) ; au-delà de la zone jouable, une ligne d’horizon en 3D (Upper Manhattan,
-  Long Island City, Downtown Brooklyn, Jersey City, statue de la Liberté) et la silhouette du ciel.
+- Les intérieurs s’arrêtent sous 48 m (limite du volume d’éclairage) ; au-dessus, seules les
+  couronnes et antennes des tours. L’Empire State et le Chrysler sont des monuments voxel de
+  63 m (non capturables) ; au-delà de la zone jouable, une ligne d’horizon en 3D et la silhouette
+  du ciel.
 
-### Quartiers (7) — symétrie miroir par rapport à l’axe z = 120
+### Quartiers (13) — symétrie miroir par rapport à l’axe z = 240
 
 ```
-           x: 0 ───────── 90 ──────────── 190 ── 216 ────── 288
- z=0    │ HARLEM         │ CENTRAL PARK      │ East  │ QUEENS (Even)  │
-        │                │ (Upper East Side) │ River │                │
- z=80   ├────────────────┴───────────────────┤       │  pont de       │
-        │      MIDTOWN — TIMES SQUARE        │       │  Queensboro    │
- z=120  │      (le joyau, au centre)          │       ├────────────────┤
- z=160  ├────────────────┬───────────────────┤       │  pont de       │
-        │ CHINATOWN      │ WALL STREET       │       │  Brooklyn      │
- z=240  │                │ (Financial Dist.) │       │ BROOKLYN(Dadou)│
+        x: 0        136        254        390   430            576
+ z=0    ┌──────────────────────────────────┐ E ┌───────────────┐
+        │ HARLEM                           │ a │ ASTORIA       │
+ z=84   ├──────────┬──────────┬────────────┤ s │ (Even)        │
+        │ UPPER    │ CENTRAL  │ UPPER      │ t ├───────────────┤ z=116
+        │ WEST SIDE│ PARK     │ EAST SIDE  │   │ LONG ISLAND   │
+ z=190  ├──────────┴──────────┴────────────┤ R │ CITY          │
+        │ MIDTOWN — TIMES SQUARE           │ i ├───────────────┤ z=240
+ z=290  ├──────────┬──────────┬────────────┤ v │ WILLIAMSBURG  │
+        │ GREENWICH│ WALL     │ LOWER      │ e │               │
+        │ VILLAGE  │ STREET   │ EAST SIDE  │ r ├───────────────┤ z=364
+ z=396  ├──────────┴──────────┴────────────┤   │ BUSHWICK      │
+        │ CHINATOWN                        │   │ (Dadou)       │
+ z=480  └──────────────────────────────────┘   └───────────────┘
 ```
 
-- Paires miroir : Harlem ↔ Chinatown, Central Park ↔ Wall Street, Queens ↔ Brooklyn ; Midtown
-  est seul au centre et vaut le plus.
-- Hudson à l’ouest (bord de carte), East River entre Manhattan et la rive est.
-- Ponts : Queensboro (Central Park ↔ Queens) et Brooklyn Bridge (Wall Street ↔ Brooklyn).
-- Métro : ligne 7 (Queens ↔ Times Square) et ligne L (Brooklyn ↔ Times Square) en tunnel sous la
-  rivière ; la station Times Square est le nœud central (itinéraires souterrains alternatifs).
+- Paires miroir : Harlem ↔ Chinatown, Upper West Side ↔ Greenwich Village, Central Park ↔ Wall
+  Street, Upper East Side ↔ Lower East Side, Astoria ↔ Bushwick, Long Island City ↔
+  Williamsburg ; Midtown est seul au centre et vaut le plus.
+- Hudson à l’ouest (bord de carte), East River entre Manhattan et la rive est, Newtown Creek
+  entre Long Island City et Williamsburg.
+- Ponts, tous carrossables : Triborough (Harlem ↔ Astoria), Queensboro (Midtown ↔ Long Island
+  City), Williamsburg (Midtown ↔ Williamsburg), Brooklyn (Chinatown ↔ Bushwick) et Pulaski
+  au-dessus de Newtown Creek.
+- Grille de rues à la new-yorkaise (avenues et rues numérotées), graphe des chaussées d’un seul
+  tenant pour les convois et les croiseurs.
+- Métro : 12 stations, lignes 1, 6, 7 et L ; Times Square et Grand Central sont les nœuds. Les
+  escouades prennent les rames (les tunnels leur sont fermés à pied).
+- Monuments : Times Square (One Times Square, marches TKTS, façades couvertes d’écrans), Grand
+  Central, Empire State, Chrysler, la Bourse et son taureau, One World Trade Center, Zuccotti
+  Park, Central Park (réservoir, lac et Bow Bridge, fontaine), lanternes de Mott Street, High
+  Line et Riverside Walk, Gantry Plaza et ses grues, arche de Washington Square et tombeau de
+  Grant.
+- 89 bâtiments au plan (73 capturables dont 31 clés, 10 logements, 4 commissariats, 2 monuments)
+  et 48 immeubles de décor.
 
 ### Contrôle
 
 - Un quartier appartient à celui qui tient **tous ses bâtiments clés ★**.
-- Le QG actuel du rival n’est prenable qu’avec **au moins 4 quartiers sur 7** : Midtown devient
+- Le QG actuel du rival n’est prenable qu’avec **au moins 7 quartiers sur 13** : Midtown devient
   décisif. Prendre le QG actuel du rival = victoire.
 
 ## 4. Progression : l’ascension du parrain
@@ -79,17 +98,26 @@ propriété (revenus) mais n’est plus le QG.
 | Palier | Dadou | Even | Bonus (indicatifs) |
 | --- | --- | --- | --- |
 | 1 Planque | Planque de Bushwick (Brooklyn) | Planque d’Astoria (Queens) | 40 hommes, 2 lieutenants |
-| 2 Garage | Garage de Red Hook (Brooklyn) | Dépôt de Long Island City (Queens) | véhicules, 70 hommes, 3 lt |
+| 2 Garage | Garage de Williamsburg (Brooklyn) | Dépôt de Long Island City (Queens) | véhicules, 70 hommes, 3 lt |
 | 3 Loft | Loft de Canal Street (Chinatown) | Loft de Lenox Avenue (Harlem) | 100 hommes, 4 lt, +10 %, ordres au téléphone, drones |
 | 4 Penthouse | Penthouse de Wall Street | Penthouse de Central Park Sud | 140 hommes, 6 lt, +20 %, gardes, ADAV |
 | 5 Tour | Tour Méridien (Times Square sud) | Tour Zénith (Times Square nord) | 180 hommes, 8 lt, +35 %, tourelles automatiques |
 
-Conditions : prix + nombre minimal de quartiers contrôlés (paliers 3, 4, 5).
+Conditions : prix + nombre minimal de quartiers contrôlés (2, 4 et 6 pour les paliers 3, 4 et 5).
 
 ## 5. Moteur : changements
 
 - `VoxelWorld` : tronçons uniformes (un tronçon plein d’un seul matériau ne coûte rien) pour le
-  sous-sol et les volumes pleins.
+  sous-sol et les volumes pleins, et tronçons **compressés** (tranches uniformes, plages,
+  rangées et tranches identiques partagées), lus sans décompression : 9 Mo de voxels pour toute
+  la ville au lieu de 323 Mo.
+- **Éclairage en tuiles** de 16 m : une fenêtre fine (cellules de 0,5 m, 128 m de côté) suit la
+  caméra dans une texture 3D torique, un volume grossier (1 m) couvre le reste de la ville ; un
+  worker dédié calcule les tuiles (d’abord autour des QG, puis de la caméra) et les garde en
+  cache compressé. Le résultat d’une tuile est identique au calcul de la ville entière.
+- **Chargement parallèle** : génération et navigation dans un worker, maillage réparti sur
+  plusieurs workers ; maillage glouton qui fusionne aussi les bandes d’occlusion ambiante
+  (moitié moins de faces à rendu identique).
 - Navigation **multi-niveaux** : plusieurs sols par cellule (métro, rue, étages, toits), A* sur
   (cellule, niveau), portails (ascenseurs) ; les PNJ prennent escaliers et ascenseurs.
 - Zones de capture par étage (rectangles + plage de hauteur).

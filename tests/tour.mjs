@@ -13,13 +13,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // x, z, (y), yaw (vers où regarder), pitch, heure (0..1), pluie, vue (fp : 1re personne), tirs (fire)
 const SHOTS = (process.env.SHOTS ? JSON.parse(process.env.SHOTS) : null) ?? [
-  { name: 'one-times-square', x: 98, z: 110, yaw: 0.25, pitch: 0.38, t: 0.95, rain: 0 },
-  { name: 'times-square-pluie', x: 92, z: 139, yaw: Math.PI, pitch: 0.3, t: 0.93, rain: 1 },
-  { name: 'east-river-queens', x: 192, z: 120, yaw: Math.PI / 2, pitch: 0.08, t: 0.9, rain: 0 },
-  { name: 'chinatown-dragon', x: 55, z: 200, yaw: -2.37, pitch: 0.35, t: 0.93, rain: 0.3 },
-  { name: 'statue-liberte', x: 60, z: 236, yaw: -0.71, pitch: 0.1, t: 0.88, rain: 0 },
-  { name: 'wall-street-jour', x: 130, z: 205, yaw: Math.PI, pitch: 0.15, t: 0.45, rain: 0 },
-  { name: 'brooklyn-crepuscule', x: 245, z: 196, yaw: Math.PI, pitch: 0.05, t: 0.76, rain: 0 },
+  { name: 'one-times-square', x: 116, z: 238, yaw: 0, pitch: 0.38, t: 0.95, rain: 0 },
+  { name: 'times-square-pluie', x: 127, z: 263, yaw: Math.PI, pitch: 0.3, t: 0.93, rain: 1 },
+  { name: 'east-river-queens', x: 387, z: 150, yaw: Math.PI / 2, pitch: 0.08, t: 0.9, rain: 0 },
+  { name: 'chinatown-mott-street', x: 195, z: 452, yaw: Math.PI, pitch: 0.25, t: 0.93, rain: 0.3 },
+  { name: 'statue-liberte', x: 60, z: 477, yaw: -0.71, pitch: 0.1, t: 0.88, rain: 0 },
+  { name: 'wall-street-jour', x: 183, z: 288, yaw: 0, pitch: 0.18, t: 0.45, rain: 0 },
+  { name: 'central-park-lac', x: 190, z: 152, yaw: 2.62, pitch: 0.05, t: 0.55, rain: 0 },
+  { name: 'pont-de-brooklyn-crepuscule', x: 433, z: 456, yaw: -2.36, pitch: 0.08, t: 0.76, rain: 0 },
 ];
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });

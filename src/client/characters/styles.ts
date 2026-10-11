@@ -498,7 +498,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
   const fScale = () => r.range(0.955, 0.985);
   switch (gang) {
     case 0: {
-      // Les Lions de Lenox (Harlem) : survêtements or et noir, chaînes, casquettes
+      // Les Lions de Lenox (Harlem), les Rats de Delancey (Lower East Side) : survêtements or et noir, chaînes, casquettes
       const gold = r.chance(0.5);
       const sk = r.pick([0x9a6644, 0x7c4f34, 0x5f3b26, 0x4a2d1e, 0xb98058]);
       const o = outfit({
@@ -531,7 +531,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
       return { style, outfit: o, neon: NEON.AMBER };
     }
     case 1: {
-      // La Garde Sterling (Central Park) : sécurité privée d'élite, blanc et sarcelle
+      // La Garde Sterling (Central Park), le Cercle du Dakota (Upper West Side) : sécurité privée d'élite, blanc et sarcelle
       const armor = r.chance(0.55);
       const o = outfit({
         skin,
@@ -557,7 +557,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
       return { style, outfit: o, neon: NEON.CYAN };
     }
     case 2: {
-      // Les Néons de Broadway (Times Square) : punks fluo rose et violet
+      // Les Néons de Broadway (Times Square), les Fantômes de Bleecker (Greenwich Village) : punks fluo rose et violet
       const pink = r.chance(0.5);
       const o = outfit({
         skin,
@@ -659,7 +659,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
       return { style, outfit: o, neon: NEON.GREEN };
     }
     case 4: {
-      // La Sécurité Axiom (Wall Street) : armure corporate gris sombre, visières bleues
+      // La Sécurité Axiom (Wall Street), les Héritiers de Park Avenue (Upper East Side) : armure corporate gris sombre, visières bleues
       const o = outfit({
         skin,
         hair,
@@ -692,7 +692,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
       return { style, outfit: o, neon: NEON.BLUE };
     }
     case 5: {
-      // Les Rouleurs de Flushing (Queens) : tenues de travail et de motard orange
+      // Les Rouleurs de Ditmars (Astoria), le Syndicat de Queens Plaza (Long Island City) : tenues de travail et de motard orange
       const kindR = r.next();
       const o = outfit({
         skin,
@@ -728,7 +728,7 @@ function thug(r: Rng, gang: number, skin: number, hair: number): Appearance {
     }
     case 6:
     default: {
-      // Les Corbeaux de Red Hook (Brooklyn) : cuir noir, rouge sang, corbeau dans le dos
+      // Les Corbeaux de Bushwick, les Vautours du Navy Yard (Williamsburg) : cuir noir, rouge sang, corbeau dans le dos
       const o = outfit({
         skin,
         hair: r.pick([0x14100e, 0x1c1410, 0x14100e, 0xa01820]),

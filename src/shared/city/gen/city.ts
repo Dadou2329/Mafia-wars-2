@@ -557,7 +557,24 @@ function square(ctx: GenContext, a: AreaDef, rng: Rng): void {
   const czm = (a.rect[1] + a.rect[3]) / 2;
   for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) if (w.get(x, GROUND_VY, z) !== 0) w.set(x, GROUND_VY, z, ((x + z) & 15) < 8 ? M.GRANITE : M.SIDEWALK);
   if (a.statue === 'fountain') fountain(ctx, cxm, czm);
-  else ctx.prop('BULL_STATUE', cxm, 0.25, czm, Math.PI * 0.75, 0);
+  else if (a.statue === 'bull') ctx.prop('BULL_STATUE', cxm, 0.25, czm, Math.PI * 0.75, 0);
+  else {
+    // square sans statue (Zuccotti Park) : bosquet régulier de petits arbres, bancs de granit entre les rangées
+    const nx = Math.max(2, Math.floor((a.rect[2] - a.rect[0]) / 5));
+    const nz = Math.max(2, Math.floor((a.rect[3] - a.rect[1]) / 5));
+    const sx = (a.rect[2] - a.rect[0]) / nx;
+    const sz = (a.rect[3] - a.rect[1]) / nz;
+    for (let i = 0; i < nx; i++)
+      for (let k = 0; k < nz; k++) {
+        const px = a.rect[0] + sx * (i + 0.5);
+        const pz = a.rect[1] + sz * (k + 0.5);
+        if ((i + k) % 2 === 0) tree(w, V(px), GROUND_VY + 1, V(pz), rng, 0.55, false);
+        else ctx.prop('BENCH', px, 0.25, pz, k % 2 ? 0 : Math.PI, 0);
+      }
+    ctx.prop('PARK_LAMP', a.rect[0] + 1, 0.25, a.rect[1] + 1, 0, 0);
+    ctx.prop('PARK_LAMP', a.rect[2] - 1, 0.25, a.rect[3] - 1, 0, 0);
+    return;
+  }
   const dz = Math.min(8, (a.rect[3] - a.rect[1]) / 2 - 2);
   const dx = Math.min(7, (a.rect[2] - a.rect[0]) / 2 - 2);
   for (const [ox, oz] of [

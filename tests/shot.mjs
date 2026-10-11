@@ -12,7 +12,12 @@ const cams = camStr.split(';');
 let i = 0;
 for (const c of cams) {
   const v = c.split(',').map(Number);
-  const r = await page.evaluate(([v, t]) => { window.__viewer.setTime(t); window.__viewer.look(...v); return window.__viewer.render(); }, [v, Number(timeStr ?? 0.85)]);
+  const r = await page.evaluate(async ([v, t]) => {
+    window.__viewer.setTime(t);
+    window.__viewer.look(...v);
+    await window.__viewer.settle?.();
+    return window.__viewer.render();
+  }, [v, Number(timeStr ?? 0.85)]);
   const file = cams.length > 1 ? out.replace('.png', `-${i}.png`) : out;
   await page.screenshot({ path: file });
   console.log('saved', file, JSON.stringify(r));

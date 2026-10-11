@@ -185,6 +185,13 @@ export class LightStream {
     this.renderer.copyTextureToTexture(src, dst, box, this.dst);
   }
 
+  /** Toute la fenêtre fine est-elle arrivée (captures d'écran) ? */
+  get complete(): boolean {
+    if (this.ox < 0) return false;
+    for (let tz = this.oz; tz < this.oz + this.wtz; tz++) for (let tx = this.ox; tx < this.ox + this.wtx; tx++) if (!this.loaded(tx, tz)) return false;
+    return this.queue.length === 0;
+  }
+
   dispose(): void {
     if (this.feed.onTile) this.feed.onTile = null;
     this.win.dispose();

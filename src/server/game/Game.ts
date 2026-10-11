@@ -1918,7 +1918,7 @@ export class Game {
     const kills = this.factions.dadou.kills + this.factions.even.kills;
     const options: [string, string][] = [
       ['GUERRE DES GANGS : DADOU ET EVEN SE DISPUTENT NEW YORK !', 'Fusillades sous les néons, établissements rackettés : deux parrains rivaux mettent la ville à feu et à sang. Le NYPD promet des arrestations.'],
-      ['LA VILLE QUI NE DORT JAMAIS RETIENT SON SOUFFLE', 'Des écrans de Times Square aux quais de Red Hook, tout New York parle de la guerre entre Dadou et Even.'],
+      ['LA VILLE QUI NE DORT JAMAIS RETIENT SON SOUFFLE', 'Des écrans de Times Square aux grues de Long Island City, tout New York parle de la guerre entre Dadou et Even.'],
     ];
     if (td > te) options.push([`DADOU CONTRÔLE ${td} QUARTIER${td > 1 ? 'S' : ''} DE NEW YORK`, 'L’homme au chapeau melon étend son empire. Ses rivaux s’inquiètent ; Even prépare-t-il une riposte ?']);
     if (te > td) options.push([`EVEN TIENT ${te} QUARTIER${te > 1 ? 'S' : ''} SOUS SA COUPE`, 'L’élégant parrain au haut-de-forme impose sa loi. Dadou acceptera-t-il cet affront ?']);

@@ -15,7 +15,7 @@ import { CharacterRenderer, type CharView } from '../characters/characterRendere
 import type { BossCustom } from '../characters/styles';
 import { envUniforms, createMaterialTexture } from '../render/env';
 
-const GANG_NAMES = ['Lions de Lenox', 'Garde Sterling', 'Néons de Broadway', 'Triade du Jade', 'Sécurité Axiom', 'Rouleurs de Flushing', 'Corbeaux de Red Hook'];
+const GANG_NAMES = ['Lions de Lenox', 'Garde Sterling', 'Néons de Broadway', 'Triade du Jade', 'Sécurité Axiom', 'Rouleurs de Ditmars', 'Corbeaux de Bushwick'];
 const WEAPON_LABEL: Record<number, string> = {
   [Weapon.FISTS]: 'Poings',
   [Weapon.PISTOL]: 'Vektor',

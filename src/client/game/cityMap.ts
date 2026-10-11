@@ -295,7 +295,7 @@ export class CityMap {
       c.translate(s.x * S, s.z * S);
       if (s.vertical) c.rotate(-Math.PI / 2);
       const water = s.name === 'East River' || s.name === 'Hudson' || s.name === 'Newtown Creek';
-      c.font = water ? `700 ${s.name === 'Newtown Creek' ? 20 : 34}px ${MAP_FONT_TITLE}` : `600 17px ${MAP_FONT}`;
+      c.font = water ? `700 ${s.name === 'Newtown Creek' ? 17 : 34}px ${MAP_FONT_TITLE}` : `600 17px ${MAP_FONT}`;
       c.fillStyle = water ? 'rgba(90,190,255,0.55)' : 'rgba(150,185,225,0.62)';
       c.fillText(water ? s.name.toUpperCase() : s.name, 0, 0);
       c.restore();
