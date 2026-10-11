@@ -42,7 +42,8 @@ export type TorsoStyle =
   | 'mandarin' // veste à col mao
   | 'crop' // veste courte sur un haut (femmes)
   | 'dress' // robe
-  | 'turtle'; // pull à col roulé
+  | 'turtle' // pull à col roulé
+  | 'hoodup'; // (clé de pièce) sweat à capuche relevée : la capuche est portée comme couvre-chef
 
 export type PelvisStyle = 'belt' | 'jacket' | 'open' | 'frock' | 'trench' | 'hem' | 'duty' | 'armor' | 'skirt' | 'tech' | 'crop';
 export type SleeveStyle = 'coat' | 'dadou' | 'even' | 'rib' | 'stripe' | 'puffer' | 'tee' | 'bare' | 'rolled' | 'pad' | 'tac' | 'tech' | 'leather' | 'trench';
@@ -303,16 +304,18 @@ export function torso(style: TorsoStyle, b: Build): VoxelModel {
       collar(T.jacket + 0.4, 27.5, 31, SLOT.COAT2, 2);
       break;
     }
-    case 'hoodie': {
+    case 'hoodie':
+    case 'hoodup': {
       layers.push({ t: T.knit + 0.4, col: (x, y) => (y < -4 ? SLOT.COAT2 : SLOT.COAT) });
       // capuche rabattue dans le dos (sauf si relevée : voir le couvre-chef)
-      extras.push((x, y, z) => {
-        if (y < 22 || y > 33) return -1;
-        const P0 = TORSO[b](27);
-        const cz = P0[2] - P0[1] - 1.2;
-        if (inEllipsoid(x, y, z, 0, 28, cz, 6.5, 5.5, 3.2)) return y > 31 ? SLOT.COAT2 : SLOT.COAT;
-        return -1;
-      });
+      if (style === 'hoodie')
+        extras.push((x, y, z) => {
+          if (y < 22 || y > 33) return -1;
+          const P0 = TORSO[b](27);
+          const cz = P0[2] - P0[1] - 1.2;
+          if (inEllipsoid(x, y, z, 0, 28, cz, 6.5, 5.5, 3.2)) return y > 31 ? SLOT.COAT2 : SLOT.COAT;
+          return -1;
+        });
       collar(T.knit + 0.5, 27, 30.5, SLOT.COAT, 2.2);
       break;
     }
@@ -449,6 +452,14 @@ export function torso(style: TorsoStyle, b: Build): VoxelModel {
   // ------------------------------------------------------------- détails peints
   const fz = (x: number, y: number) => s.frontZ(x, y);
   const dec = (x: number, y: number, c: Col) => s.front(x, y, c);
+  /** Chaîne en or en U (tracé continu, pendentif) accrochée au col. */
+  const chain = (half: number, yTop: number, depth: number) => {
+    for (let i = 0; i <= 40; i++) {
+      const u = i / 40;
+      dec(-half + 2 * half * u, yTop - Math.sin(u * Math.PI) * depth, SLOT.ACCENT);
+    }
+    for (const [x, y] of [[-0.5, yTop - depth - 1], [0.5, yTop - depth - 1], [0, yTop - depth - 2]]) dec(x, y, SLOT.ACCENT);
+  };
   /** Ligne de boutons verticale. */
   const buttons = (xs: number[], ys: number[], c: Col = SLOT.ACCENT) => {
     for (const x of xs) for (const y of ys) dec(x, y, c);
@@ -509,7 +520,7 @@ export function torso(style: TorsoStyle, b: Build): VoxelModel {
     }
     case 'turtle': {
       for (let y = 26; y <= 34; y += 2) s.paintSurf((x, yy, z, c) => (Math.abs(yy - y) < 0.5 && c === SLOT.COAT && yy > 26 ? XS.COAT_D : c));
-      for (let i = 0; i <= 8; i++) dec(-4 + i, 20 - Math.sin((i / 8) * Math.PI) * 3, SLOT.ACCENT);
+      chain(4.5, 25.5, 7);
       break;
     }
     case 'bomber': {
@@ -520,20 +531,14 @@ export function torso(style: TorsoStyle, b: Build): VoxelModel {
       for (let x = -9; x <= 9; x++) s.back(x, 20, XS.COAT_D);
       break;
     }
-    case 'hoodie': {
+    case 'hoodie':
+    case 'hoodup': {
       // poche kangourou, cordons, imprimé lumineux
       for (let x = -5; x <= 5; x++) dec(x, 6, XS.COAT_D);
       for (const sx of [-1, 1]) for (let y = -3; y <= 6; y++) dec(sx * (5 + (6 - y) * 0.15), y, XS.COAT_D);
       for (const sx of [-1.4, 1.4]) for (let y = 21; y <= 26; y++) dec(sx, y, SLOT.TIE);
-      for (const [x, y] of [
-        [0, 13],
-        [-1, 14],
-        [1, 14],
-        [-2, 15],
-        [2, 15],
-        [0, 16],
-      ])
-        dec(x, y, SLOT.NEON);
+      // double chevron lumineux (logo de marque)
+      for (const y0 of [11, 14]) for (let i = -2; i <= 2; i++) dec(i, y0 + 2 - Math.abs(i), SLOT.NEON);
       break;
     }
     case 'track': {
@@ -541,7 +546,7 @@ export function torso(style: TorsoStyle, b: Build): VoxelModel {
       s.paintSurf((x, y, z, c) => (c === SLOT.COAT && y > 22 ? SLOT.COAT2 : c));
       s.paintSurf((x, y, z, c, nx) => (c === SLOT.COAT && nx !== 0 && Math.abs(z - P(y)[2]) < 1.4 ? SLOT.TIE : c));
       for (let y = -5; y <= 29; y++) dec(0, y, SLOT.ACCENT);
-      for (let i = 0; i <= 8; i++) dec(-4 + i, 22 - Math.sin((i / 8) * Math.PI) * 4.5, SLOT.ACCENT);
+      chain(4, 26.5, 7);
       break;
     }
     case 'leather':
@@ -747,7 +752,8 @@ export function pelvis(style: PelvisStyle, b: Build): VoxelModel {
       );
       break;
     case 'frock':
-      layers.push({ t: T.coat + 0.6, on: (x, y, z) => !(front(y, z) && Math.abs(x) < Math.max(0, -y - 1.5) * 0.7), col: SLOT.COAT }, pants);
+      // redingote fermée jusqu'à la couture de taille ; fente étroite alignée sur les pans
+      layers.push({ t: T.coat + 0.6, on: (x, y, z) => !(front(y, z) && y < -4 && Math.abs(x) < 1.5), col: SLOT.COAT }, pants);
       break;
     case 'trench':
       layers.push({ t: T.coat + 0.6, on: (x, y, z) => !(front(y, z) && Math.abs(x) < Math.max(0, -y - 2) * 0.3), col: SLOT.COAT }, pants);
@@ -1049,7 +1055,8 @@ const THIGH: Record<Build, Prof> = {
     [-27, 3.5, 4, 0.5, 0],
     [-21, 4.5, 5, 0.5, 0],
     [-12, 4.5, 5.5, 0, 0],
-    [-5, 5.5, 5.5, 0, 0],
+    // haut de cuisse décalé vers l'intérieur : la hanche ne déborde que d'un voxel du bassin
+    [-5, 5.5, 5.5, 0, -1],
     [4, 4.5, 4.5, 0, 0],
     [6],
   ]),
@@ -1058,7 +1065,7 @@ const THIGH: Record<Build, Prof> = {
     [-30, 3.5, 3, 0.5, 0],
     [-23, 4.5, 4, 0.5, 0],
     [-13, 4.5, 5.5, 0, 0],
-    [-7, 5, 5.5, 0, 0.5],
+    [-7, 5, 5.5, 0, -0.5],
     [4, 4.5, 4.5, 0, 0],
     [6],
   ]),
@@ -1226,7 +1233,8 @@ export function coatTail(style: TailStyle, b: Build): VoxelModel {
     if (yy > -9 || y < -len) return -1;
     // évasement par paliers (de grandes faces planes)
     const band = Math.min(bands - 1, Math.floor(((-9 - yy) / (len - 3)) * bands));
-    const a = P0[0] + T.coat + band;
+    // le pan couvre le haut des cuisses (bord extérieur à hipX + 5,5) avec un voxel de marge
+    const a = Math.max(P0[0] + T.coat, hipX + 6.5) + band;
     const bb = P0[1] + T.coat + band;
     const dx = x - cx;
     const dz = z - P0[2];
@@ -1234,7 +1242,8 @@ export function coatTail(style: TailStyle, b: Build): VoxelModel {
     const inner = supEll(dx, dz, a - 2, bb - 2, 3) <= 1;
     if (inner || dx < -0.5) return -1;
     // ouverture devant (plus large vers le bas)
-    const open = style === 'frock' ? 3 + band * 2 : style === 'longcoat' ? 3 : 1;
+    // redingote croisée : les pans se rejoignent presque, à peine entrouverts vers le bas
+    const open = style === 'frock' ? (band < 2 ? 2 : 3) : style === 'longcoat' ? 3 : 1;
     if (dz > 0 && dx < open) return -1;
     // ourlet (fil de néon de Dadou), revers de la doublure au bord avant, intérieur sombre
     if (y < -len + 1) return style === 'longcoat' ? SLOT.NEON : XS.COAT_D;

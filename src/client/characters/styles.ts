@@ -1082,7 +1082,7 @@ export function partKeys(s: CharStyle): PartKeys {
   const b = s.build;
   const pel = s.skirt !== 'none' && s.torso !== 'crop' ? (s.torso === 'dress' || s.torso === 'suit' || s.torso === 'mandarin' ? 'skirt' : pelvisOf(s.torso)) : pelvisOf(s.torso);
   return {
-    torso: `torso:${s.torso === 'hoodie' && s.hat === 'hood' ? 'turtle' : s.torso}:${b}`,
+    torso: `torso:${s.torso === 'hoodie' && s.hat === 'hood' ? 'hoodup' : s.torso}:${b}`,
     pelvis: `pelvis:${pel === 'jacket' && s.skirt !== 'none' ? 'skirt' : pel}:${b}`,
     head: `head:${headKey(s.head)}`,
     hair: s.hair !== 'none' ? `hair:${s.hair}:${b}` : null,

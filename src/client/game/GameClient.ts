@@ -244,6 +244,12 @@ export class GameClient {
       { kind: CharKind.BOSS_DADOU, faction: 1, look: 1 },
       { kind: CharKind.BOSS_EVEN, faction: 2, look: 1 },
       { kind: CharKind.LIEUTENANT, faction: 1, look: 5 },
+      // passants et rabatteurs : préparés d'avance plutôt qu'apparus au fil des images
+      { kind: CharKind.CIVILIAN, faction: 0, look: 1 },
+      { kind: CharKind.CIVILIAN_F, faction: 0, look: 2 },
+      { kind: CharKind.BARMAN, faction: 1, look: 1 },
+      { kind: CharKind.BARMAN, faction: 2, look: 1 },
+      { kind: CharKind.TURRET, faction: 0, look: 0 },
     ]);
     // ---------------------------------------------------------------- jeu
     this.player = new PlayerController(this.camera, world.world);
@@ -906,7 +912,8 @@ export class GameClient {
         mv.y = seat.y;
         mv.z = seat.z;
         mv.yaw = drive.yaw;
-        mv.anim = Anim.SIT;
+        // en selle : poings sur le guidon, pieds en avant
+        mv.anim = Anim.DRIVE;
         mv.hidden = this.player.firstPerson;
       }
     }
@@ -931,7 +938,7 @@ export class GameClient {
         dv.y = seat.y;
         dv.z = seat.z;
         dv.yaw = vv.yaw;
-        dv.anim = Anim.SIT;
+        dv.anim = Anim.DRIVE;
         dv.hidden = false;
       } else dv.hidden = true;
     }

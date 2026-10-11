@@ -110,6 +110,39 @@ function qBasis(x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3, out: THREE
   return out.setFromRotationMatrix(_m3);
 }
 
+const _qh = new THREE.Quaternion();
+const _qk = new THREE.Quaternion();
+const _hx = new THREE.Vector3();
+const _hy = new THREE.Vector3();
+const _hz = new THREE.Vector3();
+
+/**
+ * Orientation d'une main dans le repère du torse, donnée par la direction des doigts
+ * (poignet → jointures) et la normale de la paume (au repos, bras ballants, la paume gauche
+ * regarde −x et la droite +x ; le pouce part vers l'avant).
+ */
+function handQ(i: number, fx: number, fy: number, fz: number, px: number, py: number, pz: number, out = _qh): THREE.Quaternion {
+  const y = _hy.set(-fx, -fy, -fz).normalize();
+  const s = i === 0 ? -1 : 1;
+  const x = _hx.set(px * s, py * s, pz * s);
+  x.addScaledVector(y, -x.dot(y)).normalize();
+  return qBasis(x, y, _hz.crossVectors(x, y), out);
+}
+
+/**
+ * Main droite tenant le téléphone (repère du torse) : appareil incliné vers l'avant, écran
+ * tourné vers le visage ; tient compte de la prise du téléphone dans la main (Rx(π/2)·Ry(0,4)).
+ */
+const PHONE_P = (() => {
+  const yp = new THREE.Vector3(0.05, 0.55, 0.83).normalize();
+  const xp = new THREE.Vector3(0, -0.83, 0.55);
+  xp.addScaledVector(yp, -xp.dot(yp)).normalize();
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xp, yp, new THREE.Vector3().crossVectors(xp, yp)));
+})();
+const PHONE_HQ = PHONE_P.clone().multiply(
+  new THREE.Quaternion().setFromAxisAngle(X_AXIS, HALF_PI).multiply(new THREE.Quaternion().setFromAxisAngle(Y_AXIS, 0.4)).invert(),
+);
+
 /** Pose d'un bras : épaule (rotation dans le repère du torse), coude, torsion, poignet. */
 class ArmPose {
   sh = new THREE.Quaternion();
@@ -679,7 +712,9 @@ export class CharAnim {
    * Cinématique inverse d'un bras dans le repère du torse : poignet en W, coude tiré vers
    * `pole`, main orientée selon hq (repère du torse) si donnée.
    */
-  private ik(i: number, W: THREE.Vector3, pole: THREE.Vector3, hq: THREE.Quaternion | null): void {
+  private ik(i: number, W: THREE.Vector3, pole: THREE.Vector3, hqIn: THREE.Quaternion | null): void {
+    // copie : l'appelant passe souvent un quaternion de travail (_q1.._q3) réutilisé plus bas
+    const hq = hqIn ? _qk.copy(hqIn) : null;
     const D = this.D;
     const sideX = i === 0 ? 1 : -1;
     const a = this.armT[i];
@@ -769,7 +804,8 @@ export class CharAnim {
         // mains sur le volant (ou le guidon)
         for (let i = 0; i < 2; i++) {
           const sx = i === 0 ? 1 : -1;
-          this.ik(i, _v1.set(sx * 0.17, shY - 0.2, 0.38), _v2.set(sx * 0.8, -1, -0.3), qEuler(-1.2, 0, sx * -0.4, 'XYZ', _q3));
+          // poings fermés sur la jante, jointures vers l'avant, pouces vers le haut et l'intérieur
+          this.ik(i, _v1.set(sx * 0.17, shY - 0.2, 0.38), _v2.set(sx * 0.8, -1, -0.3), handQ(i, 0, 0.2, 1, -sx * 0.75, -0.65, 0));
           this.hands[i] = 'fist';
         }
         this.held = null;
@@ -777,7 +813,8 @@ export class CharAnim {
         // mains posées sur les cuisses
         for (let i = 0; i < 2; i++) {
           const sx = i === 0 ? 1 : -1;
-          this.ik(i, _v1.set(sx * 0.12, -0.06, 0.24), _v2.set(sx * 0.6, -0.2, -1), qEuler(-1.3, 0, sx * -0.3, 'XYZ', _q3));
+          // paume à plat sur la cuisse, doigts vers le genou
+          this.ik(i, _v1.set(sx * 0.12, -0.06, 0.24), _v2.set(sx * 0.6, -0.2, -1), handQ(i, sx * 0.05, -0.35, 0.94, -sx * 0.15, -0.98, 0.1));
         }
         if (kind && !twoHanded(w)) this.hands[1] = 'grip';
         else this.held = null;
@@ -788,7 +825,8 @@ export class CharAnim {
       // mains sur la nuque, coudes en avant
       for (let i = 0; i < 2; i++) {
         const sx = i === 0 ? 1 : -1;
-        this.ik(i, _v1.set(sx * 0.07, this.m(D.neck[1]) + 0.08, -0.06), _v2.set(sx * 0.5, 0.2, 1), qEuler(-2.6, 0, sx * 0.6, 'XYZ', _q3));
+        // doigts croisés derrière la nuque, paumes contre la tête
+        this.ik(i, _v1.set(sx * 0.07, this.m(D.neck[1]) + 0.08, -0.06), _v2.set(sx * 0.5, 0.2, 1), handQ(i, -sx * 0.9, 0.35, -0.1, 0, 0, 1));
       }
       this.held = null;
       return;
@@ -909,7 +947,7 @@ export class CharAnim {
     const tt = this.idleT;
     if (idle === 'hip') {
       // main gauche sur la hanche, coude en dehors
-      this.ik(0, _v1.set(0.2, 0.04, 0.02), _v2.set(1, 0.15, -0.4), qEuler(-0.2, 0, -1.6, 'XYZ', _q3));
+      this.ik(0, _v1.set(0.2, 0.04, 0.02), _v2.set(1, 0.15, -0.4), handQ(0, -0.1, -0.69, -0.72, -0.36, -0.65, 0.67));
       this.hands[0] = 'fist';
       if (!kind) {
         this.fk(1, -0.06 + Math.sin(tt * 0.7) * 0.03, 0.12, 0, 0.28, 0, 0, 0);
@@ -917,35 +955,39 @@ export class CharAnim {
       return;
     }
     if (idle === 'behind') {
-      // mains croisées dans le dos
-      this.ik(0, _v1.set(0.035, -0.02, -0.17), _v2.set(1, -0.2, -0.9), qEuler(0.4, 0, 0.9, 'XYZ', _q3));
-      this.ik(1, _v1.set(-0.035, 0.0, -0.18), _v2.set(-1, -0.2, -0.9), qEuler(0.4, 0, -0.9, 'XYZ', _q3));
+      // mains dans le dos : la droite à plat, paume vers l'arrière ; la gauche lui serre le poignet
+      this.ik(1, _v1.set(-0.06, -0.02, -0.165), _v2.set(-1, -0.2, -0.9), handQ(1, 0.84, -0.54, 0, 0, 0, -1));
+      this.ik(0, _v1.set(0.037, 0.066, -0.195), _v2.set(1, -0.2, -0.9), handQ(0, -0.84, -0.54, 0, 0, 0, 1));
+      this.hands[0] = 'grip';
+      this.hands[1] = 'flat';
       return;
     }
     if (kind) return;
     if (idle === 'crossed') {
       // bras croisés sur la poitrine
-      this.ik(0, _v1.set(-0.11, 0.25, 0.15), _v2.set(1, -0.8, 0.2), qEuler(-1.5, 0, 1.3, 'XYZ', _q3));
-      this.ik(1, _v1.set(0.12, 0.22, 0.17), _v2.set(-1, -0.8, 0.2), qEuler(-1.5, 0, -1.3, 'XYZ', _q3));
+      this.ik(0, _v1.set(-0.11, 0.25, 0.15), _v2.set(1, -0.8, 0.2), handQ(0, -0.47, 0.26, -0.85, -0.2, -0.96, -0.18));
+      this.ik(1, _v1.set(0.12, 0.22, 0.17), _v2.set(-1, -0.8, 0.2), handQ(1, 0.47, 0.13, -0.87, 0.2, -0.98, -0.04));
       return;
     }
     if (idle === 'pockets') {
-      this.ik(0, _v1.set(0.135, -0.06, 0.06), _v2.set(1, -0.2, -0.6), qEuler(0.1, 0, 0.1, 'XYZ', _q3));
-      this.ik(1, _v1.set(-0.135, -0.06, 0.06), _v2.set(-1, -0.2, -0.6), qEuler(0.1, 0, -0.1, 'XYZ', _q3));
+      // mains glissées dans les poches de devant, dos de la main vers l'avant
+      this.ik(0, _v1.set(0.135, -0.06, 0.06), _v2.set(1, -0.2, -0.6), handQ(0, -0.1, -0.85, -0.5, -0.35, 0, -0.9));
+      this.ik(1, _v1.set(-0.135, -0.06, 0.06), _v2.set(-1, -0.2, -0.6), handQ(1, 0.1, -0.85, -0.5, 0.35, 0, -0.9));
       this.hands[0] = this.hands[1] = 'flat';
       return;
     }
     if (idle === 'belt') {
       // pouces dans le ceinturon
-      this.ik(0, _v1.set(0.1, -0.02, 0.13), _v2.set(1, -0.3, -0.2), qEuler(0.2, 0, 0.6, 'XYZ', _q3));
-      this.ik(1, _v1.set(-0.1, -0.02, 0.13), _v2.set(-1, -0.3, -0.2), qEuler(0.2, 0, -0.6, 'XYZ', _q3));
+      // pouces dans le ceinturon : doigts pendants, paumes contre le pantalon
+      this.ik(0, _v1.set(0.1, -0.02, 0.13), _v2.set(1, -0.3, -0.2), handQ(0, -0.25, -0.95, 0.1, -0.2, 0, -1));
+      this.ik(1, _v1.set(-0.1, -0.02, 0.13), _v2.set(-1, -0.3, -0.2), handQ(1, 0.25, -0.95, 0.1, 0.2, 0, -1));
       return;
     }
     if (idle === 'phone') {
       // consulte son téléphone
       this.held = 'phone';
       this.hands[1] = 'grip';
-      this.ik(1, _v1.set(-0.05, shY - 0.18, 0.27), _v2.set(-1, -1, -0.2), qEuler(-1.9, 0.5, -0.2, 'XYZ', _q3));
+      this.ik(1, _v1.set(-0.05, shY - 0.18, 0.27), _v2.set(-1, -1, -0.2), PHONE_HQ);
       this.fk(0, -0.02, 0.1, 0, 0.3, 0, 0, 0);
       return;
     }
