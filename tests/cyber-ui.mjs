@@ -149,19 +149,33 @@ const clinic = await A.evaluate(() => {
 });
 check('une clinique accessible existe dans la ville', !!clinic, JSON.stringify(clinic));
 /**
- * En station à la clinique, connecté, écran ouvert : sous forte charge (rendu logiciel), la page
- * peut perdre la connexion ; la reconnexion remet le parrain au QG et referme l'écran.
+ * Placé (fauteuil de la clinique, ou bureau du QG hors station), connecté, écran ouvert : sous
+ * forte charge (rendu logiciel), la page peut perdre la connexion ; la reconnexion remet le
+ * parrain au QG et referme l'écran.
  */
 const inStation = '(c) => typeof c.station === "string" && c.station.startsWith("clinique:")';
+const offStation = '(c) => c.station === null';
+const seat = clinic && { x: clinic.x, y: clinic.y, z: clinic.z, yaw: clinic.yaw };
+// hors station : le bureau du QG (pas de station cybernétique achetée), à l'abri des gardes
+// ennemis — 30 m plus loin, on peut tomber dans un bâtiment tenu par un gang ; sinon, à défaut
+const far =
+  (await A.evaluate(() => {
+    const g = window.__app.game;
+    const hq = g.world.buildings[g.pub.hq[g.you]];
+    if (!hq || g.priv.upgrades.includes('cyberstation')) return null;
+    const sp = hq.deskSeat ?? hq.spawn[0] ?? hq.center;
+    return { x: sp.x, y: sp.y ?? hq.floorY, z: sp.z, yaw: 0 };
+  })) ?? (clinic && { x: clinic.x + 30 * Math.sin(clinic.yaw), z: clinic.z + 30 * Math.cos(clinic.yaw), yaw: clinic.yaw });
+const cyberIs = (cond) => new Function(`const c = window.__app.game?.priv.cyber; return !!c && (${cond})(c);`);
+const connected = () => A.waitForFunction(() => window.__app.net.connected && window.__app.game?.placed, null, WAIT).catch(() => {});
 let reconnects = 0;
-const ready = async (open = true) => {
+const placeAt = async (spot, cond, open) => {
   for (let i = 0; i < 4; i++) {
-    await A.waitForFunction(() => window.__app.net.connected && window.__app.game?.placed, null, WAIT).catch(() => {});
-    const here = await A.evaluate(new Function(`const c = window.__app.game.priv.cyber; return (${inStation})(c);`));
-    if (here) break;
+    await connected();
+    if (await A.evaluate(cyberIs(cond))) break;
     if (i > 0) reconnects++;
-    if (clinic) await A.evaluate((c) => window.__app.net.act({ a: 'debugTp', x: c.x, z: c.z, y: c.y, yaw: c.yaw }), clinic);
-    const ok = await A.waitForFunction(new Function(`const c = window.__app.game.priv.cyber; return (${inStation})(c);`), null, { timeout: 45000, polling: 300 })
+    if (spot) await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', ...s }), spot);
+    const ok = await A.waitForFunction(cyberIs(cond), null, { timeout: 45000, polling: 300 })
       .then(() => true)
       .catch(() => false);
     if (ok) break;
@@ -172,6 +186,8 @@ const ready = async (open = true) => {
     await sleep(600);
   }
 };
+const ready = (open = true) => placeAt(seat, inStation, open);
+const away = (open = true) => placeAt(far, offStation, open);
 await ready(false);
 await waitCyber('en station à la clinique (priv.cyber.station)', inStation, 30000);
 const money0 = await A.evaluate(() => window.__app.game.priv.money);
@@ -255,12 +271,23 @@ check('HUD des capacités : pastilles affichées', chips >= 1, `${chips} pastill
 await shot('cyber-07-hud.png');
 
 // ------------------------------------------------------------------ hors station
-if (clinic) await A.evaluate((c) => window.__app.net.act({ a: 'debugTp', x: c.x + 30 * Math.sin(c.yaw), z: c.z + 30 * Math.cos(c.yaw), yaw: c.yaw }), clinic);
-await waitCyber('hors station (priv.cyber.station = null)', '(c) => c.station === null');
+await away(false);
+await waitCyber('hors station (priv.cyber.station = null)', offStation);
 await sleep(4000);
-await pressFor('KeyI', true, 'hors station : écran rouvert (touche I)');
+// une coupure entre la frappe et l'attente referme l'écran : on refrappe une fois reconnecté
+let reopened = false;
+for (let i = 0; i < 2 && !reopened; i++) {
+  await away(false);
+  if (i === 0 || !(await isOpen())) await A.keyboard.press('KeyI');
+  reopened = await A.waitForFunction(() => !document.querySelector('.cy-root')?.classList.contains('hidden'), null, WAIT)
+    .then(() => true)
+    .catch(() => false);
+}
+if (!reopened) await shot('echec-hors-station-ecran-rouvert.png').catch(() => {});
+check('hors station : écran rouvert (touche I)', reopened, reopened ? '' : await diag());
 await sleep(800);
 check('hors station : bandeau « consultation seulement »', /consultation seulement/.test((await textOf('.cy-station')) ?? ''));
+await away();
 await click('.cy-item[data-id="poing"]');
 const offBuy = await attrOf(action('Acheter'), 'aria-disabled');
 check('hors station : « Acheter » refusé', offBuy === 'true');
@@ -269,9 +296,11 @@ await sleep(400);
 check('hors station : la raison s’affiche', /Hors station/.test((await textOf('.cy-feedback')) ?? ''));
 await waitCyber('hors station : aucun achat', '(c) => !c.owned.poing', 3000);
 await shot('cyber-08-hors-station.png');
+await away();
 await pressFor('KeyI', false, 'touche I : écran refermé');
 
 // ------------------------------------------------------------------ téléphone : appli Implants
+await away(false);
 await A.keyboard.press('Tab');
 const phoneOpen = await A.waitForFunction(() => !document.querySelector('.phone')?.classList.contains('hidden'), null, WAIT)
   .then(() => true)

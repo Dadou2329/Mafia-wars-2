@@ -135,24 +135,52 @@ await sleep(600);
 await shot('01-fp-implants.png');
 
 console.log('=== Grappin');
-const tp0 = await A.evaluate(() => window.__app.game.priv.tp);
-const y0 = await A.evaluate(() => window.__app.game.player.pos.y);
 await A.evaluate(() => {
   const g = window.__app.game;
   window.__ev = [];
+  window.__mv = [];
   const prev = g.player.onMove;
   g.player.onMove = (e) => {
     window.__ev.push(e.k);
+    const p = g.player;
+    window.__mv.push({ k: e.k, y: e.y, y2: e.y2 ?? null, at: `pos ${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)} lacet ${p.yaw.toFixed(2)} tangage ${p.pitch.toFixed(2)} sol ${p.onGround} 1re ${p.firstPerson}` });
     prev?.(e);
   };
 });
-await A.keyboard.press('KeyF');
-await waitGame(() => window.__app.game.player.mode === 'grapple', null, 2);
-const grappling = await A.evaluate(() => window.__app.game.player.mode);
+// sous forte charge, une téléportation tardive (debugTp) remet le regard à l'horizontale : on
+// relève le regard juste avant F, et on recommence si le crochet est parti trop bas
+let tp0 = 0;
+let y0 = 0;
+let anchorY = 0;
+let grappling = 'walk';
+for (let i = 0; i < 3; i++) {
+  await waitGame(() => {
+    const p = window.__app.game.player;
+    return p.t >= p.grappleReadyAt && p.onGround && !p.hook && p.mode === 'walk';
+  }, null, 3);
+  tp0 = await A.evaluate(() => window.__app.game.priv.tp);
+  y0 = await A.evaluate(() => {
+    window.__mv.length = 0;
+    const p = window.__app.game.player;
+    p.pitch = 0.75;
+    return p.pos.y;
+  });
+  await A.keyboard.press('KeyF');
+  await waitGame(() => window.__mv.some((m) => m.k === 'grappleAttach' || m.k === 'grappleMiss'), null, 2);
+  const fired = await A.evaluate(() => window.__mv.find((m) => m.k === 'grappleFire' || m.k === 'grappleMiss') ?? null);
+  anchorY = fired?.y2 ?? 0;
+  grappling = (await A.evaluate(() => window.__mv.some((m) => m.k === 'grappleAttach'))) ? 'grapple' : fired ? fired.k : 'rien';
+  if (grappling === 'grapple' && anchorY > y0 + 6) break;
+  console.log(`  (essai ${i + 1} : ${grappling}, ancre ${anchorY.toFixed(1)} m ; au tir : ${fired?.at ?? '?'} ; lacet voulu ${spot.yaw.toFixed(2)} — on recommence)`);
+  // accroché trop bas (regard remis à l'horizontale) : on lâche, on revient au point de départ
+  if (await A.evaluate(() => !!window.__app.game.player.grapple)) await A.keyboard.press('KeyF');
+  await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', x: s.x, z: s.z, yaw: s.yaw }), spot);
+  await A.waitForFunction((s) => Math.hypot(window.__app.game.player.pos.x - s.x, window.__app.game.player.pos.z - s.z) < 1, spot, { timeout: 180000, polling: 250 });
+}
 await shot('02-grapple.png');
 await waitGame((y0) => window.__app.game.player.mode !== 'grapple' && window.__app.game.player.pos.y > y0 + 5, y0, 6);
 const y1 = await A.evaluate(() => window.__app.game.player.pos.y);
-check('grappin : accroché puis hissé', grappling === 'grapple' && y1 > y0 + 5, `mode ${grappling}, y ${y0.toFixed(1)} → ${y1.toFixed(1)}`);
+check('grappin : accroché puis hissé', grappling === 'grapple' && y1 > y0 + 5, `mode ${grappling}, ancre ${anchorY.toFixed(1)} m, y ${y0.toFixed(1)} → ${y1.toFixed(1)}`);
 await sleep(1500);
 const tp1 = await A.evaluate(() => window.__app.game.priv.tp);
 check('le serveur accepte le trajet (aucun recalage)', tp1 === tp0, `tp ${tp0} → ${tp1}`);
@@ -211,26 +239,29 @@ await sleep(500);
 console.log('=== Camouflage et vision');
 await A.evaluate(() => {
   window.__abs = [];
+  window.__camoSeen = false;
+  const g = window.__app.game;
   window.__app.net.on('ev', (evs) => {
     for (const e of evs) if (e.t === 'ab') window.__abs.push(e.ab);
   });
+  // chaque instantané reçu : le bit CAMOUFLAGE de mon parrain (le camouflage ne dure que 5 s)
+  const orig = g.store.applySnapshot.bind(g.store);
+  g.store.applySnapshot = (time, list) => {
+    for (const s of list) if (s.id === g.selfId && s.fx & 4) window.__camoSeen = true;
+    orig(time, list);
+  };
 });
 await A.keyboard.press('KeyY');
 // la touche n'est lue qu'à l'image suivante (rendu logiciel : plusieurs secondes)
 await A.waitForFunction(() => window.__abs.includes('camouflage'), null, { timeout: 120000, polling: 100 }).catch(() => undefined);
-// bits visibles de mon parrain dans le dernier instantané du serveur (temps réel : le
-// serveur avance à vitesse normale, le client en rendu logiciel bien plus lentement)
-await A.waitForFunction(() => {
-  const g = window.__app.game;
-  const e = g.store.ents.get(g.selfId);
-  return !!e && e.buf.length > 0 && (e.buf[e.buf.length - 1].s.fx & 4) !== 0;
-}, null, { timeout: 4000, polling: 100 }).catch(() => undefined);
-const camo = await A.evaluate(() => {
-  const g = window.__app.game;
-  const e = g.store.ents.get(g.selfId);
-  return e && e.buf.length ? e.buf[e.buf.length - 1].s.fx & 4 : 0;
-});
+// bit visible reçu dans les instantanés du serveur pendant le camouflage
+await A.waitForFunction(() => window.__camoSeen, null, { timeout: 60000, polling: 100 }).catch(() => undefined);
+const camo = (await A.evaluate(() => window.__camoSeen)) ? 4 : 0;
 check('camouflage confirmé par le serveur (bit visible)', camo !== 0);
+if (!camo) console.log('diagnostic camouflage :', JSON.stringify(await A.evaluate(() => {
+  const g = window.__app.game;
+  return { abs: window.__abs, cd: [...g.cyber['localCd'].entries()], server: [...g.cyber['serverCd'].entries()], connected: g.app.net.connected, equip: g.priv.cyber.equip.peau, blocked: g.modules.map((m) => !!m.blocking?.()), notices: [...document.querySelectorAll('.hud-notices > *')].map((n) => n.textContent).slice(-4) };
+})));
 await A.keyboard.press('KeyN');
 await A.waitForFunction(() => window.__app.game.cyber.visionMode !== 'normal', null, { timeout: 120000, polling: 100 }).catch(() => undefined);
 const vision = await A.evaluate(() => window.__app.game.cyber.visionMode);

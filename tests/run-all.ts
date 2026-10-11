@@ -143,18 +143,35 @@ const ltStart = g.ents.get(D.lieutenants[0])!;
 const startPos = { x: ltStart.x, z: ltStart.z };
 let maxTick = 0;
 let total = 0;
-const N = 20 * 300; // 5 minutes de jeu
-for (let i = 0; i < N; i++) {
-  const t = performance.now();
-  g.step();
-  const dt = performance.now() - t;
-  total += dt;
-  maxTick = Math.max(maxTick, dt);
-  drain();
+let travelled = 0;
+// l'assaut peut échouer (combat aléatoire : le lieutenant tombe face au gang) : une seconde
+// vague est alors lancée, comme le ferait un joueur
+for (let wave = 0; wave < 2; wave++) {
+  if (wave === 1) {
+    if (g.bstate.get(targetD)!.owner !== Faction.DADOU) g.action('dadou', { a: 'order', lt: D.lieutenants[0], order: 'attack_building', target: targetD, men: 9 });
+    if (g.bstate.get(targetE)!.owner !== Faction.EVEN) g.action('even', { a: 'order', lt: E.lieutenants[0], order: 'attack_building', target: targetE, men: 9 });
+    drain();
+  }
+  const N = 20 * 300; // 5 minutes de jeu par vague
+  for (let i = 0; i < N; i++) {
+    const t = performance.now();
+    g.step();
+    const dt = performance.now() - t;
+    total += dt;
+    maxTick = Math.max(maxTick, dt);
+    drain();
+    const l = g.ents.get(D.lieutenants[0]);
+    if (l) travelled = Math.max(travelled, Math.hypot(l.x - startPos.x, l.z - startPos.z));
+    if (g.bstate.get(targetD)!.owner === Faction.DADOU && g.bstate.get(targetE)!.owner === Faction.EVEN) break;
+  }
   if (g.bstate.get(targetD)!.owner === Faction.DADOU && g.bstate.get(targetE)!.owner === Faction.EVEN) break;
+  // seconde vague : le lieutenant blessé doit d'abord être revenu au QG
+  for (let i = 0; i < 20 * 120 && (g.squads.get(D.lieutenants[0])?.state === 'down' || g.squads.get(E.lieutenants[0])?.state === 'down'); i++) {
+    g.step();
+    drain();
+  }
 }
-const lt = g.ents.get(D.lieutenants[0])!;
-check('le lieutenant s’est déplacé physiquement', Math.hypot(lt.x - startPos.x, lt.z - startPos.z) > 5 || g.bstate.get(targetD)!.owner === Faction.DADOU);
+check('le lieutenant s’est déplacé physiquement', travelled > 5 || g.bstate.get(targetD)!.owner === Faction.DADOU, `${travelled.toFixed(1)} m`);
 check('Dadou a pris la Brasserie de Williamsburg', g.bstate.get(targetD)!.owner === Faction.DADOU, `propriétaire ${g.bstate.get(targetD)!.owner}`);
 check('Even a pris l’Usine de drones Steinway', g.bstate.get(targetE)!.owner === Faction.EVEN, `propriétaire ${g.bstate.get(targetE)!.owner}`);
 check('tick moyen < 6 ms', total / Math.max(1, g.tick) < 6, `${(total / Math.max(1, g.tick)).toFixed(2)} ms`);

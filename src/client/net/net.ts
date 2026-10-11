@@ -8,6 +8,10 @@ const TOKEN_KEY = 'mafiawars.token';
 
 type Handler = (...args: never[]) => void;
 
+/** Actions liées à l'instant : sans objet après une coupure (le parrain a pu être replacé). */
+const realtime = (a: ClientAction): boolean =>
+  a.a === 'ab' || a.a === 'grenade' || a.a === 'interact' || a.a === 'op' || (a.a === 'vehicle' && (a.op === 'enter' || a.op === 'exit'));
+
 export class Net {
   readonly socket: Socket;
   token: string;
@@ -15,6 +19,8 @@ export class Net {
   room: RoomState | null = null;
   rtt = 0;
   private handlers = new Map<string, Set<Handler>>();
+  /** Actions faites pendant une coupure : envoyées au retour (si elles sont récentes). */
+  private pending: { a: ClientAction; at: number }[] = [];
   private helloDone: Promise<void>;
   private resolveHello!: () => void;
 
@@ -48,6 +54,11 @@ export class Net {
         this.connected = true;
         this.emitLocal('connected', r.room);
         this.resolveHello();
+        // actions faites pendant la coupure (achats, ordres…) : moins de 10 s, dans l'ordre
+        const now = performance.now();
+        const queued = this.pending.filter((p) => now - p.at < 10000);
+        this.pending = [];
+        for (const p of queued) this.socket.emit('act', p.a);
       });
     });
     this.socket.on('disconnect', () => {
@@ -151,6 +162,13 @@ export class Net {
   }
 
   act(a: ClientAction): void {
+    // pendant une reconnexion, le serveur ignorerait l'action (session pas encore rétablie) : on
+    // garde les achats et ordres, pas les gestes en temps réel (capacité, grenade, portière…)
+    if (!this.connected) {
+      if (!realtime(a)) this.pending.push({ a, at: performance.now() });
+      if (this.pending.length > 40) this.pending.shift();
+      return;
+    }
     this.socket.emit('act', a);
   }
 
