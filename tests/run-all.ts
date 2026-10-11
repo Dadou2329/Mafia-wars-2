@@ -36,7 +36,7 @@ const t0 = performance.now();
 const w = getWorld();
 console.log(`  (générée en ${(performance.now() - t0).toFixed(0)} ms)`);
 check(`${BUILDINGS.length} bâtiments générés`, w.buildings.length === BUILDINGS.length, `${w.buildings.length}`);
-check('7 quartiers', DISTRICTS.length === 7);
+check('13 quartiers', DISTRICTS.length === 13);
 check('chaque bâtiment a une porte et une zone intérieure', w.buildings.every((b) => b.doors.length > 0 && b.zone.length > 0));
 check('chaque quartier a au moins un bâtiment clé', DISTRICTS.every((d) => keyBuildings(d.id).length > 0));
 for (const slot of ['dadou', 'even'] as const) {
@@ -207,7 +207,7 @@ section('Ascension : de la planque à la tour');
   g.action('dadou', { a: 'moveIn', b: loft.id });
   drain();
   const needD = TIERS[2].districts;
-  check(`le loft exige ${needD} quartier contrôlé`, g.territories('dadou') >= needD ? D.tier === 3 : D.tier === 2, lastNotify('dadou')?.text);
+  check(`le loft exige ${needD} quartier${needD > 1 ? 's' : ''} contrôlé${needD > 1 ? 's' : ''}`, g.territories('dadou') >= needD ? D.tier === 3 : D.tier === 2, lastNotify('dadou')?.text);
 }
 
 // la tour (palier 5) : tourelles automatiques au QG (partie séparée, on force les paliers)
@@ -336,10 +336,13 @@ section('Sécurité, piratage, braquage, drone');
   boss.invulnerable = false;
   // drone de reconnaissance
   D.upgrades.add('drones');
-  g.action('dadou', { a: 'drone', d: 'queens' });
-  for (let i = 0; i < 20 * 25; i++) g.step();
+  g.action('dadou', { a: 'drone', d: 'astoria' });
+  for (let i = 0; i < 20 * 40; i++) {
+    g.step();
+    if (g.privateState('dadou').droneOver === 'astoria') break;
+  }
   drain();
-  check('un drone survole le Queens et révèle les ennemis', g.privateState('dadou').droneOver === 'queens', JSON.stringify(g.privateState('dadou').droneOver));
+  check('un drone survole Astoria et révèle les ennemis', g.privateState('dadou').droneOver === 'astoria', JSON.stringify(g.privateState('dadou').droneOver));
 }
 
 // ---------------------------------------------------------------------------- convois
@@ -429,7 +432,7 @@ section('Grenades');
   const boss = g.ents.get(D.bossId)!;
   // un homme d'Even à 6 m devant Dadou, en pleine rue
   const victim = [...g.ents.values()].find((e) => e.alive && e.slot === 'even' && e.role === 'gangster')!;
-  const spot = BUILDING_BY_KEY['diner'];
+  const spot = BUILDING_BY_KEY['zabar'];
   const out = g.building(spot.id).doors[0].out;
   boss.x = out.x;
   boss.z = out.z - 3;
@@ -551,7 +554,7 @@ if (ev) {
 // météo partagée
 check('la pluie est partagée par le serveur', typeof g.publicState().rain === 'number');
 
-// victoire : Dadou prend le QG actuel d'Even après avoir pris 4 quartiers
+// victoire : Dadou prend le QG actuel d'Even après avoir pris la majorité des quartiers
 {
   const evenHq = g.hq('even').def;
   const mine = DISTRICTS.filter((d) => d.id !== evenHq.district).slice(0, HQ_CAPTURE_MIN_DISTRICTS);

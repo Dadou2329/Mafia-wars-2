@@ -5,6 +5,7 @@ import { WEAPONS, Weapon } from '../../shared/characters';
 import { BOSS_NAME, MAFIA_NAME, NEWSPAPER, ORDER_STATUS, tierDef } from '../../shared/constants';
 import type { LieutenantStatus, PrivateState, PublicState, Slot } from '../../shared/protocol';
 import { formatMoney, formatTime } from '../../shared/util';
+import { DISTRICTS } from '../../shared/city/plan';
 import { h, clear } from '../ui/dom';
 import { settings } from '../settings';
 
@@ -177,7 +178,7 @@ export class Hud {
     this.money.textContent = formatMoney(p.money);
     this.income.textContent = `+${formatMoney(p.income)}/min`;
     this.men.textContent = `${p.men}${p.pool ? ` (${p.pool} au QG)` : ''}`;
-    if (pub) this.terr.textContent = `${pub.territories[this.slot]}/7`;
+    if (pub) this.terr.textContent = `${pub.territories[this.slot]}/${DISTRICTS.length}`;
     this.home.textContent = tierDef(p.tier).name;
     // étoiles de recherche
     if (p.wanted !== this.lastWanted || this.stars.childElementCount === 0) {

@@ -28,7 +28,7 @@ import { STAIR_D, STAIR_W, buildBox, computeFloors, cornice, finishWalls, fireEs
 import { buildResidence } from './residences';
 import { buildLandmark } from './landmarks';
 
-export type Family = 'walkup' | 'brownstone' | 'glass' | 'deco' | 'warehouse' | 'shophouse' | 'classical' | 'modern' | 'industrial' | 'theatre';
+export type Family = 'walkup' | 'brownstone' | 'glass' | 'deco' | 'warehouse' | 'shophouse' | 'classical' | 'modern' | 'industrial' | 'theatre' | 'castle';
 
 export interface TypeSpec {
   family: Family;
@@ -216,6 +216,32 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         doorW: 8,
       };
     case 'gallery':
+      if (v === 1)
+        // musée classique (colonnade de pierre) : le Muséum d'histoire naturelle
+        return {
+          family: 'classical',
+          rooms: [
+            ['gallery_hall', 'vault'],
+            ['gallery_hall', 'security_room'],
+          ],
+          groundClear: 20,
+          facade: { wall: M.LIMESTONE, wallSide: M.LIMESTONE, trim: M.GRANITE, lit: 0.55, winW: 5, winH: 10 },
+          canopy: M.GOLD,
+          doorW: 8,
+        };
+      if (v === 2)
+        // galerie d'art de rue dans un ancien entrepôt (murs peints)
+        return {
+          family: 'warehouse',
+          rooms: [
+            ['gallery_hall', 'vault'],
+            ['gallery_hall', 'storeroom'],
+          ],
+          groundClear: 18,
+          facade: { wall: M.BRICK_GRAFFITI, wallSide: M.BRICK_GRAFFITI, trim: M.CONCRETE, lit: 0.5, winW: 6, winH: 6, sills: false },
+          neon: M.NEON_PINK,
+          doorW: 8,
+        };
       return {
         family: 'modern',
         rooms: [
@@ -247,6 +273,17 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
         doorW: 8,
       };
     case 'security':
+      if (v === 2)
+        // le château du Belvédère : granit, créneaux et tourelle
+        return {
+          family: 'castle',
+          rooms: [
+            ['security_room', 'server_room'],
+            ['control_room', 'exec_office'],
+          ],
+          facade: { wall: M.GRANITE, wallSide: M.GRANITE, trim: M.LIMESTONE, lit: 0.6, winW: 3, winH: 8, winSpacing: 7 },
+          canopy: M.GRANITE_DARK,
+        };
       return {
         family: 'modern',
         rooms: [
@@ -636,6 +673,28 @@ function decorateFamily(
       if (def.type === 'police') {
         f.prop('NEON_WALL_SIGN', f.W / 2, g0.ceil + 2, -0.3, Math.PI, 3);
       }
+      break;
+    }
+    case 'castle': {
+      // créneaux sur tout le pourtour, tourelle d'angle et oriflamme
+      for (let x = 0; x < f.W; x += 4) {
+        f.fill(x, roofTop + 4, 0, Math.min(f.W, x + 2), roofTop + 7, 2, st.wall);
+        f.fill(x, roofTop + 4, f.D - 2, Math.min(f.W, x + 2), roofTop + 7, f.D, st.wall);
+      }
+      for (let z = 0; z < f.D; z += 4) {
+        f.fill(0, roofTop + 4, z, 2, roofTop + 7, Math.min(f.D, z + 2), st.wall);
+        f.fill(f.W - 2, roofTop + 4, z, f.W, roofTop + 7, Math.min(f.D, z + 2), st.wall);
+      }
+      // tourelle carrée posée sur l'angle avant gauche (elle déborde à l'extérieur)
+      f.fill(-4, 0, -4, 5, roofTop + 20, 5, st.wall);
+      for (let x = -4; x < 5; x += 3) {
+        f.fill(x, roofTop + 20, -4, x + 2, roofTop + 23, -3, st.wall);
+        f.fill(x, roofTop + 20, 4, x + 2, roofTop + 23, 5, st.wall);
+      }
+      f.fill(-2, roofTop + 8, -5, 3, roofTop + 14, -4, M.GLASS_LIT);
+      f.fill(0, roofTop + 20, 0, 1, roofTop + 30, 1, M.IRON);
+      f.fill(1, roofTop + 26, 0, 6, roofTop + 30, 1, M.CLOTH_RED);
+      band(f, walls, g0.ceil, st.trim);
       break;
     }
     case 'industrial':

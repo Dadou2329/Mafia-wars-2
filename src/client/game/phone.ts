@@ -143,7 +143,7 @@ export class Phone {
           grid.appendChild(h('button', { class: `phone-app${locked ? ' locked' : ''}`, on: { click: () => this.go(id) } }, ico, LABEL[id]));
         }
         this.body.appendChild(grid);
-        this.body.appendChild(h('div', { class: 'phone-card' }, h('h3', null, formatMoney(p.money)), h('p', null, `Revenus : +${formatMoney(p.income)}/min — ${p.men}/${p.maxMen} hommes — ${gc.pub.territories[gc.you]}/7 quartiers`)));
+        this.body.appendChild(h('div', { class: 'phone-card' }, h('h3', null, formatMoney(p.money)), h('p', null, `Revenus : +${formatMoney(p.income)}/min — ${p.men}/${p.maxMen} hommes — ${gc.pub.territories[gc.you]}/${DISTRICTS.length} quartiers`)));
         break;
       }
       case 'alerts': {

@@ -261,7 +261,7 @@ export class Game {
             kind: CharKind.THUG,
             role: 'thug',
             faction: Faction.NEUTRAL,
-            gang: DISTRICT_BY_ID[b.district].index,
+            gang: DISTRICT_BY_ID[b.district].look,
             x: p.x,
             z: p.z,
             y: p.y ?? info.floorY,
@@ -1553,7 +1553,7 @@ export class Game {
         const fs = factionSlot(F)!;
         if (hqOf && this.territories(fs) < HQ_CAPTURE_MIN_DISTRICTS) {
           st.contested = true;
-          this.notify(fs, `Le QG ${DE_BOSS[hqOf]} est imprenable : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 (vous en avez ${this.territories(fs)}).`, 'info', 'hq-locked', 15);
+          this.notify(fs, `Le QG ${DE_BOSS[hqOf]} est imprenable : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} (vous en avez ${this.territories(fs)}).`, 'info', 'hq-locked', 15);
           continue;
         }
         if (st.capBy !== F) {

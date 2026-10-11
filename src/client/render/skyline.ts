@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, NOISE_GLSL } from './shaderChunks';
-import { RIVER_X0, RIVER_X1, WORLD_D, WORLD_W } from '../../shared/city/plan';
+import { CREEK, CREEK_FAR, RIVER_X0, RIVER_X1, WORLD_D, WORLD_W } from '../../shared/city/plan';
 
 // brouillard allégé : les silhouettes lointaines restent lisibles dans le smog
 const FAR_FOG_GLSL = /* glsl */ `
@@ -187,6 +187,9 @@ function rng(seed: number): () => number {
   };
 }
 
+/** Bande d'eau de Newtown Creek au-delà de la ville : pas de tours dessus. */
+const CREEK_BAND = [WORLD_W, CREEK[1] - 8, CREEK_FAR + 8, CREEK[3] + 8];
+
 /** Génère les tours d'une zone (rectangle), plus hautes près des « centres » donnés. */
 function zone(out: Tower[], r: () => number, x0: number, z0: number, x1: number, z1: number, base: [number, number], centers: { x: number; z: number; h: number; s: number }[], cell = 26, fill = 0.72): void {
   for (let gx = x0; gx < x1; gx += cell) {
@@ -196,6 +199,7 @@ function zone(out: Tower[], r: () => number, x0: number, z0: number, x1: number,
       const d = 10 + r() * 14;
       const x = gx + cell / 2 + (r() - 0.5) * (cell - w) * 0.8;
       const z = gz + cell / 2 + (r() - 0.5) * (cell - d) * 0.8;
+      if (x + w / 2 > CREEK_BAND[0] && x - w / 2 < CREEK_BAND[2] && z + d / 2 > CREEK_BAND[1] && z - d / 2 < CREEK_BAND[3]) continue;
       let h = base[0] + r() * (base[1] - base[0]);
       for (const c of centers) {
         const k = Math.exp(-((x - c.x) ** 2 + (z - c.z) ** 2) / (2 * c.s * c.s));
@@ -217,8 +221,8 @@ export function createSkyline(): Skyline {
   const towers: Tower[] = [];
   // Upper Manhattan (au nord, au-delà de Central Park) : tours résidentielles et quelques géantes
   zone(towers, r, 0, -330, RIVER_X0 - 6, -24, [18, 55], [
-    { x: 90, z: -60, h: 70, s: 50 },
-    { x: 40, z: -200, h: 35, s: 70 },
+    { x: RIVER_X0 * 0.46, z: -60, h: 70, s: 60 },
+    { x: RIVER_X0 * 0.2, z: -200, h: 35, s: 80 },
   ]);
   // Long Island City (Queens, au nord-est) : tours de verre au bord de l'eau
   zone(towers, r, RIVER_X1 + 8, -300, WORLD_W + 320, -22, [14, 40], [{ x: RIVER_X1 + 40, z: -40, h: 85, s: 45 }]);

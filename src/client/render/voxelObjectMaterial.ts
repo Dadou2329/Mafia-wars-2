@@ -1,10 +1,11 @@
 // Matériau des objets voxel (accessoires, personnages) : couleurs par sommet ou par
 // emplacement (teinte de faction, tenue du personnage), éclairage précalculé du monde,
-// ombres du soleil, émission et brouillard au sol.
+// ombres du soleil, émission, reflets (ciel en dégradé, lampes, éclat du soleil ou de la lune
+// sur le verre, le chrome et les carrosseries) et brouillard au sol.
 
 import * as THREE from 'three';
 import { envUniforms } from './env';
-import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
+import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL, REFLECT_GLSL } from './shaderChunks';
 import { NEON_COLORS } from '../../shared/city/props';
 
 /** Couleurs de faction (sRGB) : [neutre, Dadou, Even] × [principale, secondaire, sombre]. */
@@ -99,6 +100,7 @@ vInstLight = aLight;`,
 ${COMMON_UNIFORMS_GLSL}
 ${NOISE_GLSL}
 ${LIGHT_GLSL}
+${REFLECT_GLSL}
 uniform vec3 uFaction[9];
 uniform vec3 uNeon[8];
 uniform vec3 uNeonFixed[6];
@@ -161,15 +163,28 @@ diffuseColor.rgb = albedo;`,
 vec2 gL = sampleLightVol(vWPos + wn * 0.12);
 gL = max(gL, vInstLight.xy);
 float aoF = 0.42 + 0.58 * (vAO / 3.0);
-reflectedLight.directDiffuse *= mix(aoF, 1.0, 0.5) * smoothstep(0.02, 0.3, gL.x);
+float skyVis = smoothstep(0.02, 0.3, gL.x);
+reflectedLight.directDiffuse *= mix(aoF, 1.0, 0.5) * skyVis;
 reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn, vWPos) * aoF;
 totalEmissiveRadiance += gEm;
 vec3 vdir = normalize(cameraPosition - vWPos);
 float fres = pow(1.0 - max(dot(vdir, wn), 0.0), 3.0);
-reflectedLight.indirectDiffuse += gSpec * (0.2 + fres) * (uSkyAmb * gL.x + lampColorAt(vWPos) * gL.y * 0.8) * 0.45;`,
+if (gSpec > 0.0) {
+  // reflet : ciel (zénith sur les toits et capots, rue et façades sur les flancs) et lampes
+  vec3 R = reflect(-vdir, wn);
+  vec3 env = skyReflect(R, 0.05) * gL.x * 1.1 + lampColorAt(vWPos) * gL.y * 0.8;
+  reflectedLight.indirectDiffuse += gSpec * (0.2 + fres) * env * 0.45;
+#if NUM_DIR_LIGHTS > 0
+  // éclat du soleil ou de la lune (verre, chrome, carrosseries)
+  float gs = min(gSpec, 1.0);
+  vec3 hv = normalize(directLight.direction + geometryViewDir);
+  float sh = 24.0 + 160.0 * gs;
+  reflectedLight.indirectDiffuse += directLight.color * pow(max(dot(geometryNormal, hv), 0.0), sh) * (sh + 8.0) * 0.0016 * gs * (1.0 + 2.0 * fres) * skyVis;
+#endif
+}`,
       )
       .replace('#include <fog_fragment>', opts.noFog ? '' : 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vWPos);');
   };
-  mat.customProgramCacheKey = () => `voxel-object-${opts.noFog ? 'nofog' : 'fog'}-${opts.key ?? ''}`;
+  mat.customProgramCacheKey = () => `voxel-object-v2-${opts.noFog ? 'nofog' : 'fog'}-${opts.key ?? ''}`;
   return mat;
 }

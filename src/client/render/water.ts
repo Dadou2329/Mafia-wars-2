@@ -1,9 +1,10 @@
-// L'East River, l'Hudson et la baie : surface d'eau animée avec reflets du ciel et des néons.
+// L'East River, Newtown Creek, l'Hudson, la baie et les lacs de Central Park : surface d'eau animée
+// avec reflets du ciel et des néons.
 
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
-import { CREEK, RIVER_X0, RIVER_X1, WATER_Y, WORLD_D } from '../../shared/city/plan';
+import { AREAS, CREEK, CREEK_FAR, RIVER_X0, RIVER_X1, WATER_Y, WORLD_D } from '../../shared/city/plan';
 
 const VERT = /* glsl */ `
 varying vec3 vWPos;
@@ -57,15 +58,17 @@ export function createWater(): { mesh: THREE.Mesh; mat: THREE.ShaderMaterial } {
     },
   });
   mat.toneMapped = false;
-  // une seule géométrie : l'East River (prolongée au nord et au sud), Newtown Creek,
-  // l'Hudson à l'ouest de Manhattan et la baie au sud de la pointe
-  const far = 700;
+  // une seule géométrie : l'East River (prolongée au nord et au sud), Newtown Creek (qui file vers
+  // l'est sous la voie rapide), l'Hudson à l'ouest de Manhattan, la baie au sud de la pointe, et
+  // les lacs de Central Park (le plan d'eau passe sous le sol : on ne le voit que dans le creux du lac)
+  const far = 900;
   const rects: [number, number, number, number][] = [
     [RIVER_X0, -far, RIVER_X1, WORLD_D + far],
-    [CREEK[0], CREEK[1], CREEK[2], CREEK[3]],
+    [CREEK[0], CREEK[1], CREEK_FAR, CREEK[3]],
     [-far, -far, 0, WORLD_D + far],
-    [0, WORLD_D + 6, RIVER_X0, WORLD_D + far],
+    [0, WORLD_D, RIVER_X0, WORLD_D + far],
   ];
+  for (const a of AREAS) if (a.kind === 'lake' || a.kind === 'reservoir') rects.push([a.rect[0], a.rect[1], a.rect[2], a.rect[3]]);
   const geos = rects.map(([x0, z0, x1, z1]) => {
     const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, 1, 1);
     g.rotateX(-Math.PI / 2);

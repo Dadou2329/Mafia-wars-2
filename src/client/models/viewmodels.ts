@@ -127,18 +127,6 @@ class Grid {
   }
 }
 
-/** Copie miroir gauche/droite d'un modèle (pour la main gauche). */
-export function mirrorModelX(m: VoxelModel): VoxelModel {
-  const r = new VoxelModel(m.sx, m.sy, m.sz, m.res);
-  for (let y = 0; y < m.sy; y++)
-    for (let z = 0; z < m.sz; z++)
-      for (let x = 0; x < m.sx; x++) r.data[r.idx(m.sx - 1 - x, y, z)] = m.data[m.idx(x, y, z)];
-  r.setOrigin(m.sx - m.ox, m.oy, m.oz);
-  return r;
-}
-
-const mirrorV = (v: Vec3): Vec3 => [-v[0], v[1], v[2]];
-
 // ------------------------------------------------------------------ métadonnées
 
 export interface VmWeaponMeta {
@@ -576,6 +564,15 @@ export function clubModel(): VoxelModel {
 
 // ================================================================== MAINS ET AVANT-BRAS
 
+/**
+ * Mains et avant-bras de la vue subjective, au 1/128 m (deux fois plus fins que les armes) :
+ * une main anatomique (paume, éminence du pouce, quatre doigts à trois phalanges, pouce, ongles,
+ * jointures, plis) posée sur chaque prise par ses angles d'articulation, puis voxelisée dans le
+ * repère de la prise. Manches des parrains : drap du manteau, revers, poignet de chemise,
+ * boutons de manchette, fil de néon (Dadou) ; gants de cuir (Even).
+ */
+export const HAND_RES = 1 / 128;
+
 /** Poses de la main : poignée de pistolet, poignet de crosse, appui sous la longuesse, poing, manche. */
 export type HandPose = 'pistol' | 'stock' | 'support' | 'fist' | 'blade';
 
@@ -604,195 +601,388 @@ export interface ArmModels {
 /** Longueur de l'avant-bras (m). */
 export const FOREARM_LENGTH = 21 * R;
 
+// --- géométrie de la main droite, repère anatomique A (cm) : origine au poignet, doigts vers
+// +Y, paume vers +Z, pouce vers +X.
+
+type P3 = [number, number, number];
+
+interface FingerDef {
+  base: P3;
+  len: [number, number, number];
+  rad: [number, number, number];
+  /** Écartement (rad, dans le plan de la paume). */
+  spread: number;
+}
+
+const FINGERS: FingerDef[] = [
+  { base: [2.75, 9.0, -0.2], len: [4.0, 2.4, 1.9], rad: [0.98, 0.9, 0.82], spread: 0.08 }, // index
+  { base: [0.9, 9.3, -0.2], len: [4.4, 2.8, 2.0], rad: [1.0, 0.92, 0.84], spread: 0 }, // majeur
+  { base: [-0.95, 9.0, -0.2], len: [4.1, 2.6, 1.9], rad: [0.95, 0.88, 0.8], spread: -0.06 }, // annulaire
+  { base: [-2.75, 8.3, -0.25], len: [3.3, 2.0, 1.7], rad: [0.82, 0.76, 0.7], spread: -0.14 }, // auriculaire
+];
+
+/** Pose d'une main : flexions des doigts (MCP, IPP, IPD), chaîne du pouce, placement. */
+interface HandPoseDef {
+  /** Flexion de chaque doigt (rad) : index, majeur, annulaire, auriculaire. */
+  curl: [number, number, number][];
+  /** Pouce : points (repère A, cm) de la base vers la pointe. */
+  thumb: P3[];
+  /** Repère A → repère de la prise : axes de A exprimés dans la prise, puis translation (cm). */
+  ax: P3;
+  ay: P3;
+  az: P3;
+  t: P3;
+}
+
+const deg = (d: number) => (d * Math.PI) / 180;
+
+/** Normalise et orthogonalise une base (y prioritaire, puis z), x = y × z. */
+function basis(y: P3, z: P3): { x: P3; y: P3; z: P3 } {
+  const ny = norm(y);
+  let nz = sub(z, scale(ny, dot(z, ny)));
+  nz = norm(nz);
+  const nx = cross(ny, nz);
+  return { x: nx, y: ny, z: nz };
+}
+const dot = (a: P3, b: P3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const sub = (a: P3, b: P3): P3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add = (a: P3, b: P3): P3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const scale = (a: P3, k: number): P3 => [a[0] * k, a[1] * k, a[2] * k];
+const cross = (a: P3, b: P3): P3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a: P3): P3 => scale(a, 1 / Math.max(1e-9, Math.hypot(a[0], a[1], a[2])));
+
+/**
+ * Poses. La prise est dans le repère de l'arme ou de sa pièce (voir les modèles d'armes) :
+ * poignée de pistolet selon +Y (canon vers −Z, 3,1 × 4,7 cm), longuesse selon Z, manche du
+ * couteau selon Z. Valeurs mises au point à la planche d'inspection (?vm&inspect).
+ */
+function poseDef(pose: HandPose): HandPoseDef {
+  switch (pose) {
+    case 'pistol':
+    case 'stock': {
+      // doigts autour de la face avant de la poignée, index sur la détente, pouce le long du
+      // flanc gauche ; paume contre le flanc droit
+      const b = basis([0, 0.06, -1], [-1, 0, 0.12]);
+      return {
+        curl: [
+          [deg(28), deg(48), deg(18)],
+          [deg(80), deg(92), deg(38)],
+          [deg(82), deg(95), deg(38)],
+          [deg(84), deg(96), deg(38)],
+        ],
+        thumb: [
+          [3.1, 1.9, 0.5],
+          [4.4, 5.0, 2.4],
+          [4.0, 7.6, 4.0],
+          [3.4, 9.9, 4.6],
+        ],
+        ax: b.x,
+        ay: b.y,
+        az: b.z,
+        t: [2.85, pose === 'stock' ? -0.6 : -0.45, 6.75],
+      };
+    }
+    case 'support': {
+      // main droite sous la longuesse (dessinée droite puis copiée en miroir pour la gauche) :
+      // paume vers le haut, doigts remontant sur le flanc gauche, pouce le long du flanc droit
+      const b = basis([-0.72, 0.12, -0.62], [0.12, 1, -0.08]);
+      return {
+        curl: [
+          [deg(38), deg(62), deg(26)],
+          [deg(42), deg(66), deg(28)],
+          [deg(44), deg(68), deg(28)],
+          [deg(48), deg(70), deg(28)],
+        ],
+        thumb: [
+          [3.1, 1.9, 0.5],
+          [4.6, 5.0, 1.4],
+          [5.2, 7.8, 1.6],
+          [5.3, 10.2, 1.4],
+        ],
+        ax: b.x,
+        ay: b.y,
+        az: b.z,
+        t: [4.9, -4.0, 6.6],
+      };
+    }
+    case 'blade': {
+      // poing serré sous un manche dirigé vers −Z (lame en avant) : main sous le manche, doigts
+      // qui remontent autour, index vers la lame, poignet en dessous et en arrière
+      const b = basis([0.2, 1, -0.35], [1, 0, 0]);
+      const c: P3 = [0, 9.0, 2.3];
+      return {
+        curl: [
+          [deg(70), deg(102), deg(48)],
+          [deg(74), deg(104), deg(48)],
+          [deg(76), deg(104), deg(48)],
+          [deg(78), deg(102), deg(46)],
+        ],
+        thumb: [
+          [3.1, 1.9, 0.5],
+          [3.9, 5.2, 2.7],
+          [2.5, 7.6, 4.1],
+          [0.7, 8.6, 4.4],
+        ],
+        ax: b.x,
+        ay: b.y,
+        az: b.z,
+        t: scale(add(add(scale(b.x, c[0]), scale(b.y, c[1])), scale(b.z, c[2])), -1),
+      };
+    }
+    case 'fist':
+    default: {
+      // poing fermé : jointures vers −Z, dos de la main vers +Y, pouce replié devant
+      const b = basis([0, 0.02, -1], [0, -1, 0]);
+      return {
+        curl: [
+          [deg(88), deg(112), deg(74)],
+          [deg(90), deg(114), deg(74)],
+          [deg(92), deg(114), deg(74)],
+          [deg(94), deg(112), deg(72)],
+        ],
+        thumb: [
+          [3.1, 1.9, 0.5],
+          [3.9, 5.4, 2.8],
+          [2.4, 7.6, 4.4],
+          [0.2, 8.1, 4.7],
+        ],
+        ax: b.x,
+        ay: b.y,
+        az: b.z,
+        t: [0, 1.7, 6.5],
+      };
+    }
+  }
+}
+
+/** Points des phalanges d'un doigt (repère A) pour des flexions données. */
+function fingerChain(f: FingerDef, curl: [number, number, number]): P3[] {
+  const pts: P3[] = [f.base];
+  let phi = 0;
+  let p = f.base;
+  for (let k = 0; k < 3; k++) {
+    phi += curl[k];
+    const d: P3 = [Math.sin(f.spread) * Math.cos(phi), Math.cos(f.spread) * Math.cos(phi), Math.sin(phi)];
+    p = add(p, scale(d, f.len[k]));
+    pts.push(p);
+  }
+  return pts;
+}
+
+/** Distance d'un point au segment [a, b] et paramètre t. */
+function segT(p: P3, a: P3, b: P3): [number, number] {
+  const ab = sub(b, a);
+  const l2 = Math.max(1e-9, dot(ab, ab));
+  const t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2));
+  const q = add(a, scale(ab, t));
+  return [Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]), t];
+}
+
 interface HandPalette {
-  [k: string]: number;
+  skin: number;
+  dark: number;
+  light: number;
+  nail: number;
+  palm: number;
+  seam: number;
+  ring: number;
 }
 
 function handPalette(look: ArmLook): HandPalette {
   const b = look.hand;
-  if (look.glove) {
-    return {
-      s: b,
-      a: shade(b, 0.78),
-      h: mix(b, 0x9a8a78, 0.32),
-      d: shade(b, 0.68),
-      n: mix(b, 0x9a8a78, 0.2),
-      g: b,
-      k: mix(b, 0xc8b496, 0.38),
-      w: mix(b, 0x9a8a78, 0.16),
-    };
-  }
-  return {
-    s: b,
-    a: shade(b, 0.87),
-    h: shade(b, 1.1),
-    d: shade(b, 0.74),
-    n: mix(b, 0xfbe4dc, 0.6),
-    g: look.accent,
-    k: b,
-    w: shade(b, 0.93),
+  if (look.glove)
+    return { skin: b, dark: shade(b, 0.72), light: mix(b, 0x9a8a78, 0.28), nail: mix(b, 0x9a8a78, 0.16), palm: shade(b, 0.85), seam: mix(b, 0xb8a888, 0.35), ring: look.accent };
+  return { skin: b, dark: shade(b, 0.8), light: mix(b, 0xfff0e2, 0.22), nail: mix(b, 0xf8dcd4, 0.55), palm: mix(shade(b, 0.95), 0xd88878, 0.1), seam: shade(b, 0.86), ring: look.accent };
+}
+
+/**
+ * Main droite voxelisée (1/128 m) dans le repère de la prise ; renvoie le modèle et le poignet
+ * (m). rings : bagues d'or (annulaire, auriculaire, chevalière).
+ */
+function buildHand(pose: HandPose, look: ArmLook): { m: VoxelModel; wrist: Vec3 } {
+  const P = poseDef(pose);
+  const pal = handPalette(look);
+  const chains = FINGERS.map((f, i) => fingerChain(f, P.curl[i]));
+  // A → prise : g = t + x·ax + y·ay + z·az ; inverse par produits scalaires (base orthonormée)
+  const toA = (g: P3): P3 => {
+    const d = sub(g, P.t);
+    return [dot(d, P.ax), dot(d, P.ay), dot(d, P.az)];
   };
+  const toG = (a: P3): P3 => add(P.t, add(add(scale(P.ax, a[0]), scale(P.ay, a[1])), scale(P.az, a[2])));
+  // boîte englobante dans le repère de la prise
+  let lo: P3 = [Infinity, Infinity, Infinity];
+  let hi: P3 = [-Infinity, -Infinity, -Infinity];
+  const grow = (a: P3) => {
+    const g = toG(a);
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], g[k] - 1.6);
+      hi[k] = Math.max(hi[k], g[k] + 1.6);
+    }
+  };
+  for (const x of [-4.5, 4.5]) for (const y of [-2.5, 9.6]) for (const z of [-1.8, 1.6]) grow([x, y, z]);
+  for (const c of chains) for (const p of c) grow(p);
+  for (const p of P.thumb) grow(p);
+  const vox = HAND_RES * 100; // cm par voxel
+  const nx = Math.ceil((hi[0] - lo[0]) / vox);
+  const ny = Math.ceil((hi[1] - lo[1]) / vox);
+  const nz = Math.ceil((hi[2] - lo[2]) / vox);
+  const m = new VoxelModel(nx, ny, nz, HAND_RES);
+  m.setOrigin(-lo[0] / vox, -lo[1] / vox, -lo[2] / vox);
+  const ringsOn = look.accent !== undefined && !look.glove && look.boss === 'dadou';
+  for (let j = 0; j < ny; j++)
+    for (let k = 0; k < nz; k++)
+      for (let i = 0; i < nx; i++) {
+        const g: P3 = [lo[0] + (i + 0.5) * vox, lo[1] + (j + 0.5) * vox, lo[2] + (k + 0.5) * vox];
+        const a = toA(g);
+        let c = -1;
+        // poignet (ellipse) et paume (boîte arrondie qui s'élargit vers les jointures)
+        if (a[1] > -2.6 && a[1] < 1.2) {
+          if ((a[0] / 2.9) ** 2 + ((a[2] + 0.1) / 1.55) ** 2 <= 1) c = pal.skin;
+        }
+        if (c < 0 && a[1] >= 0.4 && a[1] <= 9.5) {
+          const w = 3.4 + Math.min(1, (a[1] - 0.4) / 4) * 0.85;
+          const top = a[1] > 8.6 ? 9.5 - (a[1] - 8.6) * 0.0 : 9.5;
+          const r = 0.9;
+          const qx = Math.max(Math.abs(a[0] + 0.1) - (w - r), 0);
+          const qz = Math.max(Math.abs(a[2] + 0.15) - (1.35 - r), 0);
+          if (qx * qx + qz * qz <= r * r && a[1] <= top) c = a[2] > 0.9 ? pal.palm : pal.skin;
+        }
+        // éminence du pouce
+        if (c < 0 && ((a[0] - 2.5) / 1.9) ** 2 + ((a[1] - 3.6) / 2.7) ** 2 + ((a[2] - 0.6) / 1.35) ** 2 <= 1) c = pal.palm;
+        // doigts
+        if (c < 0) {
+          for (let f = 0; f < 4 && c < 0; f++) {
+            const ch = chains[f];
+            const fd = FINGERS[f];
+            for (let s = 0; s < 3; s++) {
+              const [d, t] = segT(a, ch[s], ch[s + 1]);
+              const rr = fd.rad[s] * (1 - 0.08 * t);
+              if (d <= rr) {
+                c = pal.skin;
+                // ongle (dos de la dernière phalange), plis des articulations, bagues
+                if (s === 2 && t > 0.45) {
+                  const dir = norm(sub(ch[3], ch[2]));
+                  const back = sub(a, add(ch[2], scale(sub(ch[3], ch[2]), t)));
+                  // côté dorsal : −Z de la phalange (perpendiculaire à l'axe, vers le dos)
+                  const dorsal = sub(cross([1, 0, 0], dir), [0, 0, 0]);
+                  if (dot(back, dorsal) < -0.35 * rr && !look.glove) c = pal.nail;
+                  void dorsal;
+                }
+                if (t < 0.12 && s > 0) c = pal.dark;
+                if (ringsOn && s === 0 && (f === 2 || f === 3) && t > 0.35 && t < 0.55) c = pal.ring;
+                break;
+              }
+            }
+          }
+        }
+        // pouce
+        if (c < 0) {
+          const th = P.thumb;
+          for (let s = 0; s < th.length - 1 && c < 0; s++) {
+            const [d, t] = segT(a, th[s], th[s + 1]);
+            const rr = (s === 0 ? 1.35 : s === 1 ? 1.12 : 1.02) * (1 - 0.06 * t);
+            if (d <= rr) c = s === 2 && t > 0.6 && !look.glove ? pal.light : pal.skin;
+          }
+        }
+        if (c >= 0) m.set(i, j, k, c);
+      }
+  // relief : jointures éclairées sur le dos de la main, dessous ombré ; chevalière ; coutures du gant
+  m.forEach((x, y, z, c) => {
+    if (c !== pal.skin) return;
+    const g: P3 = [lo[0] + (x + 0.5) * vox, lo[1] + (y + 0.5) * vox, lo[2] + (z + 0.5) * vox];
+    const a = toA(g);
+    if (a[2] < -1.0 && a[1] > 8.2 && a[1] < 9.8) return look.glove ? pal.light : pal.light;
+    if (look.glove && a[2] < -1.1 && Math.abs(a[1] - 5.5) < 3 && (Math.abs(a[0] - 1.9) < 0.35 || Math.abs(a[0]) < 0.35 || Math.abs(a[0] + 1.9) < 0.35)) return pal.seam;
+    if (look.glove && a[1] < 0.6 && a[1] > -0.4) return pal.dark;
+    if (ringsOn && a[2] < -0.9 && a[1] > 9.6 && a[1] < 10.6 && a[0] < -1.7 && a[0] > -3.6) return pal.ring;
+    return;
+  });
+  const wristA: P3 = [0, -2.4, -0.1];
+  const w = toG(wristA);
+  return { m, wrist: [w[0] / 100, w[1] / 100, w[2] / 100] };
 }
 
-/**
- * Main droite refermée sur une crosse de revolver. Repère main : axe de la poignée selon +Y
- * (index en haut), dos de la main à droite (+X), doigts autour de l'avant (−Z), pouce le long
- * du flanc gauche ; poignée de 2 × 3 voxels (x ∈ {−1, 0}, z ∈ {−1, 0, 1}), origine centrée.
- */
-function pistolHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
-  const g = new Grid(-2, 2, -3, 2, -3, 3, [0, 0.5, 0.5]);
-  const L = (y: number, rows: string[]) => g.layer(y, -2, -3, rows, pal);
-  // colonnes x : -2 (pouce, bouts des doigts), -1 0 (poignée), 1 (phalanges, paume), 2 (dos de la main)
-  // rangées z : -3 (devant) … 3 (poignet) ; entre les bouts des doigts et l'éminence du pouce,
-  // le noyer de la crosse reste visible
-  L(2, ['n....', 's....', 's....', 'sss..', 'ssss.', '.hhs.', '.....']); // pouce le long de la carcasse, palmure
-  L(1, ['.....', '..sh.', 'n..s.', 's..sh', 's..ss', '.hssa', '.....']); // index sur la détente
-  L(0, ['.....', 'nssh.', 'n..sh', '...ss', 'h..ss', '.hssa', '.sss.']); // majeur
-  L(-1, ['.....', 'naah.', 'n..gh', '...ak', 's..as', '.ssaa', '.sss.']); // annulaire (bague)
-  L(-2, ['.....', '.nsh.', '.n.gh', '...ss', 's..sk', '.ssaa', '.ss..']); // auriculaire (chevalière)
-  L(-3, ['.....', '.....', '.....', '...s.', '...sa', '..sa.', '.....']); // tranche de la main
-  return { m: g.m, wrist: g.p(0, -1, 3.5) };
+/** Copie miroir gauche/droite d'un modèle (pour la main gauche). */
+export function mirrorModelX(m: VoxelModel): VoxelModel {
+  const r = new VoxelModel(m.sx, m.sy, m.sz, m.res);
+  for (let y = 0; y < m.sy; y++)
+    for (let z = 0; z < m.sz; z++)
+      for (let x = 0; x < m.sx; x++) r.data[r.idx(m.sx - 1 - x, y, z)] = m.data[m.idx(x, y, z)];
+  r.setOrigin(m.sx - m.ox, m.oy, m.oz);
+  return r;
 }
 
-/**
- * Main droite sur le poignet d'une crosse d'arme longue (repère de l'arme) : poignet de
- * 3 × 3 voxels centré sur l'origine, doigts dessous, pouce par-dessus, index sur la détente.
- */
-function stockHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
-  const g = new Grid(-2, 3, -3, 2, -4, 4);
-  const L = (y: number, rows: string[]) => g.layer(y, -2, -4, rows, pal);
-  // colonnes x : -2 (bouts des doigts), -1..1 (poignet de crosse), 2 (paume, phalanges), 3 (dos de la main)
-  // rangées z : -4 (index sur la détente) … 4 (poignet) ; le pouce passe par-dessus
-  L(2, ['......', '......', '.nssh.', '....hs', '....hs', '....hs', '....s.', '......', '......']);
-  L(1, ['......', '......', '....ss', 'n...ss', 'n...ss', '....sk', '....ss', '....s.', '......']);
-  L(0, ['......', '......', '....ss', 's...ss', 'a...as', '....sk', '....ss', '....ss', '......']);
-  L(-1, ['......', '......', '....s.', 's...s.', 'a...a.', '....s.', '....ss', '....ss', '......']);
-  L(-2, ['..ns..', '...h..', '...ss.', '.ssh..', '.aah..', '.ssh..', '......', '......', '......']);
-  L(-3, ['......', '......', '......', '..d...', '..d...', '......', '......', '......', '......']);
-  return { m: g.m, wrist: g.p(2.5, -0.5, 3.5) };
-}
+const mirrorV = (v: Vec3): Vec3 => [-v[0], v[1], v[2]];
 
 /**
- * Main gauche en coupe sous une longuesse (repère de l'arme) : longuesse de 3 × 3 voxels
- * centrée sur l'origine, paume dessous, pouce le long du flanc gauche, doigts remontant à droite.
- */
-function supportHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
-  const g = new Grid(-2, 2, -3, 2, -4, 3);
-  const L = (y: number, rows: string[]) => g.layer(y, -2, -4, rows, pal);
-  // colonnes x : -2 (pouce couché le long du flanc gauche), -1..1 (longuesse), 2 (doigts remontant à droite)
-  // rangées z : -4 (devant) … 3 (poignet)
-  L(1, ['.....', '.....', '....n', '....n', '....n', '.....', '.....', '.....']);
-  L(0, ['.....', 'n....', '....s', '....a', '....s', '....n', '.....', '.....']);
-  L(-1, ['.....', '.....', 's...a', 's...s', 's...a', 's...s', '.....', '.....']);
-  L(-2, ['.....', '.....', '.sssh', 'ssssh', 'ssssh', 'sssss', 'sss..', '.ss..']);
-  L(-3, ['.....', '.....', '..ddd', '.dddd', '.ddkd', '.ddd.', '.ss..', '.ss..']);
-  return { m: g.m, wrist: g.p(-0.5, -2.5, 3.5) };
-}
-
-/**
- * Poing droit fermé (boxe) : phalanges vers −Z, dos de la main vers +Y, pouce replié devant
- * l'index et le majeur. Origine au centre du poing.
- */
-function fistHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
-  const g = new Grid(-2, 2, -2, 2, -4, 3);
-  const L = (y: number, rows: string[]) => g.layer(y, -2, -4, rows, pal);
-  // colonnes x : -2 (pouce), -1 index, 0 majeur, 1 annulaire, 2 auriculaire ; rangées z : -4 … 3
-  L(1, ['.....', '.ghhg', '.ssss', '.skss', '.ssss', '..ss.', '..ss.', '.....']);
-  L(0, ['.....', '.sasa', 'sssss', 'sssss', '.ssss', '.sss.', '.sss.', '.....']);
-  L(-1, ['.....', '.sn..', 'sdada', '.dddd', '.dddd', '..ss.', '..ss.', '.....']);
-  return { m: g.m, wrist: g.p(0.5, 0, 2.5) };
-}
-
-/**
- * Main droite serrée sur un manche dirigé vers −Z (couteau, matraque) : dos de la main à
- * droite, pouce par-dessus, doigts dessous et bouts des doigts à gauche. Manche de 1 × 2
- * voxels (x = 0, y ∈ {−1, 0}), origine au centre du manche.
- */
-function bladeHand(pal: HandPalette): { m: VoxelModel; wrist: Vec3 } {
-  const g = new Grid(-1, 2, -2, 1, -3, 3, [0.5, 0, 0.5]);
-  const L = (y: number, rows: string[]) => g.layer(y, -1, -3, rows, pal);
-  // colonnes x : -1 (bouts des doigts), 0 (manche), 1 (paume/phalanges), 2 (dos de la main)
-  L(1, ['....', 'nssh', '.ssh', '.ssh', '.ssh', '...s', '....']);
-  L(0, ['....', 's.ss', 's.ss', 'a.ak', 's.ss', '..ss', '....']);
-  L(-1, ['....', 's.ss', 'n.ss', 'n.as', '..ss', '..ss', '....']);
-  L(-2, ['....', '.sh.', '.sh.', '.ah.', '.sh.', '....', '....']);
-  return { m: g.m, wrist: g.p(1.5, -0.5, 2.5) };
-}
-
-/**
- * Avant-bras : poignet, manchette de chemise, manche du manteau avec son parement. Origine au
- * poignet, la manche s'étend selon +Z vers le coude ; le côté extérieur du bras est +X.
+ * Avant-bras droit (1/128 m) : poignet, poignet de chemise et bouton de manchette, manche du
+ * manteau avec son revers (Dadou : cramoisi liseré d'un fil de néon ; Even : bleu, trois
+ * boutons d'argent), plis du drap. Origine au poignet, la manche s'étend selon +Z vers le
+ * coude ; côté extérieur du bras en +X, dessus en +Y.
  */
 function forearmModel(look: ArmLook): VoxelModel {
-  // section paire (6 × 6 pour la manche) : origine au coin commun des quatre voxels centraux
-  const g = new Grid(-3, 2, -3, 2, -1, 20, [0, 0, 0.5]);
-  const pal = handPalette(look);
-  const ring = (z: number, r: number, c: number) => {
-    // octogone : carré de côté 2r privé de ses coins
-    g.fill(-r, r - 1, -r + 1, r - 2, z, z, c);
-    g.fill(-r + 1, r - 2, -r, r - 1, z, z, c);
-  };
-  // poignet (sous la manchette)
-  g.fill(-1, 0, -1, 0, -1, 0, pal.w);
-  // manchette de chemise, bouton de manchette (or pour Dadou, argent pour Even)
-  const cuff = look.cuff;
-  ring(1, 2, cuff);
-  g.paint(-2, 1, -2, -2, 1, 1, shade(cuff, 0.86));
-  g.set(1, 0, 1, look.accent);
-  g.set(1, -1, 1, look.accent);
-  // manche : section octogonale, lustre du drap dessus, ombre dessous
+  const len = Math.round(FOREARM_LENGTH / HAND_RES);
+  const m = new VoxelModel(17, 17, len + 2, HAND_RES);
+  m.setOrigin(8.5, 8.5, 1);
   const sl = look.sleeve;
-  const slHi = mix(sl, 0xa4a4b0, look.boss === 'dadou' ? 0.16 : 0.1);
-  const slDk = shade(sl, 0.72);
-  for (let z = 2; z <= 20; z++) ring(z, 3, sl);
-  g.paint(-2, 1, 2, 2, 2, 20, slHi);
-  g.paint(-2, 1, -3, -3, 2, 20, slDk);
-  // plis du drap au creux du coude
-  for (const z of [11, 15, 18]) {
-    g.paint(-3, -3, -2, 1, z, z, slDk);
-    g.paint(-2, 1, -3, -3, z, z, shade(sl, 0.6));
-    g.set(-3, 1, z + 1, slHi);
+  const slHi = mix(sl, 0xa4a4b0, look.boss === 'dadou' ? 0.14 : 0.1);
+  const slDk = shade(sl, 0.7);
+  const cuff = look.cuff;
+  const hand = look.hand;
+  for (let z = 0; z < m.sz; z++) {
+    const zz = z - 1 + 0.5; // voxels depuis le poignet
+    for (let y = 0; y < m.sy; y++)
+      for (let x = 0; x < m.sx; x++) {
+        const px = x + 0.5 - 8.5;
+        const py = y + 0.5 - 8.5;
+        // sections (demi-axes en voxels) : poignet, manchette, manche qui s'évase vers le coude
+        let c = -1;
+        if (zz < 3) {
+          if ((px / 3.6) ** 2 + (py / 3.0) ** 2 <= 1) c = look.glove ? shade(hand, 0.85) : hand;
+        } else if (zz < 7.5) {
+          if ((px / 4.6) ** 2 + (py / 4.3) ** 2 <= 1) c = Math.abs(py + 4) < 0.6 ? shade(cuff, 0.86) : cuff;
+          // bouton de manchette sur le côté extérieur
+          if (c >= 0 && px > 3.4 && Math.abs(py) < 1.2 && zz > 4.5 && zz < 6.5) c = look.accent;
+        } else {
+          const k = Math.min(1, (zz - 7.5) / 30);
+          const ax = 6.2 + k * 1.6;
+          const ay = 5.9 + k * 1.4;
+          const sq = Math.abs(px / ax) ** 2.6 + Math.abs(py / ay) ** 2.6;
+          if (sq <= 1) {
+            c = sl;
+            // revers
+            if (zz < 13.5) {
+              c = look.trim;
+              if (look.boss === 'dadou' && zz > 12.2) c = SLOT.NEON_RED;
+            } else {
+              // lustre dessus, ombre dessous, plis au creux du coude
+              if (py > ay * 0.55) c = slHi;
+              else if (py < -ay * 0.55) c = slDk;
+              const fold = (zz - 20) % 7;
+              if (zz > 20 && fold >= 0 && fold < 1 && py < ay * 0.3) c = slDk;
+            }
+          }
+          // boutons d'argent d'Even le long du côté extérieur
+          if (c >= 0 && look.boss === 'even' && px > ax - 1.2 && Math.abs(py) < 1 && [16, 19.5, 23].some((b) => Math.abs(zz - b) < 0.8)) c = look.accent;
+        }
+        if (c >= 0) m.set(x, y, z, c);
+      }
   }
-  const trim = look.trim;
-  if (look.boss === 'dadou') {
-    // revers cramoisi liseré d'un fil de néon rouge
-    g.paint(-3, 2, -3, 2, 2, 3, trim);
-    g.paint(-3, 2, -3, 2, 4, 4, SLOT.NEON_RED);
-  } else {
-    // revers bleu, trois boutons d'argent sur le côté extérieur
-    g.paint(-3, 2, -3, 2, 2, 4, trim);
-    for (const z of [6, 8, 10]) g.set(2, 0, z, look.accent);
-  }
-  return g.m;
+  return m;
 }
 
 /** Construit la main (pose donnée) et l'avant-bras d'un côté. */
 export function armModels(side: 'R' | 'L', pose: HandPose, look: ArmLook): ArmModels {
-  const pal = handPalette(look);
-  let h: { m: VoxelModel; wrist: Vec3 };
-  switch (pose) {
-    case 'pistol':
-      h = pistolHand(pal);
-      break;
-    case 'stock':
-      h = stockHand(pal);
-      break;
-    case 'support':
-      h = supportHand(pal);
-      break;
-    case 'blade':
-      h = bladeHand(pal);
-      break;
-    case 'fist':
-    default:
-      h = fistHand(pal);
-      break;
-  }
+  const h = buildHand(pose, look);
   let hand = h.m;
   let wrist = h.wrist;
   let fore = forearmModel(look);
   // la main d'appui est dessinée gauche ; les autres sont dessinées droites
   const drawnLeft = pose === 'support';
+  if (drawnLeft) {
+    hand = mirrorModelX(hand);
+    wrist = mirrorV(wrist);
+  }
   if ((side === 'L') !== drawnLeft) {
     hand = mirrorModelX(hand);
     wrist = mirrorV(wrist);
@@ -811,15 +1001,15 @@ function cloth(c: number, k = 0.28): number {
 }
 
 /** Tenue des bras d'un parrain à partir de sa tenue (couleurs de `appearanceFor`, personnalisation comprise). */
-export function armLookFor(boss: 'dadou' | 'even', outfit: { skin: number; coat: number; coat2: number; shirt: number; accent: number; vest: number }): ArmLook {
+export function armLookFor(boss: 'dadou' | 'even', outfit: { skin: number; coat: number; coat2: number; shirt: number; accent: number; vest: number; dress?: number }): ArmLook {
   if (boss === 'even') {
     return {
       boss,
-      hand: 0x2a2420,
+      hand: 0x2a2522,
       glove: true,
       sleeve: cloth(outfit.coat),
       trim: cloth(outfit.coat2),
-      cuff: mix(outfit.shirt, outfit.vest, 0.25),
+      cuff: mix(outfit.shirt, outfit.vest, 0.15),
       accent: outfit.accent,
     };
   }

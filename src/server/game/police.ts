@@ -95,9 +95,10 @@ const respawnAt = new WeakMap<Game, number>();
 function patrolRoute(g: Game, i: number): Vec2[] {
   // circuits dans les beaux quartiers de Manhattan, avec un détour par les autres
   const routes: string[][] = [
+    ['midtown', 'centralpark'],
     ['midtown', 'wallstreet'],
-    ['midtown', 'centralpark', 'harlem'],
-    ['wallstreet', 'chinatown', 'midtown'],
+    ['harlem', 'uws', 'ues'],
+    ['chinatown', 'village', 'les'],
   ];
   const districts = routes[i % routes.length];
   const pts: Vec2[] = [];

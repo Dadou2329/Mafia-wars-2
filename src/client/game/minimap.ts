@@ -6,6 +6,9 @@ import type { GameEvent, PrivateState, PublicState, Slot } from '../../shared/pr
 import { MAP_FONT_TITLE, MAP_SCALE, type CityMap } from './cityMap';
 import type { EntityStore } from './entities';
 
+/** Taille des pictogrammes dessinés dans le repère de la carte de base (réglés pour 6 px/m). */
+const K = MAP_SCALE / 6;
+
 export const OWNER_FILL: Record<number, string> = {
   [Faction.DADOU]: 'rgba(170,25,32,0.55)',
   [Faction.EVEN]: 'rgba(30,60,140,0.55)',
@@ -27,7 +30,7 @@ export function drawMinimap(
   const c = canvas.getContext('2d')!;
   const W = canvas.width;
   const H = canvas.height;
-  const radiusM = 55; // mètres visibles du centre au bord
+  const radiusM = 62; // mètres visibles du centre au bord
   const s = W / 2 / (radiusM * MAP_SCALE);
   c.save();
   // au-delà de la carte : l'eau de l'Hudson et de la baie, la nuit
@@ -58,9 +61,9 @@ export function drawMinimap(
       const hqOf = pub.hq.dadou === b.id ? 'dadou' : pub.hq.even === b.id ? 'even' : null;
       if (BUILDINGS[b.id].isKey || hqOf) {
         c.fillStyle = hqOf === 'dadou' ? '#ff5a6a' : hqOf === 'even' ? '#7fb8ff' : '#ffd23c';
-        c.font = `${28}px sans-serif`;
+        c.font = `${28 * K}px sans-serif`;
         c.textAlign = 'center';
-        c.fillText(hqOf ? '♛' : '★', ((f[0] + f[2]) / 2) * MAP_SCALE, ((f[1] + f[3]) / 2) * MAP_SCALE + 10);
+        c.fillText(hqOf ? '♛' : '★', ((f[0] + f[2]) / 2) * MAP_SCALE, ((f[1] + f[3]) / 2) * MAP_SCALE + 10 * K);
       }
     }
     // combats en cours
@@ -118,9 +121,9 @@ export function drawMinimap(
       c.arc(l.x * MAP_SCALE, l.z * MAP_SCALE, (2 + (t % 1) * 3) * MAP_SCALE, 0, Math.PI * 2);
       c.stroke();
       c.fillStyle = '#50ffaa';
-      c.font = `700 ${26}px ${MAP_FONT_TITLE}`;
+      c.font = `700 ${26 * K}px ${MAP_FONT_TITLE}`;
       c.textAlign = 'center';
-      c.fillText('$', l.x * MAP_SCALE, l.z * MAP_SCALE + 9);
+      c.fillText('$', l.x * MAP_SCALE, l.z * MAP_SCALE + 9 * K);
     }
     for (const cv of pub.convoys ?? []) {
       const col = !cv.slot ? '#ffd23c' : cv.slot === me ? '#50ffaa' : cv.slot === 'dadou' ? '#ff4a5a' : '#6fa8ff';
@@ -149,9 +152,9 @@ export function drawMinimap(
     c.arc(event.x * MAP_SCALE, event.z * MAP_SCALE, (event.kind === 'raid' ? 14 : 3 + (t % 1) * 3) * MAP_SCALE, 0, Math.PI * 2);
     c.stroke();
     c.fillStyle = event.kind === 'raid' ? '#7fa8ff' : '#ffc94a';
-    c.font = `${30}px serif`;
+    c.font = `${30 * K}px serif`;
     c.textAlign = 'center';
-    c.fillText(event.kind === 'raid' ? '⚑' : '$', event.x * MAP_SCALE, event.z * MAP_SCALE + 10);
+    c.fillText(event.kind === 'raid' ? '⚑' : '$', event.x * MAP_SCALE, event.z * MAP_SCALE + 10 * K);
   }
   c.restore();
   // repère de la cargaison hors de la mini-carte : flèche au bord

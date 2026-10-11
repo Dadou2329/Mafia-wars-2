@@ -5,6 +5,8 @@ import { ACTIONS, keyLabel, type ActionId } from '../../input/bindings';
 import { settings } from '../../settings';
 import { DISTRICT_BONUS, HQ_CAPTURE_MIN_DISTRICTS, LIEUTENANT_RECOVERY, RESPAWN_PENALTY, RESPAWN_PENALTY_MAX } from '../../../shared/constants';
 import { formatMoney } from '../../../shared/util';
+import { DISTRICTS } from '../../../shared/city/plan';
+import { leNom } from '../../../shared/french';
 import { h } from '../dom';
 import { BRAND, TITLE, button, closeOnEscape, fr, icon, shieldPointer, type IconName } from './menu';
 
@@ -83,9 +85,13 @@ function sections(): Section[] {
         ul(
           ['Prenez des ', strong('bâtiments'), '.'],
           ['Contrôlez des ', strong('quartiers'), ' : un quartier est à vous quand vous tenez tous ses bâtiments clés ★.'],
-          [`Dès que vous contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7, donnez l’assaut au `, strong('QG actuel de votre rival'), ' : le prendre, c’est gagner la partie.'],
+          [`Dès que vous contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length}, donnez l’assaut au `, strong('QG actuel de votre rival'), ' : le prendre, c’est gagner la partie.'],
         ),
-        p('Les 7 quartiers : Harlem, Central Park, Times Square, Chinatown, Wall Street, le Queens et Brooklyn.'),
+        p(
+          `Les ${DISTRICTS.length} quartiers : ${DISTRICTS.slice(0, -1)
+            .map((d) => leNom(d.name))
+            .join(', ')} et ${leNom(DISTRICTS[DISTRICTS.length - 1].name)}. Astoria et Long Island City sont dans le Queens, Williamsburg et Bushwick à Brooklyn.`,
+        ),
         p('Pour prendre un bâtiment, entrez-y avec vos hommes et restez-y tant qu’aucun défenseur ennemi n’est présent : plus vous êtes nombreux, plus la prise est rapide.'),
         p('Si la partie a une durée limitée, le parrain qui contrôle le plus de quartiers à la fin du temps l’emporte.'),
       ],

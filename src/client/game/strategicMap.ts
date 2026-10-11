@@ -41,9 +41,13 @@ import { settings } from '../settings';
 import { actionKey } from '../input/bindings';
 import { h, clear } from '../ui/dom';
 import { MAP_FONT, MAP_FONT_TITLE, MAP_SCALE } from './cityMap';
+
 import type { GameClient } from './GameClient';
 import { leNom } from '../../shared/french';
 import { GRENADE_MAX, GRENADE_PRICE } from '../../shared/grenade';
+
+/** Zoom maximal de la carte stratégique (la ville entière tient dans le cadre au zoom 1). */
+const MAX_ZOOM = 7;
 
 export type Tab = 'orders' | 'recruit' | 'lieutenants' | 'upgrades' | 'armory' | 'view';
 
@@ -303,7 +307,7 @@ export class StrategicMap {
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
       const before = this.toWorld(e.offsetX, e.offsetY);
-      this.zoom = Math.min(3.2, Math.max(1, this.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      this.zoom = Math.min(MAX_ZOOM, Math.max(1, this.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
       const after = this.toWorld(e.offsetX, e.offsetY);
       this.panX += before.x - after.x;
       this.panZ += before.z - after.z;
@@ -796,7 +800,7 @@ export class StrategicMap {
     this.stats.appendChild(item('Argent', formatMoney(p.money)));
     this.stats.appendChild(item('Revenus', `+${formatMoney(p.income)}/min`, 'c-good'));
     this.stats.appendChild(item('Hommes', `${p.men}${p.pool ? ` (${p.pool} au QG)` : ''}`));
-    this.stats.appendChild(item('Territoires', `${this.gc.pub.territories[this.gc.you]}/7`));
+    this.stats.appendChild(item('Territoires', `${this.gc.pub.territories[this.gc.you]}/${DISTRICTS.length}`));
   }
 
   private renderTabs(): void {
@@ -983,7 +987,7 @@ export class StrategicMap {
           { class: terr >= HQ_CAPTURE_MIN_DISTRICTS ? 'sm-note ok' : 'sm-note' },
           terr >= HQ_CAPTURE_MIN_DISTRICTS
             ? `Vous contrôlez ${terr} quartiers : le QG ${DE_BOSS[enemyHq]} peut être pris. Sa capture vous donnera la victoire !`
-            : `Imprenable pour l’instant : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 (vous en avez ${terr}).`,
+            : `Imprenable pour l’instant : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} (vous en avez ${terr}).`,
         ),
       );
     }

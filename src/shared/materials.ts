@@ -1,7 +1,8 @@
 // Palette des matériaux voxel du monde (New York 2085).
 // Chaque voxel stocke un identifiant de matériau (0 = air). Le client transforme cette
 // table en texture et le shader applique un motif procédural (briques, asphalte, néons…)
-// calculé à partir de la position dans le monde.
+// calculé à partir de la position dans le monde. Le paramètre `scale` choisit la variante
+// du motif (voir les commentaires de shaderChunks.ts : PATTERN_GLSL).
 
 export const enum Pattern {
   NONE = 0,
@@ -53,6 +54,8 @@ export const enum Pattern {
   SOLAR = 45,
   SIDEWALK = 46,
   WATER = 47,
+  /** Membrane d'étanchéité des toits-terrasses (lés soudés). */
+  ROOF = 48,
 }
 
 export const enum Emissive {
@@ -70,10 +73,10 @@ export interface MaterialDef {
   color: number; // sRGB 0xRRGGBB
   color2?: number; // couleur secondaire du motif (joints, rayures…)
   pattern: Pattern;
-  scale?: number; // paramètre de motif (0..255)
+  scale?: number; // variante du motif (0..255)
   emissive?: number; // couleur émissive sRGB
   emissiveMode?: Emissive;
-  spec?: number; // reflet spéculaire factice 0..1
+  spec?: number; // reflet spéculaire 0..1
   grime?: number; // salissure extérieure 0..1
   noise?: number; // variation de couleur par voxel 0..1
   /** solide pour les déplacements */
@@ -92,95 +95,127 @@ const DEFS = {
   AIR: { name: 'air', color: 0, pattern: Pattern.NONE, solid: false, lightPass: true, bulletPass: true, invisible: true },
 
   // --- Sol, rues, nature -------------------------------------------------
-  BEDROCK: { name: 'roche', color: 0x4a4744, color2: 0x3a3836, pattern: Pattern.DIRT, noise: 0.4 },
-  ASPHALT: { name: 'asphalte', color: 0x2c2e33, color2: 0x1d1f23, pattern: Pattern.ASPHALT, noise: 0.25, spec: 0.15, wettable: true },
-  ASPHALT_WORN: { name: 'asphalte usé', color: 0x34353a, color2: 0x222327, pattern: Pattern.ASPHALT, scale: 1, noise: 0.35, spec: 0.12, wettable: true },
-  LINE_WHITE: { name: 'marquage blanc', color: 0xd8d8d0, color2: 0x2c2e33, pattern: Pattern.ROAD_PAINT, noise: 0.1, wettable: true },
-  LINE_YELLOW: { name: 'marquage jaune', color: 0xe0b020, color2: 0x2c2e33, pattern: Pattern.ROAD_PAINT, noise: 0.1, wettable: true },
-  SIDEWALK: { name: 'trottoir', color: 0x7d7b78, color2: 0x5e5c59, pattern: Pattern.SIDEWALK, noise: 0.2, grime: 0.35, wettable: true },
-  SIDEWALK_DARK: { name: 'trottoir sombre', color: 0x5f5e5c, color2: 0x464543, pattern: Pattern.SIDEWALK, noise: 0.2, grime: 0.3, wettable: true },
-  CURB: { name: 'bordure', color: 0x8e8b86, color2: 0x6c6964, pattern: Pattern.CONCRETE, scale: 1, noise: 0.2, wettable: true },
-  PAVER_LED: { name: 'dalle lumineuse', color: 0x3a3f4a, color2: 0x232730, pattern: Pattern.HEX, emissive: 0x40c8ff, emissiveMode: Emissive.PULSE, spec: 0.3, wettable: true },
-  PLAZA_RED: { name: 'dalle rouge', color: 0x8a2a2e, color2: 0x5a1a1e, pattern: Pattern.SIDEWALK, noise: 0.15, spec: 0.2, wettable: true },
-  DIRT: { name: 'terre', color: 0x4a3c2e, color2: 0x3a2f24, pattern: Pattern.DIRT, noise: 0.5 },
-  GRASS: { name: 'herbe', color: 0x3f6a34, color2: 0x2c5028, pattern: Pattern.GRASS, noise: 0.5 },
-  LEAVES: { name: 'feuillage', color: 0x3a6a30, color2: 0x24461d, pattern: Pattern.FOLIAGE, noise: 0.6, lightPass: true },
-  LEAVES_DARK: { name: 'feuillage sombre', color: 0x2a4f26, color2: 0x1a3317, pattern: Pattern.FOLIAGE, noise: 0.6, lightPass: true },
-  LEAVES_PINK: { name: 'cerisier', color: 0xd88aa8, color2: 0xa85a7a, pattern: Pattern.FOLIAGE, noise: 0.5, lightPass: true },
-  HEDGE: { name: 'haie', color: 0x34522a, color2: 0x223a1a, pattern: Pattern.FOLIAGE, noise: 0.5 },
-  BARK: { name: 'écorce', color: 0x4a3a2a, color2: 0x30251b, pattern: Pattern.BARK, noise: 0.4 },
-  GRAVEL: { name: 'gravier', color: 0x7d766a, color2: 0x5f594f, pattern: Pattern.DIRT, noise: 0.7, wettable: true },
-  ROCK: { name: 'rocher de schiste', color: 0x6a6660, color2: 0x4e4a45, pattern: Pattern.ASHLAR, scale: 2, noise: 0.5 },
-  QUAY: { name: 'pierre de quai', color: 0x6a6762, color2: 0x4a4744, pattern: Pattern.ASHLAR, scale: 2, noise: 0.35, grime: 0.6 },
-  RIVERBED: { name: 'lit de la rivière', color: 0x2a2620, color2: 0x1f1c18, pattern: Pattern.DIRT, noise: 0.3 },
-  DECK_WOOD: { name: 'platelage', color: 0x6b5a45, color2: 0x3a3024, pattern: Pattern.PLANK, scale: 1, noise: 0.5, grime: 0.3, wettable: true },
+  BEDROCK: { name: 'roche', color: 0x4d4a47, color2: 0x3a3836, pattern: Pattern.DIRT, scale: 3, noise: 0.3 },
+  // enrobé sombre à granulats, rapiéçages, fissures colmatées, plaques d'égout
+  ASPHALT: { name: 'asphalte', color: 0x303237, color2: 0x1d1f23, pattern: Pattern.ASPHALT, noise: 0.03, spec: 0.16, wettable: true },
+  ASPHALT_WORN: { name: 'asphalte usé', color: 0x303237, color2: 0x1d1f23, pattern: Pattern.ASPHALT, noise: 0.03, spec: 0.16, wettable: true },
+  // marquage thermoplastique net
+  LINE_WHITE: { name: 'marquage blanc', color: 0xe8e8e2, color2: 0x303237, pattern: Pattern.ROAD_PAINT, noise: 0.02, spec: 0.3, wettable: true },
+  LINE_YELLOW: { name: 'marquage jaune', color: 0xf2b51c, color2: 0x303237, pattern: Pattern.ROAD_PAINT, noise: 0.02, spec: 0.3, wettable: true },
+  // dalles de trottoir de 1,5 m (5 pieds), bords lissés, chewing-gums
+  SIDEWALK: { name: 'trottoir', color: 0x9d9b96, color2: 0x6b6965, pattern: Pattern.SIDEWALK, noise: 0.03, spec: 0.06, grime: 0.2, wettable: true },
+  // pavés anthracite modernes (places, parvis)
+  SIDEWALK_DARK: { name: 'trottoir sombre', color: 0x64676c, color2: 0x393b3f, pattern: Pattern.SIDEWALK, scale: 1, noise: 0.03, spec: 0.1, grime: 0.15, wettable: true },
+  // bordure de granit
+  CURB: { name: 'bordure', color: 0xb5b3ae, color2: 0x5d5b58, pattern: Pattern.SIDEWALK, scale: 3, noise: 0.03, spec: 0.12, wettable: true },
+  PAVER_LED: { name: 'dalle lumineuse', color: 0x343a46, color2: 0x1a1e26, pattern: Pattern.HEX, emissive: 0x40c8ff, emissiveMode: Emissive.PULSE, spec: 0.4, wettable: true },
+  // granit rouge poli de Times Square, pastilles d'acier
+  PLAZA_RED: { name: 'dalle rouge', color: 0x7c2a2f, color2: 0x461216, pattern: Pattern.SIDEWALK, scale: 2, noise: 0.03, spec: 0.3, wettable: true },
+  DIRT: { name: 'terre', color: 0x4d3b2d, color2: 0x2f241b, pattern: Pattern.DIRT, noise: 0.35 },
+  GRASS: { name: 'herbe', color: 0x4f8442, color2: 0x33602c, pattern: Pattern.GRASS, noise: 0.3 },
+  LEAVES: { name: 'feuillage', color: 0x4b843c, color2: 0x2b5a27, pattern: Pattern.FOLIAGE, noise: 0.5, lightPass: true },
+  LEAVES_DARK: { name: 'feuillage sombre', color: 0x32702f, color2: 0x1c4420, pattern: Pattern.FOLIAGE, noise: 0.5, lightPass: true },
+  LEAVES_PINK: { name: 'cerisier', color: 0xec9fbd, color2: 0xb96c8c, pattern: Pattern.FOLIAGE, noise: 0.45, lightPass: true },
+  HEDGE: { name: 'haie', color: 0x3f6e33, color2: 0x274a20, pattern: Pattern.FOLIAGE, noise: 0.45 },
+  BARK: { name: 'écorce', color: 0x5b4737, color2: 0x3a2c22, pattern: Pattern.BARK, noise: 0.35 },
+  GRAVEL: { name: 'gravier', color: 0x8d887f, color2: 0x5c5850, pattern: Pattern.DIRT, scale: 1, noise: 0.25, wettable: true },
+  // schiste de Manhattan (feuilleté, mica, lichens)
+  ROCK: { name: 'rocher de schiste', color: 0x737270, color2: 0x4a4948, pattern: Pattern.ASHLAR, scale: 5, noise: 0.3 },
+  QUAY: { name: 'pierre de quai', color: 0x7a7873, color2: 0x4d4b48, pattern: Pattern.ASHLAR, scale: 2, noise: 0.15, grime: 0.45 },
+  RIVERBED: { name: 'lit de la rivière', color: 0x2a2620, color2: 0x1f1c18, pattern: Pattern.DIRT, scale: 3, noise: 0.3 },
+  // lames d'ipé (promenade du pont, toits-terrasses)
+  DECK_WOOD: { name: 'platelage', color: 0x8e6b4b, color2: 0x2a2018, pattern: Pattern.PLANK, scale: 1, noise: 0.2, spec: 0.1, grime: 0.2, wettable: true },
 
   // --- Murs extérieurs : brique, pierre, béton -------------------------------
-  BRICK_RED: { name: 'brique rouge', color: 0x8a3a2c, color2: 0xa89a86, pattern: Pattern.BRICK, noise: 0.35, grime: 0.55 },
-  BRICK_BROWN: { name: 'brique brune', color: 0x6a4434, color2: 0xa09280, pattern: Pattern.BRICK, noise: 0.35, grime: 0.55 },
-  BRICK_DARK: { name: 'brique sombre', color: 0x4a3530, color2: 0x6b625a, pattern: Pattern.BRICK, noise: 0.3, grime: 0.4 },
-  BRICK_YELLOW: { name: 'brique jaune', color: 0xa08a62, color2: 0xc9bea6, pattern: Pattern.BRICK, noise: 0.35, grime: 0.6 },
-  BRICK_PAINTED: { name: 'brique peinte', color: 0x2c3a4a, color2: 0x3a4858, pattern: Pattern.BRICK, noise: 0.2, grime: 0.4 },
-  BRICK_GRAFFITI: { name: 'brique taguée', color: 0x7a3a2e, color2: 0xa09280, pattern: Pattern.GRAFFITI, noise: 0.3, grime: 0.5 },
-  BROWNSTONE: { name: 'grès brun', color: 0x6a4a3a, color2: 0x56392c, pattern: Pattern.ASHLAR, noise: 0.25, grime: 0.45 },
-  LIMESTONE: { name: 'pierre calcaire', color: 0xc8bfae, color2: 0xa8a090, pattern: Pattern.ASHLAR, noise: 0.18, grime: 0.55 },
-  GRANITE: { name: 'granit', color: 0x8d8b86, color2: 0x6a6863, pattern: Pattern.ASHLAR, noise: 0.25, grime: 0.4 },
-  GRANITE_DARK: { name: 'granit noir', color: 0x3a3a3c, color2: 0x2a2a2c, pattern: Pattern.ASHLAR, noise: 0.2, spec: 0.35, grime: 0.2 },
-  CONCRETE: { name: 'béton', color: 0x8a8884, color2: 0x6e6c68, pattern: Pattern.CONCRETE, noise: 0.25, grime: 0.6 },
-  CONCRETE_DARK: { name: 'béton sombre', color: 0x55545a, color2: 0x45444a, pattern: Pattern.CONCRETE, noise: 0.25, grime: 0.5 },
-  CONCRETE_WHITE: { name: 'béton blanc', color: 0xc8c6c0, color2: 0xa8a6a0, pattern: Pattern.CONCRETE, noise: 0.15, grime: 0.4 },
-  STUCCO: { name: 'enduit', color: 0xd6ccb6, pattern: Pattern.PLASTER, noise: 0.12, grime: 0.5 },
-  STUCCO_RED: { name: 'enduit rouge', color: 0x9a2a28, pattern: Pattern.PLASTER, noise: 0.12, grime: 0.4 },
-  STUCCO_GREEN: { name: 'enduit vert jade', color: 0x2a6a5a, pattern: Pattern.PLASTER, noise: 0.12, grime: 0.4 },
-  STUCCO_YELLOW: { name: 'enduit ocre', color: 0xc89a3a, pattern: Pattern.PLASTER, noise: 0.12, grime: 0.45 },
-  METAL_PANEL: { name: 'bardage métallique', color: 0x5a6068, color2: 0x3a3f45, pattern: Pattern.METAL_PANEL, noise: 0.1, spec: 0.4, grime: 0.35 },
-  METAL_PANEL_DARK: { name: 'bardage noir', color: 0x24272c, color2: 0x15171a, pattern: Pattern.METAL_PANEL, noise: 0.08, spec: 0.5, grime: 0.2 },
-  METAL_PANEL_WHITE: { name: 'bardage blanc', color: 0xd0d4d8, color2: 0xa0a4a8, pattern: Pattern.METAL_PANEL, noise: 0.08, spec: 0.45, grime: 0.3 },
-  CORRUGATED: { name: 'tôle ondulée', color: 0x6d6a66, color2: 0x4d4a47, pattern: Pattern.CORRUGATED, noise: 0.3, spec: 0.2, grime: 0.5 },
-  CORRUGATED_BLUE: { name: 'tôle bleue', color: 0x2a4a6a, color2: 0x1a3048, pattern: Pattern.CORRUGATED, noise: 0.25, spec: 0.2, grime: 0.45 },
-  CORRUGATED_RED: { name: 'tôle rouge', color: 0x7a2a26, color2: 0x501a18, pattern: Pattern.CORRUGATED, noise: 0.25, spec: 0.2, grime: 0.45 },
-  WOOD_WALL: { name: 'bardage bois', color: 0x5e4d3b, color2: 0x3b3025, pattern: Pattern.PLANK, scale: 3, noise: 0.45, grime: 0.4 },
-  TERRACOTTA: { name: 'terre cuite', color: 0xb06a46, color2: 0x8a4a30, pattern: Pattern.ASHLAR, scale: 1, noise: 0.2, grime: 0.4 },
-  CURTAIN_BLUE: { name: 'mur-rideau bleu', color: 0x1c2a3c, color2: 0x55606c, pattern: Pattern.CURTAIN, scale: 0, emissive: 0xc8dcff, emissiveMode: Emissive.NIGHT, spec: 0.85 },
-  CURTAIN_DARK: { name: 'mur-rideau fumé', color: 0x15181d, color2: 0x3a3f46, pattern: Pattern.CURTAIN, scale: 1, emissive: 0xffd8a0, emissiveMode: Emissive.NIGHT, spec: 0.9 },
-  CURTAIN_GOLD: { name: 'mur-rideau doré', color: 0x3a3020, color2: 0x8a7040, pattern: Pattern.CURTAIN, scale: 2, emissive: 0xffe0a8, emissiveMode: Emissive.NIGHT, spec: 0.9 },
-  CURTAIN_GREEN: { name: 'mur-rideau vert', color: 0x1a302c, color2: 0x4a5e58, pattern: Pattern.CURTAIN, scale: 0, emissive: 0xd0fff0, emissiveMode: Emissive.NIGHT, spec: 0.85 },
+  // brique rouge de Harlem, appareil américain, joints gris clair nets
+  BRICK_RED: { name: 'brique rouge', color: 0x8c3e31, color2: 0xbcb7ae, pattern: Pattern.BRICK, noise: 0.08, spec: 0.04, grime: 0.3 },
+  // brique romaine longue et fine, couleur caramel (immeubles modernistes)
+  BRICK_BROWN: { name: 'brique brune', color: 0xa3704f, color2: 0xd7d0c3, pattern: Pattern.BRICK, scale: 2, noise: 0.08, spec: 0.04, grime: 0.3 },
+  // brique émaillée graphite
+  BRICK_DARK: { name: 'brique sombre', color: 0x3d3f46, color2: 0x8e9095, pattern: Pattern.BRICK, scale: 3, noise: 0.06, spec: 0.3, grime: 0.18 },
+  // brique émaillée crème (immeubles d'habitation new-yorkais)
+  BRICK_YELLOW: { name: 'brique jaune', color: 0xdacfb2, color2: 0xa29e96, pattern: Pattern.BRICK, scale: 3, noise: 0.06, spec: 0.25, grime: 0.28 },
+  // brique peinte bleu ardoise, écailles laissant voir la brique rouge (color2)
+  BRICK_PAINTED: { name: 'brique peinte', color: 0x30465a, color2: 0x8e4636, pattern: Pattern.BRICK, scale: 1, noise: 0.05, spec: 0.12, grime: 0.25 },
+  BRICK_GRAFFITI: { name: 'brique taguée', color: 0x9a4535, color2: 0xb9b4aa, pattern: Pattern.GRAFFITI, noise: 0.08, spec: 0.04, grime: 0.35 },
+  BROWNSTONE: { name: 'grès brun', color: 0x805849, color2: 0x5e3f33, pattern: Pattern.ASHLAR, scale: 6, noise: 0.08, grime: 0.3 },
+  // calcaire en grands panneaux (bandeaux, corniches, façades de prestige)
+  LIMESTONE: { name: 'pierre calcaire', color: 0xd3cab9, color2: 0xa39b8c, pattern: Pattern.ASHLAR, noise: 0.05, spec: 0.05, grime: 0.35 },
+  // granit gris moucheté
+  GRANITE: { name: 'granit', color: 0x9d9b97, color2: 0x5f5d5a, pattern: Pattern.ASHLAR, scale: 3, noise: 0.05, spec: 0.15, grime: 0.25 },
+  // granit noir poli pailleté
+  GRANITE_DARK: { name: 'granit noir', color: 0x2b2c2f, color2: 0x141517, pattern: Pattern.ASHLAR, scale: 4, noise: 0.03, spec: 0.55, grime: 0.1 },
+  // béton architectonique : banches et cônes de tirants (murs), béton ciré (sols)
+  CONCRETE: { name: 'béton', color: 0x9e9c98, color2: 0x6f6d69, pattern: Pattern.CONCRETE, noise: 0.06, grime: 0.35 },
+  // béton brut planché (murs), béton ciré sombre (sols)
+  CONCRETE_DARK: { name: 'béton sombre', color: 0x5d5e62, color2: 0x3e3f43, pattern: Pattern.CONCRETE, scale: 2, noise: 0.06, grime: 0.3 },
+  CONCRETE_WHITE: { name: 'béton blanc', color: 0xd7d5cf, color2: 0xa9a7a1, pattern: Pattern.CONCRETE, noise: 0.04, grime: 0.3 },
+  // enduits de façade (refends au rez-de-chaussée)
+  STUCCO: { name: 'enduit', color: 0xddd4bf, pattern: Pattern.PLASTER, scale: 2, noise: 0.06, grime: 0.3 },
+  STUCCO_RED: { name: 'enduit rouge', color: 0x942a29, pattern: Pattern.PLASTER, scale: 2, noise: 0.06, grime: 0.25 },
+  STUCCO_GREEN: { name: 'enduit vert jade', color: 0x237262, pattern: Pattern.PLASTER, scale: 2, noise: 0.06, grime: 0.25 },
+  STUCCO_YELLOW: { name: 'enduit ocre', color: 0xd3a43f, pattern: Pattern.PLASTER, scale: 2, noise: 0.06, grime: 0.3 },
+  // cassettes composites à fixations apparentes
+  METAL_PANEL: { name: 'bardage métallique', color: 0x7d848d, color2: 0x30343a, pattern: Pattern.METAL_PANEL, noise: 0.04, spec: 0.35, grime: 0.2 },
+  // cassettes graphite, certaines perforées ; tôle larmée au sol
+  METAL_PANEL_DARK: { name: 'bardage noir', color: 0x283039, color2: 0x0f1216, pattern: Pattern.METAL_PANEL, scale: 1, noise: 0.03, spec: 0.45, grime: 0.12 },
+  // panneaux émaillés blancs (diner rétro-futuriste)
+  METAL_PANEL_WHITE: { name: 'bardage blanc', color: 0xdfe3e6, color2: 0x8d9196, pattern: Pattern.METAL_PANEL, scale: 2, noise: 0.03, spec: 0.45, grime: 0.15 },
+  // tôle galvanisée, coulures de rouille (color2)
+  CORRUGATED: { name: 'tôle ondulée', color: 0x878b8f, color2: 0x7a5236, pattern: Pattern.CORRUGATED, noise: 0.08, spec: 0.25, grime: 0.35 },
+  CORRUGATED_BLUE: { name: 'tôle bleue', color: 0x2f5a82, color2: 0x1a2e44, pattern: Pattern.CORRUGATED, noise: 0.06, spec: 0.25, grime: 0.3 },
+  CORRUGATED_RED: { name: 'tôle rouge', color: 0x97332a, color2: 0x4e1a14, pattern: Pattern.CORRUGATED, noise: 0.06, spec: 0.25, grime: 0.3 },
+  // bardage à clin
+  WOOD_WALL: { name: 'bardage bois', color: 0x7b5b3f, color2: 0x3a2a1e, pattern: Pattern.PLANK, scale: 3, noise: 0.15, grime: 0.3 },
+  // baguettes de terre cuite émaillée (pare-soleil horizontaux)
+  TERRACOTTA: { name: 'terre cuite', color: 0xb8653f, color2: 0x3a2a24, pattern: Pattern.ASHLAR, scale: 1, noise: 0.05, spec: 0.3, grime: 0.2 },
+  // murs-rideaux : meneaux, allèges émaillées, verre irisé, bureaux éclairés (planchers à y = 3,5 k)
+  CURTAIN_BLUE: { name: 'mur-rideau bleu', color: 0x1c2b40, color2: 0x8d98a6, pattern: Pattern.CURTAIN, scale: 0, emissive: 0xd0e4ff, emissiveMode: Emissive.NIGHT, spec: 0.85 },
+  CURTAIN_DARK: { name: 'mur-rideau fumé', color: 0x13171d, color2: 0x2c3138, pattern: Pattern.CURTAIN, scale: 1, emissive: 0xffdcb0, emissiveMode: Emissive.NIGHT, spec: 0.9 },
+  CURTAIN_GOLD: { name: 'mur-rideau doré', color: 0x302719, color2: 0xb8964e, pattern: Pattern.CURTAIN, scale: 2, emissive: 0xffe2b0, emissiveMode: Emissive.NIGHT, spec: 0.9 },
+  CURTAIN_GREEN: { name: 'mur-rideau vert', color: 0x16312d, color2: 0x7e9c96, pattern: Pattern.CURTAIN, scale: 0, emissive: 0xd8fff0, emissiveMode: Emissive.NIGHT, spec: 0.85 },
 
   // --- Menuiseries, métaux -------------------------------------------------------
-  PAINT_GREEN: { name: 'peinture verte', color: 0x1f4a35, pattern: Pattern.PAINT, noise: 0.12, spec: 0.25, grime: 0.25 },
-  PAINT_RED: { name: 'peinture rouge', color: 0x8a1f22, pattern: Pattern.PAINT, noise: 0.12, spec: 0.25, grime: 0.25 },
-  PAINT_NAVY: { name: 'peinture bleu nuit', color: 0x1d2f52, pattern: Pattern.PAINT, noise: 0.12, spec: 0.25, grime: 0.25 },
-  PAINT_BLACK: { name: 'peinture noire', color: 0x1c1b1a, pattern: Pattern.PAINT, noise: 0.1, spec: 0.3, grime: 0.15 },
-  PAINT_CREAM: { name: 'peinture crème', color: 0xd8ccb0, pattern: Pattern.PAINT, noise: 0.1, spec: 0.2, grime: 0.4 },
-  PAINT_YELLOW: { name: 'peinture jaune taxi', color: 0xe8b818, pattern: Pattern.PAINT, noise: 0.08, spec: 0.35, grime: 0.2 },
-  PAINT_TEAL: { name: 'peinture sarcelle', color: 0x245a58, pattern: Pattern.PAINT, noise: 0.12, spec: 0.25, grime: 0.25 },
-  PAINT_WHITE: { name: 'peinture blanche', color: 0xe4e2dc, pattern: Pattern.PAINT, noise: 0.06, spec: 0.2, grime: 0.3 },
-  PAINT_GREY: { name: 'peinture grise', color: 0x6a6e74, pattern: Pattern.PAINT, noise: 0.08, spec: 0.2, grime: 0.3 },
-  FRAME_DARK: { name: 'menuiserie sombre', color: 0x22252a, pattern: Pattern.PAINT, noise: 0.06, spec: 0.3 },
-  FRAME_WHITE: { name: 'menuiserie blanche', color: 0xd9d6cf, pattern: Pattern.PAINT, noise: 0.06, grime: 0.35 },
-  IRON: { name: 'acier noir', color: 0x1e2024, pattern: Pattern.METAL, spec: 0.5, noise: 0.1 },
-  STEEL: { name: 'acier brossé', color: 0x7a8088, pattern: Pattern.METAL, spec: 0.6, noise: 0.08 },
-  STEEL_BLUE: { name: 'acier peint bleu', color: 0x3a5a7a, pattern: Pattern.METAL, spec: 0.4, noise: 0.1, grime: 0.3 },
-  STEEL_GREEN: { name: 'acier vert de pont', color: 0x5a7a6a, pattern: Pattern.METAL, spec: 0.3, noise: 0.15, grime: 0.4 },
-  CHROME: { name: 'chrome', color: 0xc8ccd2, pattern: Pattern.METAL, spec: 0.95, noise: 0.04 },
-  BRASS: { name: 'laiton', color: 0xb08d3c, pattern: Pattern.METAL, spec: 0.8, noise: 0.1 },
-  GOLD: { name: 'dorure', color: 0xd4a640, pattern: Pattern.METAL, spec: 0.9, noise: 0.08 },
-  SILVER: { name: 'argent', color: 0xc9d1dc, pattern: Pattern.METAL, spec: 0.9, noise: 0.06 },
-  COPPER_GREEN: { name: 'cuivre vert-de-gris', color: 0x5f9a86, color2: 0x4a7c6b, pattern: Pattern.METAL, spec: 0.2, noise: 0.35 },
-  GRATE: { name: 'caillebotis', color: 0x3a3d42, color2: 0x15161a, pattern: Pattern.GRATE, spec: 0.35, noise: 0.1 },
-  RUST: { name: 'rouille', color: 0x7a4a2a, color2: 0x5a3018, pattern: Pattern.DIRT, noise: 0.5 },
-  LEAD: { name: 'zinc de toiture', color: 0x5b5f63, pattern: Pattern.METAL, spec: 0.2, noise: 0.2, wettable: true },
-  ROOF_TAR: { name: 'toit goudronné', color: 0x2e2e30, color2: 0x232325, pattern: Pattern.ASPHALT, scale: 2, noise: 0.3, wettable: true },
-  ROOF_GRAVEL: { name: 'toit gravillonné', color: 0x6a6660, color2: 0x55514c, pattern: Pattern.DIRT, noise: 0.6, wettable: true },
-  SOLAR: { name: 'panneau solaire', color: 0x14203a, color2: 0x8090a8, pattern: Pattern.SOLAR, spec: 0.85 },
-  WATER_TANK: { name: 'douelles de réservoir', color: 0x6a5240, color2: 0x45362a, pattern: Pattern.PLANK, scale: 4, noise: 0.35, grime: 0.5 },
+  PAINT_GREEN: { name: 'peinture verte', color: 0x1f5a41, pattern: Pattern.PAINT, noise: 0.05, spec: 0.25, grime: 0.2 },
+  PAINT_RED: { name: 'peinture rouge', color: 0xa3232b, pattern: Pattern.PAINT, noise: 0.05, spec: 0.25, grime: 0.2 },
+  PAINT_NAVY: { name: 'peinture bleu nuit', color: 0x1e3561, pattern: Pattern.PAINT, noise: 0.05, spec: 0.25, grime: 0.2 },
+  PAINT_BLACK: { name: 'peinture noire', color: 0x1d1e21, pattern: Pattern.PAINT, noise: 0.04, spec: 0.3, grime: 0.12 },
+  PAINT_CREAM: { name: 'peinture crème', color: 0xe3d7bd, pattern: Pattern.PAINT, noise: 0.04, spec: 0.2, grime: 0.3 },
+  PAINT_YELLOW: { name: 'peinture jaune taxi', color: 0xf2bf1b, pattern: Pattern.PAINT, noise: 0.04, spec: 0.35, grime: 0.15 },
+  PAINT_TEAL: { name: 'peinture sarcelle', color: 0x1f6b67, pattern: Pattern.PAINT, noise: 0.05, spec: 0.25, grime: 0.2 },
+  PAINT_WHITE: { name: 'peinture blanche', color: 0xebe9e4, pattern: Pattern.PAINT, noise: 0.03, spec: 0.2, grime: 0.25 },
+  PAINT_GREY: { name: 'peinture grise', color: 0x6f747b, pattern: Pattern.PAINT, noise: 0.04, spec: 0.2, grime: 0.25 },
+  FRAME_DARK: { name: 'menuiserie sombre', color: 0x25282d, pattern: Pattern.PAINT, noise: 0.03, spec: 0.3 },
+  FRAME_WHITE: { name: 'menuiserie blanche', color: 0xe0ddd6, pattern: Pattern.PAINT, noise: 0.03, grime: 0.25 },
+  IRON: { name: 'acier noir', color: 0x212429, pattern: Pattern.METAL, spec: 0.4, noise: 0.05 },
+  STEEL: { name: 'acier brossé', color: 0x8b919a, pattern: Pattern.METAL, spec: 0.6, noise: 0.04 },
+  STEEL_BLUE: { name: 'acier peint bleu', color: 0x3d6287, pattern: Pattern.METAL, spec: 0.4, noise: 0.05, grime: 0.25 },
+  // acier rivé des ponts
+  STEEL_GREEN: { name: 'acier vert de pont', color: 0x6a8f7e, pattern: Pattern.METAL, scale: 2, spec: 0.3, noise: 0.08, grime: 0.3 },
+  CHROME: { name: 'chrome', color: 0xd3d7dd, pattern: Pattern.METAL, scale: 3, spec: 0.95, noise: 0.02 },
+  BRASS: { name: 'laiton', color: 0xc39b48, pattern: Pattern.METAL, scale: 3, spec: 0.8, noise: 0.05 },
+  GOLD: { name: 'dorure', color: 0xdcae4a, pattern: Pattern.METAL, scale: 3, spec: 0.9, noise: 0.04 },
+  SILVER: { name: 'argent', color: 0xd0d7e0, pattern: Pattern.METAL, scale: 3, spec: 0.9, noise: 0.03 },
+  // vert-de-gris en coulures, cuivre qui affleure (color2)
+  COPPER_GREEN: { name: 'cuivre vert-de-gris', color: 0x5fa48c, color2: 0x8a5a36, pattern: Pattern.METAL, scale: 1, spec: 0.15, noise: 0.2 },
+  GRATE: { name: 'caillebotis', color: 0x3c4046, color2: 0x0c0d0f, pattern: Pattern.GRATE, spec: 0.35, noise: 0.05 },
+  RUST: { name: 'rouille', color: 0x8a4a26, color2: 0x5a2e16, pattern: Pattern.DIRT, scale: 2, noise: 0.35 },
+  // zinc à joints debout
+  LEAD: { name: 'zinc de toiture', color: 0x6a7076, pattern: Pattern.METAL, scale: 4, spec: 0.25, noise: 0.08, wettable: true },
+  // membrane claire (toit frais) en lés soudés
+  ROOF_TAR: { name: 'toit goudronné', color: 0x92979d, color2: 0x767a80, pattern: Pattern.ROOF, noise: 0.03, spec: 0.08, wettable: true },
+  ROOF_GRAVEL: { name: 'toit gravillonné', color: 0x908b83, color2: 0x67625b, pattern: Pattern.DIRT, scale: 1, noise: 0.2, wettable: true },
+  SOLAR: { name: 'panneau solaire', color: 0x162544, color2: 0xa4b0c4, pattern: Pattern.SOLAR, spec: 0.85 },
+  // douelles verticales de cèdre (châteaux d'eau)
+  WATER_TANK: { name: 'douelles de réservoir', color: 0x7c5b41, color2: 0x3a2a1e, pattern: Pattern.PLANK, scale: 6, noise: 0.2, grime: 0.4 },
 
   // --- Vitrages -----------------------------------------------------------------------
-  GLASS: { name: 'vitre', color: 0x20293a, pattern: Pattern.GLASS, spec: 0.9, lightPass: true, bulletPass: true },
-  GLASS_LIT: { name: 'vitre éclairée', color: 0x3a3428, pattern: Pattern.GLASS, spec: 0.6, emissive: 0xffc890, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
-  GLASS_COOL: { name: 'vitre éclairée froide', color: 0x28323a, pattern: Pattern.GLASS, spec: 0.7, emissive: 0xb8d8ff, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
-  GLASS_SHOP: { name: 'vitrine', color: 0x343028, pattern: Pattern.GLASS, spec: 0.7, emissive: 0xffe0b8, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
-  GLASS_CLEAR: { name: 'baie vitrée', color: 0x2a3540, pattern: Pattern.GLASS, scale: 1, spec: 0.95, lightPass: true, bulletPass: true },
+  GLASS: { name: 'vitre', color: 0x1e2633, pattern: Pattern.GLASS, spec: 0.9, lightPass: true, bulletPass: true },
+  GLASS_LIT: { name: 'vitre éclairée', color: 0x2d2b27, pattern: Pattern.GLASS, spec: 0.6, emissive: 0xffc890, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
+  GLASS_COOL: { name: 'vitre éclairée froide', color: 0x272e37, pattern: Pattern.GLASS, spec: 0.7, emissive: 0xc0dcff, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
+  // vitrine : rayonnages garnis visibles en profondeur
+  GLASS_SHOP: { name: 'vitrine', color: 0x2f2b25, pattern: Pattern.GLASS, scale: 2, spec: 0.7, emissive: 0xffe4c0, emissiveMode: Emissive.NIGHT, lightPass: true, bulletPass: true },
+  GLASS_CLEAR: { name: 'baie vitrée', color: 0x25313b, pattern: Pattern.GLASS, scale: 1, spec: 0.95, lightPass: true, bulletPass: true },
 
   // --- Néons, écrans, lumières --------------------------------------------------------
   NEON_PINK: { name: 'néon rose', color: 0xff3cc8, pattern: Pattern.NEON, emissive: 0xff3cc8, emissiveMode: Emissive.NEON, lightPass: true },
@@ -206,61 +241,78 @@ const DEFS = {
   FIRE: { name: 'feu', color: 0xff7a1a, pattern: Pattern.FIRE, emissive: 0xff8a2a, emissiveMode: Emissive.FIRE, lightPass: true, bulletPass: true },
 
   // --- Intérieurs -------------------------------------------------------------------
-  FLOOR_OAK: { name: 'plancher de chêne', color: 0x7a5634, color2: 0x4e3520, pattern: Pattern.PLANK, noise: 0.35 },
-  FLOOR_DARK: { name: 'plancher sombre', color: 0x4a3322, color2: 0x2e1f14, pattern: Pattern.PLANK, noise: 0.35 },
-  FLOOR_WORN: { name: 'plancher usé', color: 0x6a5a46, color2: 0x45392b, pattern: Pattern.PLANK, noise: 0.5 },
-  FLOOR_WALNUT: { name: 'parquet de noyer', color: 0x5a3a24, color2: 0x3c2516, pattern: Pattern.PLANK, scale: 4, noise: 0.2, spec: 0.35 },
-  PARQUET: { name: 'parquet', color: 0x8a6238, color2: 0x6a4626, pattern: Pattern.PARQUET, noise: 0.25, spec: 0.3 },
-  LINOLEUM: { name: 'linoléum', color: 0x8a8a7a, color2: 0x6a6a5a, pattern: Pattern.CHECKER, spec: 0.3, noise: 0.15 },
-  CHECKER: { name: 'carrelage damier', color: 0xe8e2d4, color2: 0x26231f, pattern: Pattern.CHECKER, spec: 0.4 },
-  TILE_WHITE: { name: 'carreaux de métro', color: 0xe6e4dc, color2: 0x9a9890, pattern: Pattern.TILE, spec: 0.45, noise: 0.08 },
-  TILE_GREEN: { name: 'carreaux verts', color: 0x3a6a5a, color2: 0x2a4a40, pattern: Pattern.TILE, spec: 0.45, noise: 0.08 },
-  TILE_DARK: { name: 'carrelage sombre', color: 0x2a2c30, color2: 0x1a1c20, pattern: Pattern.TILE, scale: 1, spec: 0.5, noise: 0.08 },
-  TERRAZZO: { name: 'terrazzo', color: 0xc8c2b6, color2: 0x6a645a, pattern: Pattern.TERRAZZO, spec: 0.45 },
-  TERRAZZO_DARK: { name: 'terrazzo noir', color: 0x2e2c2a, color2: 0x9a948a, pattern: Pattern.TERRAZZO, spec: 0.5 },
-  MARBLE: { name: 'marbre blanc', color: 0xe9e6df, color2: 0xa9a49b, pattern: Pattern.MARBLE, spec: 0.6 },
-  MARBLE_BLACK: { name: 'marbre noir', color: 0x2a2725, color2: 0x6a645e, pattern: Pattern.MARBLE, spec: 0.6 },
-  MARBLE_GREEN: { name: 'marbre vert', color: 0x2a4a3e, color2: 0x8aa89a, pattern: Pattern.MARBLE, spec: 0.6 },
-  CARPET_RED: { name: 'moquette rouge', color: 0x7a1e22, color2: 0xc9a24a, pattern: Pattern.CARPET, noise: 0.1 },
-  CARPET_BLUE: { name: 'moquette bleue', color: 0x22305a, color2: 0xb8a46a, pattern: Pattern.CARPET, noise: 0.1 },
-  CARPET_GREY: { name: 'moquette grise', color: 0x4a4c50, color2: 0x5a5c62, pattern: Pattern.CARPET, noise: 0.12 },
-  CARPET_PURPLE: { name: 'moquette violette', color: 0x3a1e4a, color2: 0xc840ff, pattern: Pattern.CARPET, noise: 0.1 },
-  RUBBER: { name: 'sol caoutchouc', color: 0x2a2a2c, color2: 0x3a3a3e, pattern: Pattern.RUBBER, noise: 0.15 },
-  WP_RED: { name: 'tenture rouge', color: 0x6e1c22, color2: 0x8f3036, pattern: Pattern.DAMASK, noise: 0.05 },
-  WP_BLUE: { name: 'tenture bleue', color: 0x283b63, color2: 0x3c5486, pattern: Pattern.DAMASK, noise: 0.05 },
+  // parquet de chêne en lames larges
+  FLOOR_OAK: { name: 'plancher de chêne', color: 0x9b7853, color2: 0x5a3d24, pattern: Pattern.PLANK, noise: 0.12, spec: 0.22 },
+  // chêne fumé
+  FLOOR_DARK: { name: 'plancher sombre', color: 0x4f3727, color2: 0x2a1b12, pattern: Pattern.PLANK, noise: 0.12, spec: 0.25 },
+  // plancher usé de la planque : éraflures, taches
+  FLOOR_WORN: { name: 'plancher usé', color: 0x77634b, color2: 0x3e3226, pattern: Pattern.PLANK, scale: 7, noise: 0.25 },
+  // noyer en chevrons (luxe)
+  FLOOR_WALNUT: { name: 'parquet de noyer', color: 0x6b452a, color2: 0x3e2616, pattern: Pattern.PARQUET, scale: 1, noise: 0.08, spec: 0.4 },
+  // chêne miel en chevrons
+  PARQUET: { name: 'parquet', color: 0x9e703f, color2: 0x6a4626, pattern: Pattern.PARQUET, noise: 0.08, spec: 0.3 },
+  // dalles vinyle mouchetées
+  LINOLEUM: { name: 'linoléum', color: 0x9b9b8d, color2: 0x86867a, pattern: Pattern.CHECKER, scale: 1, spec: 0.25, noise: 0.06 },
+  CHECKER: { name: 'carrelage damier', color: 0xede7db, color2: 0x1f1d1c, pattern: Pattern.CHECKER, spec: 0.45, noise: 0.03 },
+  TILE_WHITE: { name: 'carreaux de métro', color: 0xedebe4, color2: 0xa29f97, pattern: Pattern.TILE, spec: 0.5, noise: 0.03 },
+  TILE_GREEN: { name: 'carreaux verts', color: 0x2f7a66, color2: 0x1e4a3e, pattern: Pattern.TILE, spec: 0.5, noise: 0.03 },
+  TILE_DARK: { name: 'carrelage sombre', color: 0x2b2e34, color2: 0x15171a, pattern: Pattern.TILE, scale: 1, spec: 0.5, noise: 0.03 },
+  TERRAZZO: { name: 'terrazzo', color: 0xd3cdc1, color2: 0x5f5a52, pattern: Pattern.TERRAZZO, spec: 0.45, noise: 0.03 },
+  TERRAZZO_DARK: { name: 'terrazzo noir', color: 0x2d2c2d, color2: 0xa39d92, pattern: Pattern.TERRAZZO, spec: 0.5, noise: 0.03 },
+  // marbre blanc à joints de laiton
+  MARBLE: { name: 'marbre blanc', color: 0xefece6, color2: 0x9a958d, pattern: Pattern.MARBLE, spec: 0.65, noise: 0.02 },
+  // nero marquina : noir veiné de blanc
+  MARBLE_BLACK: { name: 'marbre noir', color: 0x201f21, color2: 0xd8d4cc, pattern: Pattern.MARBLE, scale: 1, spec: 0.65, noise: 0.02 },
+  MARBLE_GREEN: { name: 'marbre vert', color: 0x23483c, color2: 0x9cbcae, pattern: Pattern.MARBLE, spec: 0.65, noise: 0.02 },
+  // moquettes : treillis art déco à fils d'or (Dadou) ou d'argent (Even), dalles de bureau, VIP néon
+  CARPET_RED: { name: 'moquette rouge', color: 0x6a1520, color2: 0xc9a24a, pattern: Pattern.CARPET, noise: 0.04 },
+  CARPET_BLUE: { name: 'moquette bleue', color: 0x1c2b55, color2: 0xaab6c8, pattern: Pattern.CARPET, noise: 0.04 },
+  CARPET_GREY: { name: 'moquette grise', color: 0x4d5259, color2: 0x5d636b, pattern: Pattern.CARPET, scale: 1, noise: 0.04 },
+  CARPET_PURPLE: { name: 'moquette violette', color: 0x2d1641, color2: 0xc048ff, pattern: Pattern.CARPET, scale: 2, noise: 0.04 },
+  // sol de salle de sport en caoutchouc à paillettes bleues
+  RUBBER: { name: 'sol caoutchouc', color: 0x2a2b2e, color2: 0x4a78c8, pattern: Pattern.RUBBER, noise: 0.08 },
+  // revêtements muraux : panneaux tendus à joints métalliques (cramoisi et or, marine et argent)
+  WP_RED: { name: 'tenture rouge', color: 0x6e1620, color2: 0xc9a24a, pattern: Pattern.DAMASK, noise: 0.03 },
+  WP_BLUE: { name: 'tenture bleue', color: 0x1b2b50, color2: 0xb4bfd0, pattern: Pattern.DAMASK, noise: 0.03 },
   WP_GREEN: { name: 'papier peint vert', color: 0x3d5a3f, color2: 0x587a52, pattern: Pattern.STRIPES, noise: 0.05 },
-  WP_GOLD: { name: 'papier peint doré', color: 0x8a6a3a, color2: 0xb08a4a, pattern: Pattern.DAMASK, noise: 0.05 },
-  WP_FADED: { name: 'papier peint défraîchi', color: 0x8e8470, color2: 0x9c927d, pattern: Pattern.DAMASK, noise: 0.15 },
-  WP_BLACK: { name: 'tenture noire', color: 0x1a1a1e, color2: 0x2e2a30, pattern: Pattern.DAMASK, noise: 0.05 },
-  PLASTER: { name: 'plâtre', color: 0xd6d0c2, pattern: Pattern.PLASTER, noise: 0.08 },
-  PLASTER_WHITE: { name: 'plâtre blanc', color: 0xe8e6e0, pattern: Pattern.PLASTER, noise: 0.05 },
-  PLASTER_DIRTY: { name: 'plâtre sale', color: 0x9a927e, pattern: Pattern.PLASTER, noise: 0.25 },
-  PLASTER_GREY: { name: 'plâtre gris', color: 0x8a8a88, pattern: Pattern.PLASTER, noise: 0.1 },
-  PLASTER_DARK: { name: 'plâtre anthracite', color: 0x34363a, pattern: Pattern.PLASTER, noise: 0.06 },
-  PANEL_DARK: { name: 'lambris sombre', color: 0x3e2a1c, color2: 0x2a1c12, pattern: Pattern.PANEL, noise: 0.15, spec: 0.2 },
-  PANEL_LIGHT: { name: 'lambris clair', color: 0x7a5a3a, color2: 0x5c4128, pattern: Pattern.PANEL, noise: 0.15, spec: 0.2 },
-  SLATS_WOOD: { name: 'claustra bois', color: 0x8a6440, color2: 0x4a3420, pattern: Pattern.SLATS, noise: 0.1, spec: 0.2 },
-  SLATS_DARK: { name: 'claustra noir', color: 0x2a2420, color2: 0x120e0c, pattern: Pattern.SLATS, noise: 0.1, spec: 0.3 },
-  HEX_PANEL: { name: 'panneaux hexagonaux', color: 0x2a2e36, color2: 0x15181d, pattern: Pattern.HEX, spec: 0.4 },
-  CEILING: { name: 'plafond', color: 0xd0cbc0, pattern: Pattern.PLASTER, noise: 0.06 },
-  CEILING_DARK: { name: 'plafond sombre', color: 0x2a2a2e, pattern: Pattern.PLASTER, noise: 0.06 },
-  CEILING_PANEL: { name: 'faux plafond', color: 0xc8c8c4, color2: 0x9a9a96, pattern: Pattern.TILE, scale: 2, noise: 0.05 },
-  BEAM: { name: 'poutre', color: 0x3a2a1d, color2: 0x26190f, pattern: Pattern.PLANK, scale: 2, noise: 0.3 },
-  MAHOGANY: { name: 'acajou', color: 0x4f2318, color2: 0x36150d, pattern: Pattern.PLANK, scale: 4, noise: 0.2, spec: 0.4 },
-  WALNUT: { name: 'noyer', color: 0x5a3a24, color2: 0x3c2516, pattern: Pattern.PLANK, scale: 4, noise: 0.2, spec: 0.35 },
-  FELT: { name: 'feutre vert', color: 0x1f5a3a, pattern: Pattern.CLOTH, noise: 0.08 },
+  // soie champagne à éventails art déco
+  WP_GOLD: { name: 'papier peint doré', color: 0xb39b70, color2: 0xe2cc98, pattern: Pattern.DAMASK, scale: 1, noise: 0.03 },
+  // papier peint des années 1970, passé et taché
+  WP_FADED: { name: 'papier peint défraîchi', color: 0x8f927f, color2: 0xb3aa86, pattern: Pattern.DAMASK, scale: 2, noise: 0.08 },
+  // capitons noirs (club)
+  WP_BLACK: { name: 'tenture noire', color: 0x1a1a1e, color2: 0x2f2c35, pattern: Pattern.DAMASK, scale: 3, noise: 0.03 },
+  PLASTER: { name: 'plâtre', color: 0xddd8cc, pattern: Pattern.PLASTER, noise: 0.04 },
+  PLASTER_WHITE: { name: 'plâtre blanc', color: 0xefede8, pattern: Pattern.PLASTER, noise: 0.03 },
+  // auréoles d'humidité, coulures (planque)
+  PLASTER_DIRTY: { name: 'plâtre sale', color: 0xa69e89, pattern: Pattern.PLASTER, scale: 1, noise: 0.12 },
+  PLASTER_GREY: { name: 'plâtre gris', color: 0x8f8f8d, pattern: Pattern.PLASTER, noise: 0.05 },
+  PLASTER_DARK: { name: 'plâtre anthracite', color: 0x35383d, pattern: Pattern.PLASTER, noise: 0.04 },
+  // placages affleurants à joints creux
+  PANEL_DARK: { name: 'lambris sombre', color: 0x4a3121, color2: 0x1e140d, pattern: Pattern.PANEL, noise: 0.05, spec: 0.25 },
+  PANEL_LIGHT: { name: 'lambris clair', color: 0x9b7751, color2: 0x4a3420, pattern: Pattern.PANEL, noise: 0.05, spec: 0.2 },
+  SLATS_WOOD: { name: 'claustra bois', color: 0x8c6642, color2: 0x4a3420, pattern: Pattern.SLATS, noise: 0.05, spec: 0.2 },
+  SLATS_DARK: { name: 'claustra noir', color: 0x2b2521, color2: 0x120e0c, pattern: Pattern.SLATS, noise: 0.05, spec: 0.3 },
+  HEX_PANEL: { name: 'panneaux hexagonaux', color: 0x2d323b, color2: 0x15181d, pattern: Pattern.HEX, spec: 0.4, noise: 0.03 },
+  CEILING: { name: 'plafond', color: 0xd9d5cb, pattern: Pattern.PLASTER, noise: 0.03 },
+  CEILING_DARK: { name: 'plafond sombre', color: 0x2b2c30, pattern: Pattern.PLASTER, noise: 0.03 },
+  CEILING_PANEL: { name: 'faux plafond', color: 0xd1d1cd, color2: 0x9a9a96, pattern: Pattern.TILE, scale: 2, noise: 0.03 },
+  BEAM: { name: 'poutre', color: 0x4b3525, color2: 0x26190f, pattern: Pattern.PLANK, scale: 2, noise: 0.2 },
+  MAHOGANY: { name: 'acajou', color: 0x5b2719, color2: 0x36150d, pattern: Pattern.PLANK, scale: 4, noise: 0.1, spec: 0.45 },
+  WALNUT: { name: 'noyer', color: 0x5f3e27, color2: 0x3c2516, pattern: Pattern.PLANK, scale: 4, noise: 0.1, spec: 0.4 },
+  FELT: { name: 'feutre vert', color: 0x1f5a3a, pattern: Pattern.CLOTH, noise: 0.05 },
   BOOKS: { name: 'livres', color: 0x6a2a2a, pattern: Pattern.BOOKS, noise: 0.1 },
-  CRATE: { name: 'caisse', color: 0x8a6a42, color2: 0x5e4428, pattern: Pattern.PLANK, scale: 5, noise: 0.35 },
-  POSTER: { name: 'affiches', color: 0xd8cfb5, color2: 0x2a2a2a, pattern: Pattern.POSTER, noise: 0.1, grime: 0.3 },
-  CLOTH_WHITE: { name: 'tissu blanc', color: 0xe8e2d4, pattern: Pattern.CLOTH, noise: 0.05 },
-  AWNING_RED: { name: 'auvent rouge', color: 0x8a2a24, color2: 0x6a1a18, pattern: Pattern.AWNING, noise: 0.1 },
-  AWNING_GREEN: { name: 'auvent vert', color: 0x2a5a3a, color2: 0x1a3a26, pattern: Pattern.AWNING, noise: 0.1 },
-  AWNING_BLUE: { name: 'auvent bleu', color: 0x24406a, color2: 0x162a48, pattern: Pattern.AWNING, noise: 0.1 },
-  AWNING_BLACK: { name: 'auvent noir', color: 0x1e1e22, color2: 0x2e2e34, pattern: Pattern.AWNING, noise: 0.1 },
+  CRATE: { name: 'caisse', color: 0x9b7b4f, color2: 0x5e4428, pattern: Pattern.PLANK, scale: 5, noise: 0.25 },
+  // affiches collées (collage coloré)
+  POSTER: { name: 'affiches', color: 0xe3ddcc, color2: 0x1a1a1a, pattern: Pattern.POSTER, noise: 0.05, grime: 0.25 },
+  CLOTH_WHITE: { name: 'tissu blanc', color: 0xece7db, pattern: Pattern.CLOTH, noise: 0.03 },
+  AWNING_RED: { name: 'auvent rouge', color: 0xa3292a, color2: 0xebe4d6, pattern: Pattern.AWNING, noise: 0.05 },
+  AWNING_GREEN: { name: 'auvent vert', color: 0x22704a, color2: 0xebe4d6, pattern: Pattern.AWNING, noise: 0.05 },
+  AWNING_BLUE: { name: 'auvent bleu', color: 0x24477a, color2: 0xebe4d6, pattern: Pattern.AWNING, noise: 0.05 },
+  AWNING_BLACK: { name: 'auvent noir', color: 0x1e1e22, color2: 0x3a3a42, pattern: Pattern.AWNING, noise: 0.05 },
 
   // --- Couleurs de faction (décor statique des logements) ---------------------------------
-  CLOTH_RED: { name: 'drap cramoisi', color: 0x8e1b22, pattern: Pattern.CLOTH, noise: 0.08 },
-  CLOTH_NAVY: { name: 'drap bleu marine', color: 0x1d3461, pattern: Pattern.CLOTH, noise: 0.08 },
+  CLOTH_RED: { name: 'drap cramoisi', color: 0x8e1b22, pattern: Pattern.CLOTH, noise: 0.05 },
+  CLOTH_NAVY: { name: 'drap bleu marine', color: 0x1d3461, pattern: Pattern.CLOTH, noise: 0.05 },
 
   // --- Eau des fontaines (peu profonde : on y marche) -----------------------------------
   FOUNTAIN_WATER: { name: 'eau de fontaine', color: 0x16405a, color2: 0x2a6a8a, pattern: Pattern.NONE, spec: 0.95, emissive: 0x1e5a7a, emissiveMode: Emissive.PULSE, solid: false, lightPass: true, bulletPass: true },
@@ -270,6 +322,24 @@ const DEFS = {
   COLLIDE: { name: 'collision invisible', color: 0, pattern: Pattern.NONE, invisible: true, lightPass: true, bulletPass: true },
   /** Garde-corps invisible : bloque la marche mais ni la vue ni les balles. */
   BARRIER: { name: 'barrière invisible', color: 0, pattern: Pattern.NONE, invisible: true, lightPass: true, bulletPass: true },
+
+  // --- 2085 : revêtements supplémentaires (disponibles pour le générateur) ---------------
+  /** Céramique de façade grand format (120 × 60), blanc brillant, joints fins. */
+  CLAD_CERAMIC: { name: 'céramique de façade', color: 0xe8e6e1, color2: 0x9a9892, pattern: Pattern.ASHLAR, scale: 7, noise: 0.02, spec: 0.35, grime: 0.15 },
+  /** Tôle perforée (pare-soleil, garde-corps, habillage de parkings). */
+  METAL_PERFORATED: { name: 'tôle perforée', color: 0x8c929b, color2: 0x1a1c1f, pattern: Pattern.METAL_PANEL, scale: 3, noise: 0.03, spec: 0.4, grime: 0.12 },
+  /** Panneaux de composite carbone (sergé), accents 2085. */
+  CARBON_PANEL: { name: 'panneau carbone', color: 0x272b33, color2: 0x101113, pattern: Pattern.METAL_PANEL, scale: 4, noise: 0.02, spec: 0.55 },
+  /** Verre holographique : mur-rideau à reflets irisés marqués. */
+  GLASS_HOLO: { name: 'verre holographique', color: 0x1a2238, color2: 0x6a7690, pattern: Pattern.CURTAIN, scale: 3, emissive: 0xb8f0ff, emissiveMode: Emissive.NIGHT, spec: 0.9 },
+  /** Grille d'arbre en fonte (fosses des arbres d'alignement). */
+  TREE_GRATE: { name: "grille d'arbre", color: 0x2c2e33, color2: 0x2b2018, pattern: Pattern.GRATE, scale: 1, noise: 0.05, spec: 0.3, wettable: true },
+  /** Toiture végétalisée (sedum vert et rouge). */
+  ROOF_GREEN: { name: 'toiture végétalisée', color: 0x5f8a3e, color2: 0x8e4a3a, pattern: Pattern.GRASS, scale: 1, noise: 0.2, wettable: true },
+  /** Bande podotactile jaune (bords de quais, passages piétons). */
+  TACTILE: { name: 'bande podotactile', color: 0xe2b322, color2: 0x8a6a10, pattern: Pattern.SIDEWALK, scale: 4, noise: 0.03, spec: 0.2, wettable: true },
+  /** Brique peinte en blanc (écailles sur brique rouge). */
+  BRICK_WHITE: { name: 'brique peinte blanche', color: 0xe9e6df, color2: 0x9a4a38, pattern: Pattern.BRICK, scale: 1, noise: 0.04, spec: 0.12, grime: 0.3 },
 } satisfies Record<string, MaterialDef>;
 
 export type MatName = keyof typeof DEFS;

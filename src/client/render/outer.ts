@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { envUniforms } from './env';
 import { COMMON_UNIFORMS_GLSL, LIGHT_GLSL, NOISE_GLSL } from './shaderChunks';
-import { RIVER_X0, RIVER_X1, WORLD_D, WORLD_W } from '../../shared/city/plan';
+import { CREEK, CREEK_FAR, RIVER_X0, RIVER_X1, WORLD_D, WORLD_W } from '../../shared/city/plan';
 
 const VERT = /* glsl */ `
 varying vec3 vWPos;
@@ -49,10 +49,12 @@ export function createOuterGround(): THREE.Group {
     m.updateMatrix();
     g.add(m);
   };
-  const far = 700;
+  const far = 900;
   add(0, -far, RIVER_X0, 0); // Manhattan au nord (Upper Manhattan, le Bronx)
   add(RIVER_X1, -far, WORLD_W + far, 0); // le Queens au nord-est
-  add(WORLD_W, 0, WORLD_W + far, WORLD_D); // le Queens et Brooklyn à l'est
+  add(WORLD_W, 0, WORLD_W + far, CREEK[1]); // le Queens à l'est
+  add(WORLD_W, CREEK[3], WORLD_W + far, WORLD_D); // Brooklyn à l'est
+  add(CREEK_FAR, CREEK[1], WORLD_W + far, CREEK[3]); // au-delà du bout de Newtown Creek
   add(RIVER_X1, WORLD_D, WORLD_W + far, WORLD_D + far); // Brooklyn au sud
   return g;
 }

@@ -334,6 +334,9 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
             o = ai.pathI * PATH_STRIDE;
             px = path[o];
             pz = path[o + 1];
+          } else if ((gd > 1.5 || Math.abs(gy - e.y) > 1.2) && g.time > ai.repathAt) {
+            // chemin partiel (recherche bornée, longs trajets) : arrivé au bout, on repart d'ici vers le but
+            ai.path = null;
           }
         }
         const dx = px - e.x;

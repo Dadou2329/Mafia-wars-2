@@ -1,10 +1,13 @@
 // Galerie des personnages (développement, route ?chars) : tenues, poses et armes de New York 2085.
 //
-// ?chars&scene=lineup|bosses|mafia|gangs|police|civ|weapons|turrets · &row=N (une seule rangée)
-// · &only=N (un seul personnage) · &pose=walk|run|aim|fire|dead|side|back|sit|drive · &night (néons de
-// nuit) · &muzzle (repères rouges sur les bouches de canon, vérifie muzzleOf). Un personnage
-// précis : ?chars&scene=one&kind=4&faction=0&look=401&gang=6&weapon=1. API de capture :
-// window.__viewer (scene, pose, look, night, labels, render).
+// ?chars&scene=lineup|bosses|mafia|gangs|police|civ|weapons|turrets|strip · &row=N (une seule
+// rangée) · &only=N (un seul personnage) · &pose=idle|walk|jog|run|aim|fire|throw|melee|hit|dead|
+// sit|drive|cower|interact|side|back · &t=s (instant de l'animation après l'événement : lancer,
+// coup, chute…) · &speed=m/s · &yaw=degrés · &pitch=rad (visée) · &weapon=N · &night (néons de nuit)
+// · &muzzle (repères rouges sur les bouches de canon, vérifie muzzleOf) · &ao=N (occlusion du
+// maillage). scene=strip : un personnage dans toutes les poses (&kind, &faction, &look, &weapon).
+// Un personnage précis : ?chars&scene=one&kind=4&faction=0&look=401&gang=6&weapon=1. API de
+// capture : window.__viewer (scene, pose, look, night, labels, render, stats).
 
 import * as THREE from 'three';
 import { Anim, CharKind, Weapon } from '../../shared/characters';
@@ -30,6 +33,21 @@ interface Entry {
 
 export function startCharGallery(root: HTMLElement): void {
   const params = new URLSearchParams(location.search);
+  if (params.has('portraits')) {
+    // portraits du salon et de l'interface (ui/portraits.ts), tels qu'affichés en jeu
+    root.style.cssText = 'background:#14121a;display:flex;gap:16px;padding:16px;';
+    void import('../ui/portraits').then(async (m) => {
+      const p = await m.renderPortraits();
+      for (const src of [p.dadou, p.even]) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.cssText = 'width:360px;height:480px;border:1px solid #444;';
+        root.appendChild(img);
+      }
+      (window as unknown as { __viewer: object }).__viewer = { render: () => 0 };
+    });
+    return;
+  }
   createMaterialTexture();
   const data = new Uint8Array(16).fill(190);
   const tex = new THREE.Data3DTexture(data, 2, 2, 2);
@@ -56,6 +74,7 @@ export function startCharGallery(root: HTMLElement): void {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
+  if (params.has('ao')) CharacterRenderer.aoKeep = Number(params.get('ao'));
   const cr = new CharacterRenderer();
   scene.add(cr.group);
   const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.05, 200);
@@ -226,31 +245,124 @@ export function startCharGallery(root: HTMLElement): void {
     ],
   };
 
+  // scène « crowd » : foule de 150 personnages variés sur 100 m (niveaux de détail, coût)
+  scenes.crowd = () => {
+    const kinds = [CharKind.CIVILIAN, CharKind.CIVILIAN_F, CharKind.GANGSTER, CharKind.GANGSTER, CharKind.THUG, CharKind.POLICE, CharKind.LIEUTENANT, CharKind.CIVILIAN, CharKind.CIVILIAN_F];
+    const out: Entry[][] = [];
+    for (let r = 0; r < 15; r++) {
+      const items: [string, CharKind, number, Partial<CharView>?][] = [];
+      for (let c = 0; c < 10; c++) {
+        const k = kinds[(r * 10 + c) % kinds.length];
+        items.push(['', k, k === CharKind.GANGSTER || k === CharKind.LIEUTENANT ? 1 + ((r + c) & 1) : k === CharKind.POLICE ? 3 : 0, { look: 1000 + r * 31 + c * 7, gang: (r + c) % 7, weapon: [Weapon.FISTS, Weapon.PISTOL, Weapon.SMG, Weapon.FISTS][(r + c) % 4] }]);
+      }
+      out.push(row(items, -r * 7, 3.2));
+    }
+    return out;
+  };
+
+  // scène « strip » : un même personnage dans toutes les poses
+  const POSES = ['idle', 'walk', 'jog', 'run', 'aim', 'fire', 'throw', 'melee', 'hit', 'dead', 'sit', 'drive', 'cower', 'interact'];
+  scenes.strip = () => {
+    const n = (k: string, d: number) => (params.has(k) ? Number(params.get(k)) : d);
+    const kind = n('kind', CharKind.BOSS_DADOU) as CharKind;
+    const fac = n('faction', kind === CharKind.BOSS_EVEN ? 2 : 1);
+    const list = (params.get('poses') ?? POSES.join(',')).split(',');
+    return [
+      row(
+        list.map((p) => [p, kind, fac, { look: n('look', 1), gang: n('gang', 0), weapon: n('weapon', Weapon.PISTOL) as Weapon, pose: p }] as unknown as [string, CharKind, number, Partial<CharView>]),
+        0,
+        1.25,
+      ),
+    ];
+  };
+
   let sceneName = params.get('scene') ?? 'lineup';
   let mode = params.get('pose') ?? 'idle';
   let rowSel = params.has('row') ? Number(params.get('row')) : -1;
   let onlySel = params.has('only') ? Number(params.get('only')) : -1;
   let entries: Entry[] = [];
+  const num = (k: string, d: number) => (params.has(k) ? Number(params.get(k)) : d);
+  /** Événements de chaque personnage : instant (s) avant l'instant de rendu. */
+  const events = new Map<number, { shot?: number; melee?: number; hit?: number; death?: number; interact?: number }>();
+  /** Pose d'un personnage (vitesse, état, événements). */
+  const applyPose = (v: CharView, pose: string) => {
+    const t = num('t', -1);
+    const ev: { shot?: number; melee?: number; hit?: number; death?: number; interact?: number } = {};
+    switch (pose) {
+      case 'walk':
+        v.vz = num('speed', 1.5);
+        v.anim = Anim.WALK;
+        break;
+      case 'jog':
+        v.vz = num('speed', 4.2);
+        v.anim = Anim.WALK;
+        break;
+      case 'run':
+        v.vz = num('speed', 6.2);
+        v.anim = Anim.RUN;
+        break;
+      case 'aim':
+      case 'fire':
+        v.aiming = true;
+        v.pitch = num('pitch', 0.06);
+        if (v.weapon === Weapon.FISTS || v.weapon === Weapon.KNIFE || v.weapon === Weapon.CLUB) v.weapon = Weapon.PISTOL;
+        if (pose === 'fire') ev.shot = t >= 0 ? t : 0.04;
+        break;
+      case 'throw':
+        if (v.weapon === Weapon.FISTS || v.weapon === Weapon.KNIFE || v.weapon === Weapon.CLUB) v.weapon = Weapon.PISTOL;
+        ev.melee = t >= 0 ? t : 0.24;
+        break;
+      case 'melee':
+        if (v.weapon !== Weapon.FISTS && v.weapon !== Weapon.KNIFE && v.weapon !== Weapon.CLUB) v.weapon = Weapon.CLUB;
+        ev.melee = t >= 0 ? t : 0.14;
+        break;
+      case 'hit':
+        ev.hit = t >= 0 ? t : 0.08;
+        break;
+      case 'dead':
+        v.anim = Anim.DEAD;
+        ev.death = t >= 0 ? t : 2.5;
+        break;
+      case 'sit':
+        v.anim = Anim.SIT;
+        break;
+      case 'drive':
+        v.anim = Anim.DRIVE;
+        break;
+      case 'cower':
+        v.anim = Anim.COWER;
+        break;
+      case 'interact':
+        ev.interact = t >= 0 ? t : 0.3;
+        break;
+      case 'side':
+        v.yaw = Math.PI / 2;
+        break;
+      case 'back':
+        v.yaw = Math.PI;
+        break;
+    }
+    events.set(v.id, ev);
+  };
   const build = () => {
     nextId = 1;
+    events.clear();
     const rows = (scenes[sceneName] ?? scenes.lineup)();
     entries = rowSel >= 0 ? (rows[rowSel] ?? []).map((e) => ((e.view.z = 0), e)) : rows.flat();
     if (onlySel >= 0) entries = entries.slice(onlySel, onlySel + 1).map((e) => ((e.view.x = 0), e));
     const views = entries.map((e) => e.view);
-    if (mode === 'walk') views.forEach((v) => ((v.vz = 1.4), (v.anim = Anim.WALK)));
-    if (mode === 'run') views.forEach((v) => ((v.vz = 5.5), (v.anim = Anim.RUN)));
-    if (mode === 'aim')
-      views.forEach((v) => {
-        v.aiming = true;
-        v.pitch = 0.08;
-        if (v.weapon === Weapon.FISTS && v.kind !== CharKind.TURRET) v.weapon = Weapon.PISTOL;
-      });
-    if (mode === 'fire') views.forEach((v) => ((v.aiming = true), (v.shotAt = 0.75)));
-    if (mode === 'dead') views.forEach((v) => ((v.anim = Anim.DEAD), (v.deathAt = 0)));
-    if (mode === 'sit') views.forEach((v) => (v.anim = Anim.SIT));
-    if (mode === 'drive') views.forEach((v) => (v.anim = Anim.DRIVE));
-    if (mode === 'side') views.forEach((v) => (v.yaw = Math.PI / 2));
-    if (mode === 'back') views.forEach((v) => (v.yaw = Math.PI));
+    const yawDeg = params.has('yaw') ? (num('yaw', 0) * Math.PI) / 180 : null;
+    for (const v of views) {
+      if (params.has('weapon') && sceneName !== 'one' && sceneName !== 'strip') v.weapon = num('weapon', 0) as Weapon;
+      if (yawDeg !== null) v.yaw += yawDeg;
+      const own = (v as unknown as { pose?: string }).pose;
+      applyPose(v, own ?? mode);
+      // la vitesse est donnée vers l'avant (ou de côté avec &strafe) : on l'oriente selon le lacet
+      const sp = v.vz;
+      const dir = v.yaw + (params.has('strafe') ? Math.PI / 2 : params.has('backward') ? Math.PI : 0);
+      v.vx = Math.sin(dir) * sp;
+      v.vz = Math.cos(dir) * sp;
+    }
     // cadrage par défaut : toute la scène
     let minX = Infinity;
     let maxX = -Infinity;
@@ -262,9 +374,9 @@ export function startCharGallery(root: HTMLElement): void {
     }
     const w = maxX - minX + 1.1;
     const depth = -minZ;
-    const dist = Math.max(onlySel >= 0 ? 2.3 : 3.2, (w / 2 / Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 1.02) + depth * 0.35;
+    const dist = Math.max(onlySel >= 0 ? 3.4 : 3.2, (w / 2 / Math.tan(THREE.MathUtils.degToRad(20)) / camera.aspect) * 1.02) + depth * 0.35;
     camera.position.set((minX + maxX) / 2, 1.25 + depth * 0.75, dist);
-    camera.lookAt((minX + maxX) / 2, 0.85, -depth * 0.42);
+    camera.lookAt((minX + maxX) / 2, onlySel >= 0 ? 0.95 : 0.85, -depth * 0.42);
     camera.updateMatrixWorld();
   };
 
@@ -307,6 +419,7 @@ export function startCharGallery(root: HTMLElement): void {
     }
   };
 
+  let clock = 1;
   const api = {
     t: 0,
     scene(name: string, row = -1, only = -1) {
@@ -331,13 +444,44 @@ export function startCharGallery(root: HTMLElement): void {
       showLabels = on;
     },
     render(time = 0.8) {
-      // simule quelques images pour stabiliser l'animation
+      // simule quelques images pour stabiliser l'animation ; les événements sont placés avant
+      // l'instant de rendu
       const views = entries.map((e) => e.view);
-      for (let i = 0; i < 40; i++) cr.update(views, camera, time + i * 0.016, 0.016);
+      for (const v of views) {
+        const ev = events.get(v.id);
+        if (!ev) continue;
+        if (ev.shot !== undefined) v.shotAt = time - ev.shot;
+        if (ev.melee !== undefined) v.meleeAt = time - ev.melee;
+        if (ev.hit !== undefined) v.hitAt = time - ev.hit;
+        if (ev.death !== undefined) v.deathAt = time - ev.death;
+        if (ev.interact !== undefined) v.interactAt = time - ev.interact;
+      }
+      for (let i = 39; i >= 0; i--) cr.update(views, camera, time - i * 0.016, 0.016);
       drawMuzzles();
       renderer.render(scene, camera);
       drawLabels();
-      return { ...renderer.info.render, instances: cr.stats.instances };
+      return { ...renderer.info.render, instances: cr.stats.instances, quads: cr.stats.quads, drawn: cr.stats.drawn };
+    },
+    /** Avance la simulation de `sec` secondes (images de 1/60 s) puis dessine (séquences animées). */
+    step(sec = 1 / 60) {
+      const views = entries.map((e) => e.view);
+      const n = Math.max(1, Math.round(sec * 60));
+      for (let i = 0; i < n; i++) {
+        clock += 1 / 60;
+        cr.update(views, camera, clock, 1 / 60);
+      }
+      drawMuzzles();
+      renderer.render(scene, camera);
+      drawLabels();
+      return { quads: cr.stats.quads, clock };
+    },
+    /** Membres dessinés à un niveau de détail (0 près, 1 moyen, 2 loin). */
+    keys(tier = 1) {
+      return cr.keysInUse(tier);
+    },
+    /** Statistiques du rendu des personnages (quads, instances). */
+    stats() {
+      return { ...cr.stats };
     },
     setTime() {},
   };

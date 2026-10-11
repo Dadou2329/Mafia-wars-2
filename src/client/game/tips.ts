@@ -3,7 +3,7 @@
 // le joueur fait ce qu'il veut dans la ville ; on lui souffle seulement ce qui est possible.
 
 import { BOSS_NAME, DE_BOSS, HQ_CAPTURE_MIN_DISTRICTS, tierDef } from '../../shared/constants';
-import { BUILDINGS, RESIDENCES } from '../../shared/city/plan';
+import { BUILDINGS, DISTRICTS, RESIDENCES } from '../../shared/city/plan';
 import { RECRUITER_NAME } from '../../shared/characters';
 import type { PrivateState } from '../../shared/protocol';
 import { actionKey } from '../input/bindings';
@@ -48,7 +48,7 @@ export class Tips {
     const text =
       mine >= HQ_CAPTURE_MIN_DISTRICTS
         ? `Assaut final possible : prenez ${leNom(hq.name)}, le QG ${DE_BOSS[other]} !`
-        : `Contrôlez ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 (vous : ${mine}), puis prenez le QG ${DE_BOSS[other]}.`;
+        : `Contrôlez ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} (vous : ${mine}), puis prenez le QG ${DE_BOSS[other]}.`;
     if (text !== this.lastGoal) {
       this.lastGoal = text;
       gc.hud.setObjective(text, false);

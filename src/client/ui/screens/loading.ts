@@ -3,6 +3,7 @@
 import { keyLabel, type ActionId } from '../../input/bindings';
 import { settings } from '../../settings';
 import { DISTRICT_BONUS, HQ_CAPTURE_MIN_DISTRICTS } from '../../../shared/constants';
+import { DISTRICTS } from '../../../shared/city/plan';
 import { h } from '../dom';
 import { BRAND, TITLE, ambience, fr, pct, shieldPointer, watchUnmount } from './menu';
 
@@ -15,7 +16,7 @@ function key(id: ActionId | string, fallback = '—'): string {
 function tips(): string[] {
   return [
     `Appuyez sur ${key('wheel')} près de vos hommes pour leur donner un ordre rapide.`,
-    `Contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur 7 pour pouvoir prendre d’assaut le QG actuel de votre rival.`,
+    `Contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} pour pouvoir prendre d’assaut le QG actuel de votre rival.`,
     'Un quartier n’est à vous que si vous tenez tous ses bâtiments clés ★.',
     'Recrutez de nouveaux gangsters auprès du recruteur de votre QG, par 1, 5 ou 10.',
     `Au QG, installez-vous au bureau (${key('interact')}) pour ouvrir la carte stratégique. Elle s’ouvre aussi partout avec ${key('map')}.`,

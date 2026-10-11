@@ -18,7 +18,8 @@ import {
 import { GM } from '../../shared/city/gen/city';
 import type { WorldData } from '../world/worldLoader';
 
-export const MAP_SCALE = 6; // pixels par mètre
+/** Pixels par mètre de la carte de base (576 m × 4 = 2304 px de large). */
+export const MAP_SCALE = 4;
 
 /** Polices de la carte (chargées par l'interface). */
 export const MAP_FONT_TITLE = "'Orbitron', 'Rajdhani', sans-serif";
@@ -152,7 +153,7 @@ export class CityMap {
         c.strokeStyle = 'rgba(60,220,140,0.45)';
         c.lineWidth = 1.5;
         c.strokeRect(x0 + 0.5, z0 + 0.5, x1 - x0 - 1, z1 - z0 - 1);
-      } else if (a.kind === 'lake') {
+      } else if (a.kind === 'lake' || a.kind === 'reservoir') {
         c.fillStyle = 'rgba(10,50,90,0.85)';
         c.beginPath();
         c.ellipse((x0 + x1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (z1 - z0) / 2, 0, 0, Math.PI * 2);
@@ -166,6 +167,30 @@ export class CityMap {
         c.setLineDash([6, 6]);
         c.strokeRect(x0 + 0.5, z0 + 0.5, x1 - x0 - 1, z1 - z0 - 1);
         c.setLineDash([]);
+      } else if (a.kind === 'highline') {
+        // promenade plantée surélevée (High Line)
+        c.fillStyle = 'rgba(60,220,140,0.28)';
+        c.fillRect(x0, z0, x1 - x0, z1 - z0);
+        c.strokeStyle = 'rgba(120,255,180,0.6)';
+        c.lineWidth = 1.5;
+        c.setLineDash([5, 4]);
+        c.strokeRect(x0 + 0.5, z0 + 0.5, x1 - x0 - 1, z1 - z0 - 1);
+        c.setLineDash([]);
+      } else if (a.kind === 'yard') {
+        // terrains : parking, conteneurs, basket, jardin, marché
+        const col = a.style === 'parking' ? '120,140,170' : a.style === 'containers' ? '255,150,60' : a.style === 'court' ? '255,120,60' : a.style === 'garden' ? '60,220,140' : '255,200,80';
+        c.fillStyle = `rgba(${col},0.10)`;
+        c.fillRect(x0, z0, x1 - x0, z1 - z0);
+        c.strokeStyle = `rgba(${col},0.45)`;
+        c.lineWidth = 1.5;
+        c.strokeRect(x0 + 0.5, z0 + 0.5, x1 - x0 - 1, z1 - z0 - 1);
+        if (a.style === 'parking') {
+          c.font = `700 ${Math.min(x1 - x0, z1 - z0) * 0.5}px ${MAP_FONT_TITLE}`;
+          c.textAlign = 'center';
+          c.textBaseline = 'middle';
+          c.fillStyle = `rgba(${col},0.45)`;
+          c.fillText('P', (x0 + x1) / 2, (z0 + z1) / 2);
+        }
       }
     }
     // tunnels et stations de métro (accès souterrains)
@@ -204,16 +229,23 @@ export class CityMap {
         c.fillText('M', e.x * S, e.z * S + 0.5);
       }
     }
-    // ponts
+    // ponts (garde-corps le long du tablier)
     for (const b of BRIDGES) {
       const [x0, z0, x1, z1] = b.rect.map((v) => v * S);
       c.strokeStyle = 'rgba(160,200,255,0.55)';
       c.lineWidth = 2;
       c.beginPath();
-      c.moveTo(x0, z0 + 2);
-      c.lineTo(x1, z0 + 2);
-      c.moveTo(x0, z1 - 2);
-      c.lineTo(x1, z1 - 2);
+      if (b.axis === 'x') {
+        c.moveTo(x0, z0 + 2);
+        c.lineTo(x1, z0 + 2);
+        c.moveTo(x0, z1 - 2);
+        c.lineTo(x1, z1 - 2);
+      } else {
+        c.moveTo(x0 + 2, z0);
+        c.lineTo(x0 + 2, z1);
+        c.moveTo(x1 - 2, z0);
+        c.lineTo(x1 - 2, z1);
+      }
       c.stroke();
     }
     // bâtiments : aplats sombres et liseré lumineux
@@ -262,27 +294,34 @@ export class CityMap {
       c.save();
       c.translate(s.x * S, s.z * S);
       if (s.vertical) c.rotate(-Math.PI / 2);
-      const water = s.name === 'East River' || s.name === 'Hudson';
-      c.font = water ? `700 34px ${MAP_FONT_TITLE}` : `600 19px ${MAP_FONT}`;
+      const water = s.name === 'East River' || s.name === 'Hudson' || s.name === 'Newtown Creek';
+      c.font = water ? `700 ${s.name === 'Newtown Creek' ? 20 : 34}px ${MAP_FONT_TITLE}` : `600 17px ${MAP_FONT}`;
       c.fillStyle = water ? 'rgba(90,190,255,0.55)' : 'rgba(150,185,225,0.62)';
       c.fillText(water ? s.name.toUpperCase() : s.name, 0, 0);
       c.restore();
     }
     for (const b of BRIDGES) {
-      c.font = `600 16px ${MAP_FONT}`;
+      c.font = `600 15px ${MAP_FONT}`;
       c.fillStyle = 'rgba(170,210,255,0.7)';
-      c.fillText(b.name, ((b.rect[0] + b.rect[2]) / 2) * S, b.rect[1] * S - 10);
+      if (b.axis === 'x') c.fillText(b.name, ((b.rect[0] + b.rect[2]) / 2) * S, b.rect[1] * S - 10);
+      else {
+        c.save();
+        c.translate(b.rect[2] * S + 12, ((b.rect[1] + b.rect[3]) / 2) * S);
+        c.rotate(-Math.PI / 2);
+        c.fillText(b.name, 0, 0);
+        c.restore();
+      }
     }
     // habillage de la carte stratégique (pas sur la mini-carte) : l'échelle
     c = this.decor.getContext('2d')!;
     c.textAlign = 'center';
     // échelle
     c.fillStyle = 'rgba(60,220,255,0.9)';
-    c.fillRect(120, this.d - 38, 20 * S, 3);
+    c.fillRect(120, this.d - 38, 50 * S, 3);
     c.fillRect(120, this.d - 44, 2, 15);
-    c.fillRect(120 + 20 * S - 2, this.d - 44, 2, 15);
+    c.fillRect(120 + 50 * S - 2, this.d - 44, 2, 15);
     c.font = `600 15px ${MAP_FONT}`;
-    c.fillText('20 m', 120 + 10 * S, this.d - 54);
+    c.fillText('50 m', 120 + 25 * S, this.d - 54);
     // cadre
     c.strokeStyle = 'rgba(60,220,255,0.65)';
     c.lineWidth = 4;
