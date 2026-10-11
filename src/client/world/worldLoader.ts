@@ -1,16 +1,21 @@
-// Chargement du monde : génération dans un worker (repli sur le fil principal si besoin).
+// Chargement du monde : génération et navigation dans un worker, maillage réparti sur plusieurs
+// workers, éclairage calculé ensuite en continu par un worker dédié (repli sur le fil principal si
+// les workers sont indisponibles).
 import type { BuildingInfo, HoloInfo, LightSource, PropPlacement, ScreenInfo } from '../../shared/city/gen/context';
 import { generateCity } from '../../shared/city/gen/city';
 import { buildCityNav } from '../../shared/city/navBuild';
 import { NavGrid } from '../../shared/nav';
-import { VoxelWorld } from '../../shared/voxel';
-import { computeLightVolume, computeTintVolume, type LightVolume, type TintVolume } from '../render/lightVolume';
-import { meshRegions, type RegionMesh } from '../render/worldMesh';
+import { CHUNK, VoxelWorld, type ChunkExport } from '../../shared/voxel';
+import { computeTintVolume, type TintVolume } from '../render/lightVolume';
+import { lightDims } from '../render/lightService';
+import { meshRegions, REGION_VOXELS, type RegionMesh } from '../render/worldMesh';
+import { LocalLightFeed, WorkerLightFeed, type LightFeed } from './lightFeed';
 
 export interface WorldData {
   world: VoxelWorld;
   regions: RegionMesh[];
-  light: LightVolume;
+  /** Éclairage (tuiles fines autour de la caméra, volume grossier de la ville). */
+  lightFeed: LightFeed;
   tint: TintVolume;
   nav: NavGrid;
   props: PropPlacement[];
@@ -46,51 +51,99 @@ function progress(step: string, f: number): void {
 export function loadWorld(): Promise<WorldData> {
   if (promise) return promise;
   promise = new Promise<WorldData>((resolve) => {
-    let worker: Worker | null = null;
-    try {
-      worker = new Worker(new URL('./worldWorker.ts', import.meta.url), { type: 'module' });
-    } catch {
-      worker = null;
-    }
-    if (!worker) {
+    const t0 = performance.now();
+    const workers: Worker[] = [];
+    let failed = false;
+    const fail = () => {
+      if (failed) return;
+      failed = true;
+      for (const w of workers) w.terminate();
       resolve(loadOnMainThread());
+    };
+    let main: Worker;
+    try {
+      main = new Worker(new URL('./worldWorker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      fail();
       return;
     }
-    worker.onmessage = (e: MessageEvent) => {
+    workers.push(main);
+    // données reçues
+    let meta: Record<string, unknown> | null = null;
+    let world: VoxelWorld | null = null;
+    let nav: NavGrid | null = null;
+    const regions: RegionMesh[] = [];
+    let total = -1;
+    let meshed = 0;
+    const finish = () => {
+      if (failed || !meta || !world || !nav || meshed < total) return;
+      for (const w of workers) w.terminate();
+      const m = meta;
+      const lightFeed = new WorkerLightFeed(lightDims(world), [world.sx, world.sy, world.sz], world.exportChunks(), m.lights as LightSource[]);
+      progress('New York est prête.', 1);
+      resolve({
+        world,
+        regions,
+        lightFeed,
+        tint: m.tint as TintVolume,
+        nav,
+        props: m.props as PropPlacement[],
+        lights: m.lights as LightSource[],
+        buildings: (m.buildings as BuildingInfo[]).sort((a, b) => a.id - b.id),
+        smokes: m.smokes as WorldData['smokes'],
+        screens: (m.screens as ScreenInfo[]) ?? [],
+        holos: (m.holos as HoloInfo[]) ?? [],
+        groundMap: m.groundMap as Uint8Array,
+        gw: m.gw as number,
+        gd: m.gd as number,
+        ms: performance.now() - t0,
+      });
+    };
+    const meshProgress = () => {
+      if (total > 0) progress('Assemblage des façades…', 0.35 + 0.65 * (meshed / total));
+    };
+    main.onmessage = (e: MessageEvent) => {
       const m = e.data;
       if (m.type === 'progress') progress(m.step, m.f);
-      else if (m.type === 'done') {
+      else if (m.type === 'world') {
+        meta = m;
         const [sx, sy, sz] = m.dims as number[];
-        const world = new VoxelWorld(sx, sy, sz);
-        for (let i = 0; i < world.chunks.length; i++) world.chunks[i] = m.chunks[i] ?? null;
-        world.fillMat.set(m.fillMat);
-        const nav = NavGrid.deserialize(m.nav);
-        progress('New York est prête.', 1);
-        resolve({
-          world,
-          regions: m.regions,
-          light: m.light,
-          tint: m.tint,
-          nav,
-          props: m.props,
-          lights: m.lights,
-          buildings: (m.buildings as BuildingInfo[]).sort((a, b) => a.id - b.id),
-          smokes: m.smokes,
-          screens: m.screens ?? [],
-          holos: m.holos ?? [],
-          groundMap: m.groundMap,
-          gw: m.gw,
-          gd: m.gd,
-          ms: m.ms,
-        });
-        worker!.terminate();
+        const w = new VoxelWorld(sx, sy, sz);
+        w.importChunks(m.chunks as ChunkExport);
+        world = w;
+        // maillage réparti : chaque worker reçoit une copie du monde (compressé, quelques Mo)
+        const list: [number, number][] = [];
+        const rx = Math.ceil(w.cx / (REGION_VOXELS / CHUNK));
+        const rz = Math.ceil(w.cz / (REGION_VOXELS / CHUNK));
+        for (let gz = 0; gz < rz; gz++) for (let gx = 0; gx < rx; gx++) list.push([gx, gz]);
+        total = list.length;
+        const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+        for (let k = 0; k < n; k++) {
+          let mw: Worker;
+          try {
+            mw = new Worker(new URL('./meshWorker.ts', import.meta.url), { type: 'module' });
+          } catch {
+            fail();
+            return;
+          }
+          workers.push(mw);
+          mw.onmessage = (ev: MessageEvent) => {
+            if (ev.data.type === 'region') regions.push(ev.data.r as RegionMesh);
+            meshed++;
+            meshProgress();
+            finish();
+          };
+          mw.onerror = fail;
+          mw.postMessage({ dims: m.dims, chunks: m.chunks, regions: list.filter((_, i) => i % n === k) });
+        }
+        meshProgress();
+      } else if (m.type === 'nav') {
+        nav = NavGrid.deserialize(m.nav);
+        finish();
       }
     };
-    worker.onerror = () => {
-      worker?.terminate();
-      resolve(loadOnMainThread());
-    };
-    worker.postMessage('go');
+    main.onerror = fail;
+    main.postMessage('go');
   });
   return promise;
 }
@@ -98,7 +151,6 @@ export function loadWorld(): Promise<WorldData> {
 function loadOnMainThread(): WorldData {
   const t0 = performance.now();
   const city = generateCity();
-  const light = computeLightVolume(city.world, city.ctx.lights);
   const tint = computeTintVolume(city.world, city.ctx.lights);
   const nav = buildCityNav(city);
   const regions = meshRegions(city.world);
@@ -106,7 +158,7 @@ function loadOnMainThread(): WorldData {
   return {
     world: city.world,
     regions,
-    light,
+    lightFeed: new LocalLightFeed(city.world, city.ctx.lights),
     tint,
     nav,
     props: city.ctx.props,

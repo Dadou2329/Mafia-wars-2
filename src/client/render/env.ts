@@ -19,9 +19,15 @@ function emptyVolume(format: THREE.PixelFormat, channels: number, fill: number[]
 }
 
 export const envUniforms = {
+  /** Fenêtre fine (0,5 m) autour de la caméra, ou volume complet (galeries). */
   uLightTex: { value: emptyVolume(THREE.RGFormat, 2, [255, 0]) as THREE.Data3DTexture },
   uLightOrigin: { value: new THREE.Vector3(0, -8.5, 0) },
   uLightSize: { value: new THREE.Vector3(288, 57, 240) },
+  /** Rectangle (x0, z0, x1, z1, relatif à uLightOrigin) où la fenêtre fine est valable. */
+  uLightWin: { value: new THREE.Vector4(-1e9, -1e9, 1e9, 1e9) },
+  /** Volume grossier (1 m) de toute la ville. */
+  uLightCoarse: { value: emptyVolume(THREE.RGFormat, 2, [255, 0]) as THREE.Data3DTexture },
+  uLightCoarseSize: { value: new THREE.Vector3(288, 57, 240) },
   uTintTex: { value: emptyVolume(THREE.RGBAFormat, 4, [0, 0, 0, 0]) as THREE.Data3DTexture },
   uTintOrigin: { value: new THREE.Vector3(0, -8.5, 0) },
   uTintSize: { value: new THREE.Vector3(288, 57, 240) },
@@ -84,6 +90,7 @@ export function createLightTexture(v: LightVolume): THREE.Data3DTexture {
   envUniforms.uLightTex.value = tex;
   envUniforms.uLightOrigin.value.set(v.origin[0], v.origin[1], v.origin[2]);
   envUniforms.uLightSize.value.set(v.nx * v.cell, v.ny * v.cell, v.nz * v.cell);
+  envUniforms.uLightWin.value.set(-1e9, -1e9, 1e9, 1e9);
   return tex;
 }
 

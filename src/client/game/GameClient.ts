@@ -29,7 +29,8 @@ import { BigScreens } from './bigScreens';
 import { GlassBreaker } from './glassBreaker';
 import { GrenadeFx } from './grenades';
 import { EngineSounds, rpm, type LoopSource } from './engineSounds';
-import { createLightTexture, createMaterialTexture, createTintTexture, envUniforms } from '../render/env';
+import { createMaterialTexture, createTintTexture, envUniforms } from '../render/env';
+import { LightStream } from '../render/lightStream';
 import { createOuterGround } from '../render/outer';
 import { PropRenderer } from '../render/propRenderer';
 import { createWater } from '../render/water';
@@ -125,6 +126,7 @@ export class GameClient {
   activeEvent: Extract<GameEvent, { t: 'event' }> | null = null;
   private fogBoost = 1;
   private regions: { mesh: THREE.Mesh; x: number; z: number; r: number }[] = [];
+  private lightStream: LightStream;
   private cullAcc = 1;
   private water: ReturnType<typeof createWater>;
   pub: PublicState;
@@ -179,7 +181,7 @@ export class GameClient {
     this.renderer.toneMappingExposure = 1.05;
     this.camera = new THREE.PerspectiveCamera(settings.fov, window.innerWidth / window.innerHeight, 0.08, 520);
     createMaterialTexture();
-    createLightTexture(world.light);
+    this.lightStream = new LightStream(world.lightFeed, this.renderer);
     createTintTexture(world.tint);
     const worldGroup = buildWorldGroup(world.regions, createWorldMaterial());
     this.scene.add(worldGroup);
@@ -970,6 +972,7 @@ export class GameClient {
     this.chars.update(list, this.camera, now, dt);
     // ------------------------------------------------- monde
     const camPos = this.camera.position;
+    this.lightStream.update(camPos.x, camPos.z);
     this.cullAcc += dt;
     if (this.cullAcc > 0.25) {
       this.cullAcc = 0;
@@ -990,7 +993,7 @@ export class GameClient {
     // pluie : traits de pluie, chaussée mouillée (qui sèche lentement), ciel bas et éclairs
     const rainTarget = this.pub.rain ?? 0;
     const sheltered = camPos.y < -1.2 || this.buildingAt(camPos.x, camPos.z, camPos.y) >= 0;
-    this.rain.update(dt, this.camera, rainTarget, sheltered);
+    this.rain.update(dt, this.camera, rainTarget, sheltered, this.renderer.domElement.height);
     const wetTarget = Math.min(1, rainTarget * 1.4);
     envUniforms.uWet.value += (wetTarget - envUniforms.uWet.value) * Math.min(1, dt * (wetTarget > envUniforms.uWet.value ? 0.12 : 0.012));
     this.atmo.rain = this.rain.intensity;
@@ -1449,6 +1452,7 @@ export class GameClient {
     this.app.input.blocked = true;
     this.app.input.lockEnabled = false;
     this.strategic.dispose();
+    this.lightStream.dispose();
     this.renderer.dispose();
     this.canvas.remove();
     this.overlay.remove();

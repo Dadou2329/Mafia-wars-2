@@ -16,6 +16,8 @@ uniform vec3 uBox;
 uniform float uIntensity;
 uniform float uClock;
 uniform vec2 uWind;
+/** Taille d'un pixel (m) à 1 m de la caméra. */
+uniform float uPixel;
 varying float vA;
 varying float vT;
 varying vec3 vCol;
@@ -29,19 +31,20 @@ void main() {
   // à l'abri : pas de pluie
   vec2 L = sampleLightVol(head);
   float open = smoothstep(0.12, 0.3, L.x);
-  float len = 0.45 + 0.4 * fract(aSeed * 7.3);
+  float len = 0.6 + 0.45 * fract(aSeed * 7.3);
   vec3 pt = head - dir * len * position.y;
   vec3 toCam = normalize(cameraPosition - head);
   vec3 side = normalize(cross(dir, toCam));
   float dist = distance(cameraPosition, head);
-  // au moins un pixel et demi de large (un trait plus fin ne se dessine pas)
-  pt += side * position.x * max(0.022, dist * 0.0042);
+  // au moins un pixel et demi de large, quelle que soit la résolution (un trait plus fin ne se
+  // dessine pas)
+  pt += side * position.x * max(0.008, dist * uPixel * 1.2);
   // les gouttes trop proches de l'objectif gênent : on les estompe
-  float near = smoothstep(0.6, 2.2, dist);
-  vA = on * open * near * (0.4 + 0.35 * fract(aSeed * 3.1));
+  float near = smoothstep(0.8, 3.0, dist);
+  vA = on * open * near * (0.16 + 0.2 * fract(aSeed * 3.1));
   vT = position.y;
   // les gouttes accrochent la lumière : ciel le jour, néons et lampadaires la nuit
-  vec3 dropCol = mix(vec3(0.62, 0.66, 0.72), vec3(0.32, 0.36, 0.46), uNight);
+  vec3 dropCol = mix(vec3(0.58, 0.62, 0.68), vec3(0.26, 0.3, 0.38), uNight);
   vCol = dropCol + lampColorAt(head) * clamp(L.y * 1.8, 0.0, 1.0) * 0.8 * uNight;
   gl_Position = projectionMatrix * viewMatrix * vec4(pt, 1.0);
   if (vA < 0.002) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -95,9 +98,12 @@ export class Rain {
         uIntensity: { value: 0 },
         uClock: { value: 0 },
         uWind: { value: new THREE.Vector2(1.6, 0.7) },
+        uPixel: { value: 0.002 },
       },
       transparent: true,
       depthWrite: false,
+      // le trait est orienté vers la caméra mais son sens de parcours dépend du vent : deux faces
+      side: THREE.DoubleSide,
     });
     this.mat.toneMapped = false;
     this.mesh = new THREE.Mesh(quad, this.mat);
@@ -107,8 +113,8 @@ export class Rain {
     this.mesh.name = 'pluie';
   }
 
-  /** target : pluie voulue (0..1) ; sheltered : caméra à l'intérieur ou sous terre. */
-  update(dt: number, camera: THREE.Camera, target: number, sheltered: boolean): void {
+  /** target : pluie voulue (0..1) ; sheltered : caméra à l'intérieur ou sous terre ; viewH : hauteur de l'image en pixels. */
+  update(dt: number, camera: THREE.PerspectiveCamera, target: number, sheltered: boolean, viewH = 1080): void {
     this.intensity += (target - this.intensity) * Math.min(1, dt * 0.6);
     const visible = this.intensity > 0.02 && !sheltered;
     this.mesh.visible = visible;
@@ -118,5 +124,6 @@ export class Rain {
     u.uCam.value.copy(camera.position);
     u.uIntensity.value = Math.min(1, this.intensity * 1.1);
     u.uClock.value = this.clock;
+    u.uPixel.value = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / Math.max(1, viewH);
   }
 }

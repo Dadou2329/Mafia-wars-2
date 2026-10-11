@@ -33,7 +33,7 @@ export class MeshBuffers {
   }
   /** Ajoute un quad : 4 sommets (x,y,z) déjà ordonnés, normale, ao par sommet, matériau. */
   quad(
-    v: number[], // 12 valeurs
+    v: ArrayLike<number>, // 12 valeurs
     nx: number,
     ny: number,
     nz: number,
@@ -46,56 +46,94 @@ export class MeshBuffers {
     if ((this.quads + 1) * 12 > this.pos.length) this.grow();
     const q = this.quads++;
     const p = q * 12;
+    const pos = this.pos;
+    const nrm = this.nrm;
+    const dat = this.dat;
     // inversion de diagonale pour une interpolation d'AO correcte
     const flip = ao0 + ao2 < ao1 + ao3;
-    const order = flip ? [1, 2, 3, 0] : [0, 1, 2, 3];
-    const aos = [ao0, ao1, ao2, ao3];
+    const n0 = nx * 127;
+    const n1 = ny * 127;
+    const n2 = nz * 127;
     for (let k = 0; k < 4; k++) {
-      const s = order[k];
-      this.pos[p + k * 3] = v[s * 3];
-      this.pos[p + k * 3 + 1] = v[s * 3 + 1];
-      this.pos[p + k * 3 + 2] = v[s * 3 + 2];
-      this.nrm[p + k * 3] = nx * 127;
-      this.nrm[p + k * 3 + 1] = ny * 127;
-      this.nrm[p + k * 3 + 2] = nz * 127;
-      this.dat[q * 8 + k * 2] = aos[s];
-      this.dat[q * 8 + k * 2 + 1] = mat;
+      const s = flip ? (k + 1) & 3 : k;
+      const o = p + k * 3;
+      pos[o] = v[s * 3];
+      pos[o + 1] = v[s * 3 + 1];
+      pos[o + 2] = v[s * 3 + 2];
+      nrm[o] = n0;
+      nrm[o + 1] = n1;
+      nrm[o + 2] = n2;
+      dat[q * 8 + k * 2] = s === 0 ? ao0 : s === 1 ? ao1 : s === 2 ? ao2 : ao3;
+      dat[q * 8 + k * 2 + 1] = mat;
     }
   }
 }
 
 const pad = new Uint8Array(P * P * P);
+/** MAT_VISIBLE de chaque cellule de `pad`. */
+const vis = new Uint8Array(P * P * P);
 const mask = new Int32Array(CHUNK * CHUNK);
+/** Voxels visibles de chaque tranche de `pad` (section intérieure 32×32), pour chaque axe. */
+const sliceCount = [new Int32Array(P), new Int32Array(P), new Int32Array(P)];
+const vtx = new Int32Array(12);
 
-/** Copie le tronçon (cx,cy,cz) et sa bordure d'un voxel dans `pad`. */
+/** Copie le tronçon (cx,cy,cz) et sa bordure d'un voxel dans `pad` ; faux si le tronçon est vide. */
 function fillPad(world: VoxelWorld, cx: number, cy: number, cz: number): boolean {
-  const ox = cx * CHUNK - 1;
-  const oy = cy * CHUNK - 1;
-  const oz = cz * CHUNK - 1;
-  const chunk = world.getChunk(cx, cy, cz);
-  // tronçon uniforme : un seul matériau à l'intérieur
-  const uni = chunk === null ? world.fillMat[world.chunkIndex(cx, cy, cz)] : 0;
-  let any = uni !== 0;
+  world.copyBox(cx * CHUNK - 1, cy * CHUNK - 1, cz * CHUNK - 1, P, P, P, pad, 0, P2, P);
+  // sous le monde : plein
+  if (cy === 0) pad.fill(1, 0, P2);
+  const VIS = MAT_VISIBLE;
+  let any = false;
   for (let y = 0; y < P; y++) {
-    const wy = oy + y;
+    const inY = y > 0 && y < P - 1;
     for (let z = 0; z < P; z++) {
-      const wz = oz + z;
       const row = y * P2 + z * P;
-      const inner = y > 0 && y < P - 1 && z > 0 && z < P - 1;
-      for (let x = 0; x < P; x++) {
-        let m: number;
-        if (inner && x > 0 && x < P - 1) {
-          if (chunk !== null) {
-            m = chunk[((y - 1) << 10) | ((z - 1) << 5) | (x - 1)];
-            if (m !== 0) any = true;
-          } else m = uni;
-        } else if (wy < 0) m = 1;
-        else m = world.get(ox + x, wy, wz);
-        pad[row + x] = m;
-      }
+      if (inY && z > 0 && z < P - 1) {
+        vis[row] = VIS[pad[row]];
+        for (let x = 1; x < P - 1; x++) {
+          const m = pad[row + x];
+          if (m !== 0) any = true;
+          vis[row + x] = VIS[m];
+        }
+        vis[row + P - 1] = VIS[pad[row + P - 1]];
+      } else for (let x = 0; x < P; x++) vis[row + x] = VIS[pad[row + x]];
     }
   }
   return any;
+}
+
+/** Compte les voxels visibles de chaque tranche (permet de sauter les tranches sans face). */
+function countSlices(): void {
+  const cx = sliceCount[0];
+  const cy = sliceCount[1];
+  const cz = sliceCount[2];
+  cx.fill(0);
+  cy.fill(0);
+  cz.fill(0);
+  for (let y = 0; y < P; y++) {
+    const yIn = y > 0 && y < P - 1;
+    for (let z = 0; z < P; z++) {
+      const zIn = z > 0 && z < P - 1;
+      if (!yIn && !zIn) continue;
+      const row = y * P2 + z * P;
+      let n = 0;
+      if (yIn && zIn) {
+        if (vis[row]) cx[0]++;
+        if (vis[row + P - 1]) cx[P - 1]++;
+        for (let x = 1; x < P - 1; x++)
+          if (vis[row + x]) {
+            cx[x]++;
+            n++;
+          }
+        cy[y] += n;
+        cz[z] += n;
+      } else {
+        for (let x = 1; x < P - 1; x++) n += vis[row + x];
+        if (zIn) cy[y] += n;
+        else cz[z] += n;
+      }
+    }
+  }
 }
 
 /** La bordure du tampon (voisins immédiats du tronçon) est-elle entièrement opaque ? */
@@ -106,8 +144,8 @@ function shellOpaque(): boolean {
       const edgeZ = edgeY || z === 0 || z === P - 1;
       const row = y * P2 + z * P;
       if (edgeZ) {
-        for (let x = 0; x < P; x++) if (MAT_VISIBLE[pad[row + x]] !== 1) return false;
-      } else if (MAT_VISIBLE[pad[row]] !== 1 || MAT_VISIBLE[pad[row + P - 1]] !== 1) return false;
+        for (let x = 0; x < P; x++) if (vis[row + x] !== 1) return false;
+      } else if (vis[row] !== 1 || vis[row + P - 1] !== 1) return false;
     }
   }
   return true;
@@ -140,58 +178,67 @@ const AX = [
 const STRIDE = [1, P2, P]; // x, y, z dans pad
 
 export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number, out: MeshBuffers): void {
-  if (world.getChunk(cx, cy, cz) === null) {
-    const u = world.fillMat[world.chunkIndex(cx, cy, cz)];
+  const ci = world.chunkIndex(cx, cy, cz);
+  if (world.isUniformChunk(ci)) {
+    const u = world.fillMat[ci];
     if (u === 0 || MAT_VISIBLE[u] !== 1) return;
     if (buried(world, cx, cy, cz)) return;
     fillPad(world, cx, cy, cz);
     if (shellOpaque()) return;
   } else if (!fillPad(world, cx, cy, cz)) return;
-  const base = [cx * CHUNK, cy * CHUNK, cz * CHUNK];
-  const v = new Array<number>(12);
+  countSlices();
+  const FULL = CHUNK * CHUNK;
   for (let a = 0; a < 3; a++) {
     const u = AX[a][1];
     const w = AX[a][2];
     const sa = STRIDE[a];
     const su = STRIDE[u];
     const sw = STRIDE[w];
+    const cnt = sliceCount[a];
+    const baseA = a === 0 ? cx * CHUNK : a === 1 ? cy * CHUNK : cz * CHUNK;
+    const baseU = u === 0 ? cx * CHUNK : u === 1 ? cy * CHUNK : cz * CHUNK;
+    const baseW = w === 0 ? cx * CHUNK : w === 1 ? cy * CHUNK : cz * CHUNK;
     for (let dir = -1; dir <= 1; dir += 2) {
       const nOff = sa * dir;
+      const nx = a === 0 ? dir : 0;
+      const ny = a === 1 ? dir : 0;
+      const nz = a === 2 ? dir : 0;
       for (let k = 0; k < CHUNK; k++) {
+        // pas de face : tranche vide, ou tranche voisine entièrement pleine
+        if (cnt[k + 1] === 0 || cnt[k + 1 + dir] === FULL) continue;
         // construction du masque de la tranche k
         let anyFace = false;
         for (let j = 0; j < CHUNK; j++) {
-          for (let i = 0; i < CHUNK; i++) {
-            // index dans pad de la cellule (a=k, u=i, w=j)
-            const pi = (k + 1) * sa + (i + 1) * su + (j + 1) * sw;
-            const m = pad[pi];
+          let pi = (k + 1) * sa + su + (j + 1) * sw;
+          const mrow = j * CHUNK;
+          for (let i = 0; i < CHUNK; i++, pi += su) {
             let key = 0;
-            if (m !== 0 && MAT_VISIBLE[m] === 1) {
+            if (vis[pi] === 1) {
               const q = pi + nOff;
-              if (MAT_VISIBLE[pad[q]] === 0) {
+              if (vis[q] === 0) {
                 // AO : voisins dans la couche q
-                const s1m = MAT_VISIBLE[pad[q - su]];
-                const s1p = MAT_VISIBLE[pad[q + su]];
-                const s2m = MAT_VISIBLE[pad[q - sw]];
-                const s2p = MAT_VISIBLE[pad[q + sw]];
-                const cmm = MAT_VISIBLE[pad[q - su - sw]];
-                const cpm = MAT_VISIBLE[pad[q + su - sw]];
-                const cpp = MAT_VISIBLE[pad[q + su + sw]];
-                const cmp = MAT_VISIBLE[pad[q - su + sw]];
-                const ao0 = s1m && s2m ? 0 : 3 - (s1m + s2m + cmm);
-                const ao1 = s1p && s2m ? 0 : 3 - (s1p + s2m + cpm);
-                const ao2 = s1p && s2p ? 0 : 3 - (s1p + s2p + cpp);
-                const ao3 = s1m && s2p ? 0 : 3 - (s1m + s2p + cmp);
-                key = (m | (ao0 << 8) | (ao1 << 10) | (ao2 << 12) | (ao3 << 14)) + 1;
+                const s1m = vis[q - su];
+                const s1p = vis[q + su];
+                const s2m = vis[q - sw];
+                const s2p = vis[q + sw];
+                const ao0 = s1m && s2m ? 0 : 3 - (s1m + s2m + vis[q - su - sw]);
+                const ao1 = s1p && s2m ? 0 : 3 - (s1p + s2m + vis[q + su - sw]);
+                const ao2 = s1p && s2p ? 0 : 3 - (s1p + s2p + vis[q + su + sw]);
+                const ao3 = s1m && s2p ? 0 : 3 - (s1m + s2p + vis[q - su + sw]);
+                key = (pad[pi] | (ao0 << 8) | (ao1 << 10) | (ao2 << 12) | (ao3 << 14)) + 1;
                 anyFace = true;
               }
             }
-            mask[j * CHUNK + i] = key;
+            mask[mrow + i] = key;
           }
         }
         if (!anyFace) continue;
         // fusion gloutonne
-        const plane = base[a] + k + (dir > 0 ? 1 : 0);
+        const plane = baseA + k + (dir > 0 ? 1 : 0);
+        vtx[a] = plane;
+        vtx[3 + a] = plane;
+        vtx[6 + a] = plane;
+        vtx[9 + a] = plane;
         for (let j = 0; j < CHUNK; j++) {
           for (let i = 0; i < CHUNK; ) {
             const key = mask[j * CHUNK + i];
@@ -204,49 +251,43 @@ export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number,
             const ao1 = (raw >> 10) & 3;
             const ao2 = (raw >> 12) & 3;
             const ao3 = (raw >> 14) & 3;
-            const uniform = ao0 === ao1 && ao1 === ao2 && ao2 === ao3;
             let wd = 1;
             let ht = 1;
-            if (uniform) {
+            if (ao0 === ao1 && ao1 === ao2 && ao2 === ao3) {
               while (i + wd < CHUNK && mask[j * CHUNK + i + wd] === key) wd++;
               outer: while (j + ht < CHUNK) {
-                for (let t = 0; t < wd; t++) if (mask[(j + ht) * CHUNK + i + t] !== key) break outer;
+                const r = (j + ht) * CHUNK + i;
+                for (let t = 0; t < wd; t++) if (mask[r + t] !== key) break outer;
                 ht++;
               }
             }
-            for (let jj = 0; jj < ht; jj++) for (let ii = 0; ii < wd; ii++) mask[(j + jj) * CHUNK + i + ii] = 0;
-            const u0 = base[u] + i;
+            for (let jj = 0; jj < ht; jj++) mask.fill(0, (j + jj) * CHUNK + i, (j + jj) * CHUNK + i + wd);
+            const u0 = baseU + i;
             const u1 = u0 + wd;
-            const w0 = base[w] + j;
+            const w0 = baseW + j;
             const w1 = w0 + ht;
             // sommets (u,w) : (u0,w0) (u1,w0) (u1,w1) (u0,w1) — sens direct vu depuis +a
-            const corners =
-              dir > 0
-                ? [
-                    [u0, w0],
-                    [u1, w0],
-                    [u1, w1],
-                    [u0, w1],
-                  ]
-                : [
-                    [u0, w0],
-                    [u0, w1],
-                    [u1, w1],
-                    [u1, w0],
-                  ];
-            const aoc = dir > 0 ? [ao0, ao1, ao2, ao3] : [ao0, ao3, ao2, ao1];
-            for (let c = 0; c < 4; c++) {
-              const pos = [0, 0, 0];
-              pos[a] = plane;
-              pos[u] = corners[c][0];
-              pos[w] = corners[c][1];
-              v[c * 3] = pos[0];
-              v[c * 3 + 1] = pos[1];
-              v[c * 3 + 2] = pos[2];
+            if (dir > 0) {
+              vtx[u] = u0;
+              vtx[w] = w0;
+              vtx[3 + u] = u1;
+              vtx[3 + w] = w0;
+              vtx[6 + u] = u1;
+              vtx[6 + w] = w1;
+              vtx[9 + u] = u0;
+              vtx[9 + w] = w1;
+              out.quad(vtx, nx, ny, nz, ao0, ao1, ao2, ao3, raw & 255);
+            } else {
+              vtx[u] = u0;
+              vtx[w] = w0;
+              vtx[3 + u] = u0;
+              vtx[3 + w] = w1;
+              vtx[6 + u] = u1;
+              vtx[6 + w] = w1;
+              vtx[9 + u] = u1;
+              vtx[9 + w] = w0;
+              out.quad(vtx, nx, ny, nz, ao0, ao3, ao2, ao1, raw & 255);
             }
-            const n = [0, 0, 0];
-            n[a] = dir;
-            out.quad(v, n[0], n[1], n[2], aoc[0], aoc[1], aoc[2], aoc[3], raw & 255);
             i += wd;
           }
         }

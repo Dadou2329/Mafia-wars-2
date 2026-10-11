@@ -5,7 +5,7 @@
 // Recherche de chemin A* (8 directions) avec lissage par ligne de marche.
 
 import { MAT_SOLID } from './materials';
-import { CHUNK, CHUNK_BITS, GROUND_VY, VOXEL, type VoxelWorld } from './voxel';
+import { CHUNK, CHUNK_BITS, CHUNK_VOL, GROUND_VY, VOXEL, type VoxelWorld } from './voxel';
 
 export const NAV_CELL = 0.5;
 /** Nombre maximal de sols superposés par cellule. */
@@ -131,33 +131,42 @@ export class NavGrid {
     const sx = world.sx;
     const sy = world.sy;
     const MAXC = L + 2; // sols mémorisés par colonne de voxels
-    // 1) sols de chaque colonne de voxels (lecture directe des tronçons)
-    const colFloors = new Int16Array(world.sx * world.sz * MAXC).fill(-1);
+    const exclude = opts.exclude;
+    // On avance par bandes d'une rangée de tronçons (32 voxels en z) : d'abord les sols de chaque
+    // colonne de voxels de la bande, puis les cellules 2×2 de la bande (une cellule ne chevauche
+    // jamais deux bandes). Chaque tronçon n'est lu (décompressé) qu'une fois.
+    const colFloors = new Int16Array(sx * CHUNK * MAXC);
     const solid = new Uint8Array(sy + 1);
-    for (let cz = 0; cz < world.cz; cz++)
+    const bufs = Array.from({ length: world.cy }, () => new Uint8Array(CHUNK_VOL));
+    const col: (Uint8Array | null)[] = new Array(world.cy).fill(null);
+    const uni = new Uint8Array(world.cy);
+    for (let cz = 0; cz < world.cz; cz++) {
+      colFloors.fill(-1);
+      // 1) sols de chaque colonne de voxels de la bande
       for (let cx = 0; cx < world.cx; cx++) {
+        for (let cy = 0; cy < world.cy; cy++) {
+          const ci = world.chunkIndex(cx, cy, cz);
+          col[cy] = world.chunkRaw(ci, bufs[cy]);
+          uni[cy] = MAT_SOLID[world.fillMat[ci]];
+        }
         for (let lz = 0; lz < CHUNK; lz++) {
           const z = cz * CHUNK + lz;
           if (z >= world.sz) break;
           for (let lx = 0; lx < CHUNK; lx++) {
             const x = cx * CHUNK + lx;
-            if (x >= world.sx) break;
+            if (x >= sx) break;
             // colonne de solidité
+            const base = (lz << CHUNK_BITS) | lx;
             for (let cy = 0; cy < world.cy; cy++) {
-              const ci = world.chunkIndex(cx, cy, cz);
-              const ch = world.chunks[ci];
+              const ch = col[cy];
               const y0 = cy * CHUNK;
-              if (ch === null) {
-                const s = MAT_SOLID[world.fillMat[ci]];
-                for (let y = 0; y < CHUNK && y0 + y < sy; y++) solid[y0 + y] = s;
-              } else {
-                const base = (lz << CHUNK_BITS) | lx;
-                for (let y = 0; y < CHUNK && y0 + y < sy; y++) solid[y0 + y] = MAT_SOLID[ch[(y << 10) | base]];
-              }
+              const n = Math.min(CHUNK, sy - y0);
+              if (ch === null) solid.fill(uni[cy], y0, y0 + n);
+              else for (let y = 0; y < n; y++) solid[y0 + y] = MAT_SOLID[ch[(y << 10) | base]];
             }
             solid[sy] = 0;
             let nf = 0;
-            const o = (z * sx + x) * MAXC;
+            const o = (lz * sx + x) * MAXC;
             for (let vy = 1; vy < sy - 1 && nf < MAXC; vy++) {
               if (solid[vy] || !solid[vy - 1]) continue;
               let ok = true;
@@ -172,35 +181,37 @@ export class NavGrid {
           }
         }
       }
-    // 2) cellules 2×2 : un sol de cellule existe si les 4 colonnes ont un sol voisin
-    const exclude = opts.exclude;
-    for (let k = 0; k < d; k++) {
-      for (let i = 0; i < w; i++) {
-        const c0 = ((k * 2) * sx + i * 2) * MAXC;
-        const c1 = ((k * 2) * sx + i * 2 + 1) * MAXC;
-        const c2 = ((k * 2 + 1) * sx + i * 2) * MAXC;
-        const c3 = ((k * 2 + 1) * sx + i * 2 + 1) * MAXC;
-        const n = k * w + i;
-        let cnt = 0;
-        for (let a = 0; a < MAXC && cnt < L; a++) {
-          const fa = colFloors[c0 + a];
-          if (fa < 0) break;
-          const fb = matchFloor(colFloors, c1, MAXC, fa);
-          if (fb < 0) continue;
-          const fc = matchFloor(colFloors, c2, MAXC, fa);
-          if (fc < 0) continue;
-          const fd = matchFloor(colFloors, c3, MAXC, fa);
-          if (fd < 0) continue;
-          const mn = Math.min(fa, fb, fc, fd);
-          const mx = Math.max(fa, fb, fc, fd);
-          if (mx - mn > STEP) continue;
-          if (exclude && exclude((i + 0.5) * NAV_CELL, (k + 0.5) * NAV_CELL, (mx - GROUND_VY) * VOXEL)) continue;
-          // pas de doublon (sols très proches)
-          if (cnt > 0 && Math.abs(nav.floor[n * L + cnt - 1] - mx) <= STEP) continue;
-          nav.floor[n * L + cnt] = mx;
-          cnt++;
+      // 2) cellules 2×2 : un sol de cellule existe si les 4 colonnes ont un sol voisin
+      const k1 = Math.min(d, ((cz + 1) * CHUNK) >> 1);
+      for (let k = (cz * CHUNK) >> 1; k < k1; k++) {
+        const lz = k * 2 - cz * CHUNK;
+        for (let i = 0; i < w; i++) {
+          const c0 = (lz * sx + i * 2) * MAXC;
+          const c1 = (lz * sx + i * 2 + 1) * MAXC;
+          const c2 = ((lz + 1) * sx + i * 2) * MAXC;
+          const c3 = ((lz + 1) * sx + i * 2 + 1) * MAXC;
+          const n = k * w + i;
+          let cnt = 0;
+          for (let a = 0; a < MAXC && cnt < L; a++) {
+            const fa = colFloors[c0 + a];
+            if (fa < 0) break;
+            const fb = matchFloor(colFloors, c1, MAXC, fa);
+            if (fb < 0) continue;
+            const fc = matchFloor(colFloors, c2, MAXC, fa);
+            if (fc < 0) continue;
+            const fd = matchFloor(colFloors, c3, MAXC, fa);
+            if (fd < 0) continue;
+            const mn = Math.min(fa, fb, fc, fd);
+            const mx = Math.max(fa, fb, fc, fd);
+            if (mx - mn > STEP) continue;
+            if (exclude && exclude((i + 0.5) * NAV_CELL, (k + 0.5) * NAV_CELL, (mx - GROUND_VY) * VOXEL)) continue;
+            // pas de doublon (sols très proches)
+            if (cnt > 0 && Math.abs(nav.floor[n * L + cnt - 1] - mx) <= STEP) continue;
+            nav.floor[n * L + cnt] = mx;
+            cnt++;
+          }
+          nav.count[n] = cnt;
         }
-        nav.count[n] = cnt;
       }
     }
     // 3) portails

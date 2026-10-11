@@ -2,9 +2,12 @@
 
 export const COMMON_UNIFORMS_GLSL = /* glsl */ `
 uniform highp sampler3D uLightTex;
+uniform highp sampler3D uLightCoarse;
 uniform highp sampler3D uTintTex;
 uniform vec3 uLightOrigin;
 uniform vec3 uLightSize;
+uniform vec3 uLightCoarseSize;
+uniform vec4 uLightWin;
 uniform vec3 uTintOrigin;
 uniform vec3 uTintSize;
 uniform vec3 uSkyAmb;
@@ -49,10 +52,21 @@ float fbm(vec2 p) {
 `;
 
 export const LIGHT_GLSL = /* glsl */ `
+// Lumière (ciel, lampes) : fenêtre fine (0,5 m) autour de la caméra, texture torique (répétée en x
+// et z) valable dans le rectangle uLightWin ; au-delà, volume grossier (1 m) de toute la ville.
 vec2 sampleLightVol(vec3 p) {
-  vec3 uvw = (p - uLightOrigin) / uLightSize;
-  if (uvw.y >= 1.0) return vec2(1.0, 0.0);
-  return texture(uLightTex, clamp(uvw, vec3(0.0005), vec3(0.9995))).rg;
+  vec3 q = p - uLightOrigin;
+  if (q.y >= uLightSize.y) return vec2(1.0, 0.0);
+  vec2 e = min(q.xz - uLightWin.xy, uLightWin.zw - q.xz);
+  float f = clamp(min(e.x, e.y) * 0.25, 0.0, 1.0);
+  vec2 L = vec2(1.0, 0.0);
+  if (f < 1.0) L = texture(uLightCoarse, clamp(q / uLightCoarseSize, vec3(0.0005), vec3(0.9995))).rg;
+  if (f > 0.0) {
+    vec3 uvw = q / uLightSize;
+    uvw.y = clamp(uvw.y, 0.0005, 0.9995);
+    L = mix(L, texture(uLightTex, uvw).rg, f);
+  }
+  return L;
 }
 // Couleur des lampes à cet endroit (néons roses, cyan, réverbères…), intensité comprise.
 vec3 lampColorAt(vec3 p) {

@@ -5,7 +5,7 @@
 // considéré comme exposé au ciel (couronnes des tours, antennes).
 
 import { MAT_BLOCKS_LIGHT } from '../../shared/materials';
-import { CHUNK, GROUND_VY, VOXEL, type VoxelWorld } from '../../shared/voxel';
+import { CHUNK, CHUNK_VOL, GROUND_VY, VOXEL, type VoxelWorld } from '../../shared/voxel';
 import type { LightSource } from '../../shared/city/gen/context';
 
 export interface TintVolume {
@@ -88,44 +88,86 @@ const SKY_DECAY = 22;
 /** Couche voxel (exclue) du sommet du volume d'éclairage : 48,5 m au-dessus de la rue. */
 export const LIGHT_TOP_VY = GROUND_VY + 194;
 
+/** Volume d'éclairage complet du monde (petits mondes, outils de développement, tests). */
 export function computeLightVolume(world: VoxelWorld, lights: LightSource[], maxVY = LIGHT_TOP_VY): LightVolume {
   const nx = world.sx >> 1;
   const nz = world.sz >> 1;
   const ny = Math.min(world.sy, maxVY) >> 1;
+  const data = computeLightBox(world, lights, 0, 0, nx, nz, 0, maxVY);
+  return { data, nx, ny, nz, origin: [0, -GROUND_VY * VOXEL, 0], cell: 0.5 };
+}
+
+/** Marge (cellules) autour d'une boîte : rayon de la plus grande lampe (14 m), au-delà de la diffusion du ciel. */
+export const LIGHT_MARGIN = 28;
+
+const scratchChunk = new Uint8Array(CHUNK_VOL);
+
+/**
+ * Lumière des cellules [i0, i0+ni) × [0, ny) × [k0, k0+nk) du volume fin (cellules de 0,5 m).
+ * Le calcul porte sur la boîte élargie de `margin` cellules (diffusion du ciel, lampes voisines) :
+ * une boîte calculée seule donne le même résultat que le volume complet, aux chemins de lumière
+ * sortant de la marge près. Résultat : RG entrelacé, indice ((k·ny + j)·ni + i)·2.
+ */
+export function computeLightBox(
+  world: VoxelWorld,
+  lights: LightSource[],
+  i0: number,
+  k0: number,
+  ni: number,
+  nk: number,
+  margin = LIGHT_MARGIN,
+  maxVY = LIGHT_TOP_VY,
+): Uint8Array {
+  const NXW = world.sx >> 1;
+  const NZW = world.sz >> 1;
+  const ny = Math.min(world.sy, maxVY) >> 1;
+  // boîte élargie (coordonnées de cellules du monde)
+  const ei0 = Math.max(0, i0 - margin);
+  const ek0 = Math.max(0, k0 - margin);
+  const ei1 = Math.min(NXW, i0 + ni + margin);
+  const ek1 = Math.min(NZW, k0 + nk + margin);
+  const nx = ei1 - ei0;
+  const nz = ek1 - ek0;
   const N = nx * ny * nz;
   const NY = nx; // pas d'un niveau
   const NZ = nx * ny; // pas d'une rangée
   const at = (i: number, j: number, k: number) => (k * ny + j) * nx + i;
+  const BL = MAT_BLOCKS_LIGHT;
   // 1) opacité : nombre de voxels opaques par cellule 2×2×2 (puis seuil, en place)
   const opaque = new Uint8Array(N);
-  for (let cy = 0; cy < world.cy; cy++) {
-    if (cy * CHUNK >= ny * 2) break;
-    for (let cz = 0; cz < world.cz; cz++) {
-      for (let cx = 0; cx < world.cx; cx++) {
-        const ch = world.getChunk(cx, cy, cz);
-        if (!ch) {
-          const u = world.fillMat[world.chunkIndex(cx, cy, cz)];
-          if (u === 0 || MAT_BLOCKS_LIGHT[u] !== 1) continue;
+  const vx0 = ei0 * 2;
+  const vx1 = ei1 * 2;
+  const vz0 = ek0 * 2;
+  const vz1 = ek1 * 2;
+  const vy1 = ny * 2;
+  for (let cy = 0; cy * CHUNK < vy1 && cy < world.cy; cy++) {
+    const ly1 = Math.min(vy1 - cy * CHUNK, CHUNK);
+    for (let cz = vz0 >> 5; cz <= (vz1 - 1) >> 5; cz++) {
+      const lz0 = Math.max(vz0, cz * CHUNK) - cz * CHUNK;
+      const lz1 = Math.min(vz1, (cz + 1) * CHUNK) - cz * CHUNK;
+      for (let cx = vx0 >> 5; cx <= (vx1 - 1) >> 5; cx++) {
+        const lx0 = Math.max(vx0, cx * CHUNK) - cx * CHUNK;
+        const lx1 = Math.min(vx1, (cx + 1) * CHUNK) - cx * CHUNK;
+        const ci = world.chunkIndex(cx, cy, cz);
+        const ch = world.chunkRaw(ci, scratchChunk);
+        if (ch === null) {
+          const u = world.fillMat[ci];
+          if (u === 0 || BL[u] !== 1) continue;
           // tronçon plein et opaque : toutes ses cellules sont opaques
-          for (let j = (cy * CHUNK) >> 1; j < Math.min(ny, ((cy + 1) * CHUNK) >> 1); j++)
-            for (let k = (cz * CHUNK) >> 1; k < Math.min(nz, ((cz + 1) * CHUNK) >> 1); k++)
-              for (let i = (cx * CHUNK) >> 1; i < Math.min(nx, ((cx + 1) * CHUNK) >> 1); i++) opaque[at(i, j, k)] = 8;
+          for (let j = (cy * CHUNK) >> 1; j < (cy * CHUNK + ly1) >> 1; j++)
+            for (let k = ((cz * CHUNK + lz0) >> 1) - ek0; k < ((cz * CHUNK + lz1) >> 1) - ek0; k++)
+              for (let i = ((cx * CHUNK + lx0) >> 1) - ei0; i < ((cx * CHUNK + lx1) >> 1) - ei0; i++) opaque[at(i, j, k)] = 8;
           continue;
         }
-        for (let y = 0; y < CHUNK; y++) {
-          const vy = cy * CHUNK + y;
-          if (vy >= ny * 2) break;
-          const j = vy >> 1;
-          for (let z = 0; z < CHUNK; z++) {
-            const k = (cz * CHUNK + z) >> 1;
-            if (k >= nz) break;
+        for (let y = 0; y < ly1; y++) {
+          const j = (cy * CHUNK + y) >> 1;
+          for (let z = lz0; z < lz1; z++) {
+            const k = ((cz * CHUNK + z) >> 1) - ek0;
             const row = (y << 10) | (z << 5);
-            for (let x = 0; x < CHUNK; x++) {
+            const base = (k * ny + j) * nx - ei0;
+            for (let x = lx0; x < lx1; x++) {
               const m = ch[row | x];
-              if (m !== 0 && MAT_BLOCKS_LIGHT[m] === 1) {
-                const i = (cx * CHUNK + x) >> 1;
-                if (i < nx) opaque[at(i, j, k)]++;
-              }
+              if (m !== 0 && BL[m] === 1) opaque[base + ((cx * CHUNK + x) >> 1)]++;
             }
           }
         }
@@ -179,24 +221,28 @@ export function computeLightVolume(world: VoxelWorld, lights: LightSource[], max
     }
     frontier = next;
   }
-  // 4) lampes : remplissage borné, atténuation euclidienne
+  // 4) lampes : remplissage borné, atténuation euclidienne (seules celles qui touchent la boîte)
   const cell = 0.5;
   const oy = -GROUND_VY * VOXEL; // origine verticale du volume (m)
   let visited = new Uint8Array(0);
   for (const L of lights) {
     const R = L.radius / cell;
-    const ci = Math.floor(L.x / cell);
+    // centre de la lampe en cellules du monde
+    const gx = L.x / cell - 0.5;
+    const gz = L.z / cell - 0.5;
+    if (gx + R < i0 - 1 || gx - R > i0 + ni || gz + R < k0 - 1 || gz - R > k0 + nk) continue;
+    const ci = Math.floor(L.x / cell) - ei0;
     const cj = Math.floor((L.y - oy) / cell);
-    const ck = Math.floor(L.z / cell);
+    const ck = Math.floor(L.z / cell) - ek0;
     if (ci < 0 || cj < 0 || ck < 0 || ci >= nx || cj >= ny || ck >= nz) continue;
     const r = Math.ceil(R);
     const size = 2 * r + 1;
     const vol = size * size * size;
     if (visited.length < vol) visited = new Uint8Array(vol);
     else visited.fill(0, 0, vol);
-    const lx = (L.x / cell) - 0.5;
+    const lx = gx - ei0;
     const ly = ((L.y - oy) / cell) - 0.5;
-    const lz = (L.z / cell) - 0.5;
+    const lz = gz - ek0;
     let cur: number[] = [ci, cj, ck];
     // si la source est dans une cellule opaque, on démarre quand même
     visited[(r * size + r) * size + r] = 1;
@@ -216,29 +262,29 @@ export function computeLightVolume(world: VoxelWorld, lights: LightSource[], max
         }
         if (step > 0 && opaque[n]) continue;
         for (let dir = 0; dir < 6; dir++) {
-          const ni = i + (dir === 0 ? 1 : dir === 1 ? -1 : 0);
+          const ni2 = i + (dir === 0 ? 1 : dir === 1 ? -1 : 0);
           const nj = j + (dir === 2 ? 1 : dir === 3 ? -1 : 0);
-          const nk = k + (dir === 4 ? 1 : dir === 5 ? -1 : 0);
-          if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
-          const li = ni - ci + r;
+          const nk2 = k + (dir === 4 ? 1 : dir === 5 ? -1 : 0);
+          if (ni2 < 0 || nj < 0 || nk2 < 0 || ni2 >= nx || nj >= ny || nk2 >= nz) continue;
+          const li = ni2 - ci + r;
           const lj = nj - cj + r;
-          const lk = nk - ck + r;
+          const lk = nk2 - ck + r;
           if (li < 0 || lj < 0 || lk < 0 || li >= size || lj >= size || lk >= size) continue;
           const vi = (lk * size + lj) * size + li;
           if (visited[vi]) continue;
           visited[vi] = 1;
-          if (opaque[at(ni, nj, nk)]) {
+          if (opaque[at(ni2, nj, nk2)]) {
             // on éclaire la face du mur mais on ne traverse pas
-            const dd = Math.hypot(ni - lx, nj - ly, nk - lz) / R;
+            const dd = Math.hypot(ni2 - lx, nj - ly, nk2 - lz) / R;
             if (dd < 1) {
               const t = 1 - dd * dd;
               const v = Math.min(255, Math.round(255 * L.intensity * t * (0.35 + 0.65 * t)));
-              const m = at(ni, nj, nk);
+              const m = at(ni2, nj, nk2);
               if (v > data[m * 2 + 1]) data[m * 2 + 1] = v;
             }
             continue;
           }
-          next.push(ni, nj, nk);
+          next.push(ni2, nj, nk2);
         }
       }
       cur = next;
@@ -258,7 +304,17 @@ export function computeLightVolume(world: VoxelWorld, lights: LightSource[], max
         if (k < nz - 1 && !opaque[n + NZ]) s = Math.max(s, data[(n + NZ) * 2]);
         data[n * 2] = s;
       }
-  return { data, nx, ny, nz, origin: [0, oy, 0], cell };
+  // 6) la boîte demandée
+  if (nx === ni && nz === nk) return data;
+  const out = new Uint8Array(ni * ny * nk * 2);
+  const di = i0 - ei0;
+  const dk = k0 - ek0;
+  for (let k = 0; k < nk; k++)
+    for (let j = 0; j < ny; j++) {
+      const src = at(di, j, k + dk) * 2;
+      out.set(data.subarray(src, src + ni * 2), (k * ny + j) * ni * 2);
+    }
+  return out;
 }
 
 /** Échantillonnage CPU (plus proche voisin) pour les objets dynamiques. */
