@@ -67,6 +67,7 @@ await A.waitForFunction(() => window.__app?.net?.room?.code, null, { timeout: 18
 const code = await A.evaluate(() => window.__app.net.room.code);
 // le robot (Even) reçoit des ordres du test sur son entrée standard (BOT_CMDS=1)
 const bot = spawn(process.execPath, ['tests/bot.mjs', code, 'even', new globalThis.URL(URL).origin], { stdio: ['pipe', 'inherit', 'inherit'], env: { ...process.env, BOT_CMDS: '1' } });
+bot.stdin.on('error', () => undefined); // robot déjà parti : on l'ignore (le test échouera plus loin)
 const botAct = (a) => bot.stdin.write(JSON.stringify(a) + '\n');
 await A.waitForFunction(() => Object.keys(window.__app.net.room?.players ?? {}).length === 2, null, { timeout: 180000, polling: 250 });
 await A.evaluate(() => window.__app.net.pick('dadou'));
@@ -279,10 +280,24 @@ check('HUD des capacités : une pastille par commande', chips >= 8, `${chips} pa
 
 console.log('=== Implants de l’adversaire, vus chez moi');
 // Even (le robot) s'équipe, sort sa lame et vient se placer à 4 m devant mon parrain, face à moi :
-// mon navigateur doit recevoir son apparence et construire ses implants
+// mon navigateur doit recevoir son apparence et construire ses implants. Rendez-vous 35 m plus
+// loin dans la rue : devant mon QG, mes hommes abattraient Even (qui ne bouge pas).
 await A.keyboard.press('KeyV'); // retour en vue subjective
-await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', x: s.x, z: s.z, yaw: s.yaw }), lane);
-await A.waitForFunction((s) => Math.hypot(window.__app.game.player.pos.x - s.x, window.__app.game.player.pos.z - s.z) < 1, lane, { timeout: 180000, polling: 250 });
+// sur le trottoir (12 m vers les façades depuis l'axe de la rue) : la circulation, simulée par
+// chaque navigateur, s'arrête devant un piéton sur la chaussée et masquerait Even ; à défaut
+// (trottoir encombré), au milieu de la rue
+const ground0 = await A.evaluate(() => window.__app.game.player.pos.y);
+const toFacade = { x: Math.sin(spot.yaw), z: Math.cos(spot.yaw) };
+let meet = { x: lane.x + Math.sin(lane.yaw) * 35 + toFacade.x * 12, z: lane.z + Math.cos(lane.yaw) * 35 + toFacade.z * 12, yaw: lane.yaw };
+for (const fallback of [false, true]) {
+  if (fallback) meet = { x: lane.x + Math.sin(lane.yaw) * 35, z: lane.z + Math.cos(lane.yaw) * 35, yaw: lane.yaw };
+  await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', x: s.x, z: s.z, yaw: s.yaw }), meet);
+  await A.waitForFunction((s) => Math.hypot(window.__app.game.player.pos.x - s.x, window.__app.game.player.pos.z - s.z) < 1, meet, { timeout: 180000, polling: 250 });
+  await waitGame(() => false, null, 0.5);
+  const y = await A.evaluate(() => window.__app.game.player.pos.y);
+  if (Math.abs(y - ground0) < 0.6) break;
+  console.log(`  (trottoir à ${y.toFixed(1)} m : rendez-vous au milieu de la rue)`);
+}
 const rivalKit = [
   ['grappin', 3, 'brasG'],
   ['lame', 2, 'brasD'],
@@ -294,33 +309,36 @@ const rivalKit = [
 ];
 botAct({ a: 'debugMoney', n: 50000 });
 for (const [id, lv, slot] of rivalKit) botAct({ a: 'debugCyber', id, lv, slot });
-const front = { x: lane.x + Math.sin(lane.yaw) * 4, z: lane.z + Math.cos(lane.yaw) * 4, yaw: lane.yaw + Math.PI };
+const front = { x: meet.x + Math.sin(meet.yaw) * 4, z: meet.z + Math.cos(meet.yaw) * 4, yaw: meet.yaw + Math.PI };
 botAct({ a: 'debugTp', x: front.x, z: front.z, yaw: front.yaw });
 await sleep(1500);
 botAct({ a: 'ab', id: 'bras', slot: 'brasD' });
+const rivalState = () => {
+  const g = window.__app.game;
+  return [...g.store.ents.values()]
+    .filter((e) => e.info?.kind === 1)
+    .map((e) => ({
+      id: e.info.id,
+      look: (e.view.cyber ?? []).join(' '),
+      fx: e.view.fx,
+      alive: e.alive,
+      d: Math.hypot(e.x - g.player.pos.x, e.z - g.player.pos.z),
+      sig: g.chars.states.get(e.info.id)?.cy?.sig ?? null,
+    }));
+};
 const rival = await A.waitForFunction(
-  () => {
-    const g = window.__app.game;
-    for (const e of g.store.ents.values()) {
-      if (e.info?.kind !== 1 || !e.view.cyber?.some((x) => x.startsWith('brasD=lame'))) continue;
-      const st = g.chars.states.get(e.id);
-      const near = Math.hypot(e.x - g.player.pos.x, e.z - g.player.pos.z);
-      if (!st?.cy || near > 8 || !(e.view.fx & 16)) return false;
-      return { id: e.id, look: e.view.cyber.join(' '), sig: String(st.cy.sig), near: near.toFixed(1), fx: e.view.fx };
-    }
-    return false;
+  (src) => {
+    const list = new Function(`return (${src})()`)();
+    const r = list.find((e) => /brasD=lame/.test(e.look) && e.d < 8 && e.sig && e.fx & 16);
+    return r ? { ...r, sig: String(r.sig) } : false;
   },
-  null,
+  rivalState.toString(),
   { timeout: 240000, polling: 500 },
 )
   .then((h) => h.jsonValue())
   .catch(() => null);
-if (!rival)
-  console.log('diagnostic Even :', JSON.stringify(await A.evaluate(() => {
-    const g = window.__app.game;
-    return [...g.store.ents.values()].filter((e) => e.info?.kind === 1).map((e) => ({ id: e.id, cyber: e.view.cyber, fx: e.view.fx, d: Math.hypot(e.x - g.player.pos.x, e.z - g.player.pos.z).toFixed(1), cy: !!g.chars.states.get(e.id)?.cy, pending: !!g.chars.states.get(e.id)?.cyPending }));
-  })));
-check('apparence d’Even reçue (bras, jambes, torse, yeux)', !!rival && /brasG=grappin/.test(rival.look) && /jambes1=esquive/.test(rival.look) && /yeux1=thermique/.test(rival.look), rival ? rival.look : 'Even introuvable près de moi');
+if (!rival) console.log('diagnostic Even :', JSON.stringify(await A.evaluate(new Function(`return (${rivalState.toString()})()`))));
+check('apparence d’Even reçue (bras, jambes, torse, yeux)', !!rival && /brasG=grappin/.test(rival.look) && /jambes1=esquive/.test(rival.look) && /yeux1=thermique/.test(rival.look), rival ? `${rival.look} — à ${rival.d.toFixed(1)} m` : 'Even introuvable près de moi');
 check('implants d’Even construits par mon rendu', !!rival?.sig, rival ? `signature ${rival.sig.slice(0, 60)}` : '');
 check('lame d’Even sortie, visible chez moi (bit du bras droit)', !!rival && (rival.fx & 16) !== 0, rival ? `fx ${rival.fx}` : '');
 // regard vers Even, un peu vers le bas
@@ -331,6 +349,44 @@ await A.evaluate((f) => {
 }, front);
 await waitGame(() => false, null, 0.6);
 await shot('08-rival-implants.png');
+
+// Even lance son grappin vers une façade : chez moi, le câble doit apparaître (bit du grappin et
+// ancre reçus) ; le serveur garde le câble 7 s, on relance au besoin (recharge de 3,5 s)
+const aim = await A.evaluate((f) => {
+  const g = window.__app.game;
+  const ev = [...g.store.ents.values()].find((e) => e.info?.kind === 1);
+  if (!ev) return null;
+  const o = { x: f.x, y: ev.y + 1.6, z: f.z };
+  // une façade à 4–30 m, en tournant autour d'Even : la plus proche (câble bien visible)
+  let best = null;
+  for (const pitch of [0.6, 0.9]) {
+    for (let i = 0; i < 24; i++) {
+      const yaw = (i / 24) * Math.PI * 2;
+      const d = { x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+      const dist = g.world.world.raycast(o.x, o.y, o.z, d.x, d.y, d.z, 30, undefined, 'solid');
+      if (dist >= 4 && (!best || dist < best.dist)) best = { o: [o.x, o.y, o.z], d: [d.x, d.y, d.z], p: [o.x + d.x * dist, o.y + d.y * dist, o.z + d.z * dist], dist };
+    }
+  }
+  return best;
+}, front);
+let cable = false;
+for (let i = 0; i < 3 && aim && rival && !cable; i++) {
+  botAct({ a: 'ab', id: 'grappin', slot: 'brasG', o: aim.o, d: aim.d, p: aim.p });
+  cable = await A.waitForFunction(
+    (id) => {
+      const g = window.__app.game;
+      const e = g.store.ents.get(id);
+      return !!e && (e.view.fx & 1) !== 0 && g.cyber.anchors.has(id);
+    },
+    rival.id,
+    { timeout: 12000, polling: 100 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  if (cable) await shot('09-rival-grapple.png');
+  else await sleep(4000);
+}
+check('grappin d’Even : câble visible chez moi', cable, aim ? `ancre à ${aim.dist.toFixed(1)} m` : 'aucune façade visée');
 
 check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 3).join(' | '));
 bot.kill();

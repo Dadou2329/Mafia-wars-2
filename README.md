@@ -327,11 +327,13 @@ Limites actuelles, en toute transparence :
 
 - **Implants et nouveaux déplacements vérifiés surtout sans navigateur.** Les déplacements,
   les capacités, les opérations et le QG ont leurs tests automatiques ; dans le vrai client,
-  le grappin, l’esquive, la glissade, le pistolet d’avant-bras, le camouflage et les visions
-  ont été vérifiés en rendu logiciel, à très faible cadence (quelques images par seconde) :
-  la sensation de jeu (accélérations, caméra, rythme des enchaînements) n’a pas pu être jugée à
-  60 images par seconde sur une vraie carte graphique. Les sons n’ont pas été écoutés (contrôlés
-  par mesure). Le mini-jeu de piratage n’a pas été joué à la main.
+  le grappin, l’esquive, la glissade, le pistolet d’avant-bras, le camouflage, les visions,
+  l’écran CYBERNÉTIQUE et les implants de l’adversaire vus chez soi (apparence, lame sortie,
+  câble du grappin) ont été vérifiés en rendu logiciel, à très faible cadence (quelques images
+  par seconde), face à un robot de test qui n’affiche rien : jamais avec deux joueurs humains
+  sur deux écrans. La sensation de jeu (accélérations, caméra, rythme des enchaînements) n’a
+  pas pu être jugée à 60 images par seconde sur une vraie carte graphique. Les sons n’ont pas
+  été écoutés (contrôlés par mesure). Le mini-jeu de piratage n’a pas été joué à la main.
 - Les implants sont réservés aux deux parrains : les PNJ n’en portent pas (les gardes d’élite
   sont blindés, sans implants). Le drone de combat peut être abattu par l’autre joueur ; les PNJ
   l’ignorent.

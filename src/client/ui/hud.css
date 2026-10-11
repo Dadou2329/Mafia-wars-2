@@ -578,6 +578,8 @@
 
 .hud-prompt {
   position: absolute;
+  /* au-dessus du journal holographique et des panneaux d'information (l'action prime) */
+  z-index: 2;
   left: 50%;
   top: 58%;
   transform: translateX(-50%);
