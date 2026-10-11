@@ -130,3 +130,10 @@ Conditions : prix + nombre minimal de quartiers contrôlés (2, 4 et 6 pour les 
 - Palette : nuit bleu-noir, néons magenta/cyan, or pour le luxe ; Dadou cramoisi néon (#ff2a4d),
   Even bleu néon (#4fd8ff).
 - Typographies : titres art déco/néon, corps lisible avec tous les accents français.
+- Matières (sans aucune texture, calculées à partir de la position) : brique américaine, pierre
+  calcaire, granit, céramique, béton banché, métaux brossés et polis à reflets, vitrages avec
+  pièces en parallaxe la nuit, murs-rideaux qui reflètent les fenêtres éclairées, écrans géants,
+  chaussée mouillée et flaques ; les détails plus fins qu'un pixel s'effacent au loin (pas de
+  moirage).
+- Personnages : voxels de 1/64 m, proportions adultes (environ 7,5 têtes), visages détaillés,
+  animation procédurale (marche, attitudes, visée par arme, conduite), trois niveaux de détail.

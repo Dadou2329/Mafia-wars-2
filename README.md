@@ -20,7 +20,9 @@ en français. Suite de *MAFIA WARS : Dadou vs Even* (Londres, 1888), dont il rep
 - Graphismes voxel procéduraux, sons et musiques synthétisés : aucun fichier externe n’est
   téléchargé pendant le jeu.
 - Une ville de **576 × 480 m** : 13 quartiers, 89 bâtiments au plan, 5 ponts, 4 lignes de métro ;
-  personnages voxel fins (voxels de 1/64 m, visages détaillés, animation procédurale).
+  personnages voxel fins (voxels de 1/64 m, visages détaillés, animation procédurale) ; matières
+  de 2085 calculées sans texture (brique américaine, calcaire, granit, céramique, métaux polis,
+  vitrages et murs-rideaux qui reflètent la ville, chaussée mouillée et flaques sous la pluie).
 
 ---
 
