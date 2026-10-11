@@ -4,6 +4,7 @@
 import type { BuildingInfo, HoloInfo, LightSource, PropPlacement, ScreenInfo } from '../../shared/city/gen/context';
 import { generateCity } from '../../shared/city/gen/city';
 import { buildCityNav } from '../../shared/city/navBuild';
+import { HQ_BUILDING } from '../../shared/city/plan';
 import { NavGrid } from '../../shared/nav';
 import { CHUNK, VoxelWorld, type ChunkExport } from '../../shared/voxel';
 import { computeTintVolume, type TintVolume } from '../render/lightVolume';
@@ -80,6 +81,13 @@ export function loadWorld(): Promise<WorldData> {
       for (const w of workers) w.terminate();
       const m = meta;
       const lightFeed = new WorkerLightFeed(lightDims(world), [world.sx, world.sy, world.sz], world.exportChunks(), m.lights as LightSource[]);
+      // l'éclairage se calcule d'abord autour des QG de départ (la partie commence là)
+      lightFeed.focus(
+        (['dadou', 'even'] as const).map((s) => {
+          const r = HQ_BUILDING[s].rect;
+          return [(r[0] + r[2]) / 2, (r[1] + r[3]) / 2] as [number, number];
+        }),
+      );
       progress('New York est prête.', 1);
       resolve({
         world,

@@ -12,6 +12,8 @@ export interface LightFeed {
   readonly coarse: Uint8Array;
   /** Tuiles fines demandées (ordre de priorité) et position de la caméra (m). */
   want(tiles: number[], camX: number, camZ: number): void;
+  /** Avant la partie : les calculs de fond partent de ces points (QG de départ). */
+  focus(points: [number, number][]): void;
   /** Reçoit les tuiles fines (données à téléverser aussitôt). */
   onTile: ((t: number, fine: Uint8Array) => void) | null;
   /** Tuiles dont la version grossière a changé depuis le dernier appel. */
@@ -34,6 +36,10 @@ abstract class BaseFeed implements LightFeed {
   }
 
   abstract want(tiles: number[], camX: number, camZ: number): void;
+
+  focus(points: [number, number][]): void {
+    void points;
+  }
   abstract pump(): void;
 
   takeCoarse(): number[] {
@@ -86,6 +92,10 @@ export class WorkerLightFeed extends BaseFeed {
 
   want(tiles: number[], camX: number, camZ: number): void {
     this.worker.postMessage({ type: 'want', tiles, cam: [camX, camZ] });
+  }
+
+  override focus(points: [number, number][]): void {
+    this.worker.postMessage({ type: 'focus', points });
   }
 
   pump(): void {

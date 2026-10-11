@@ -14,7 +14,8 @@ const MAX_PER_MSG = 12;
 
 let svc: LightService | null = null;
 let wanted: number[] = [];
-let cam: [number, number] = [0, 0];
+/** Points d'intérêt (caméra, ou QG de départ avant la partie) : la tâche de fond part de là. */
+let focus: [number, number][] = [[0, 0]];
 let coarseSent = new Uint8Array(0);
 let blocksDone = new Uint8Array(0);
 let timer: ReturnType<typeof setTimeout> | 0 = 0;
@@ -35,7 +36,10 @@ self.onmessage = (e: MessageEvent) => {
     schedule();
   } else if (m.type === 'want') {
     wanted = m.tiles as number[];
-    cam = m.cam as [number, number];
+    focus = [m.cam as [number, number]];
+    schedule();
+  } else if (m.type === 'focus') {
+    focus = m.points as [number, number][];
     schedule();
   }
 };
@@ -103,7 +107,8 @@ function pump(): void {
     if (blocksDone[b]) continue;
     const i = b % bx;
     const k = (b - i) / bx;
-    const dd = Math.hypot((i + 0.5) * blockM - cam[0], (k + 0.5) * blockM - cam[1]);
+    let dd = Infinity;
+    for (const [fx, fz] of focus) dd = Math.min(dd, Math.hypot((i + 0.5) * blockM - fx, (k + 0.5) * blockM - fz));
     if (dd < bestD) {
       bestD = dd;
       best = b;
@@ -134,7 +139,7 @@ function pump(): void {
       }
   if (x1 >= 0) {
     const items: { t: number; coarse: Uint8Array }[] = [];
-    for (const r of s.computeRect(x0, z0, x1, z1)) if (!coarseSent[r.t]) items.push(coarseItem(s, r.t, r.fine));
+    for (const r of s.computeRect(x0, z0, x1, z1, 'if-room')) if (!coarseSent[r.t]) items.push(coarseItem(s, r.t, r.fine));
     if (items.length > 0)
       post(
         { type: 'coarse', items },

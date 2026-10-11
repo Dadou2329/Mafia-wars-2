@@ -127,6 +127,9 @@ export class GameClient {
   private fogBoost = 1;
   private regions: { mesh: THREE.Mesh; x: number; z: number; r: number }[] = [];
   private lightStream: LightStream;
+  /** Voile noir du début de partie : levé quand le parrain est placé et l'éclairage arrivé. */
+  private curtain: HTMLElement | null = null;
+  private curtainT = 0;
   private cullAcc = 1;
   private water: ReturnType<typeof createWater>;
   pub: PublicState;
@@ -256,6 +259,7 @@ export class GameClient {
     this.hud = new Hud(this.you);
     this.overlay = h('div', { class: `layer game-overlay mw-${this.you}` });
     app.root.appendChild(this.overlay);
+    this.showCurtain();
     this.overlay.appendChild(this.hud.el);
     this.strategic = new StrategicMap(this);
     this.overlay.appendChild(this.strategic.el);
@@ -357,6 +361,7 @@ export class GameClient {
     this.glass.restore();
     for (const g of init.glass ?? []) this.glass.apply(g[0], g[1], g[2], g[3]);
     this.placed = false;
+    if (init.time < 10) this.showCurtain();
     // nouvelle partie : on repart d'un parrain vivant, sans événement en cours
     this.player.dead = false;
     this.deadSince = -1;
@@ -809,6 +814,22 @@ export class GameClient {
   }
 
   /** Distance d'affichage selon la qualité : régions lointaines masquées, plan lointain réduit. */
+  private showCurtain(): void {
+    this.curtain?.remove();
+    this.curtainT = 0;
+    this.curtain = h('div', { class: 'game-curtain', style: 'position:absolute;inset:0;background:#000;pointer-events:none;transition:opacity 0.8s ease' });
+    // sous le HUD : seule la vue 3D est voilée
+    this.overlay.insertBefore(this.curtain, this.overlay.firstChild);
+  }
+
+  private liftCurtain(): void {
+    const c = this.curtain;
+    if (!c) return;
+    this.curtain = null;
+    c.style.opacity = '0';
+    setTimeout(() => c.remove(), 900);
+  }
+
   private cullRegions(cam: THREE.Vector3): void {
     const q = qualityProfile(settings.quality);
     const d = q.drawDist;
@@ -973,6 +994,11 @@ export class GameClient {
     // ------------------------------------------------- monde
     const camPos = this.camera.position;
     this.lightStream.update(camPos.x, camPos.z);
+    if (this.curtain && this.placed) {
+      this.curtainT += dt;
+      // l'éclairage fin autour du parrain arrive en général en une fraction de seconde
+      if (this.lightStream.ready || this.curtainT > 4) this.liftCurtain();
+    }
     this.cullAcc += dt;
     if (this.cullAcc > 0.25) {
       this.cullAcc = 0;

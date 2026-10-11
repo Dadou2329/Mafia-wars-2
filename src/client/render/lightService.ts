@@ -146,9 +146,10 @@ export class LightService {
 
   /**
    * Calcule d'un coup les tuiles du rectangle [tx0, tx1) × [tz0, tz1) (marge partagée) et les met
-   * en cache. Renvoie les tuiles calculées avec leurs données fines.
+   * en cache (« if-room » : seulement s'il reste de la place, sans rien oublier pour elles).
+   * Renvoie les tuiles calculées avec leurs données fines.
    */
-  computeRect(tx0: number, tz0: number, tx1: number, tz1: number): { t: number; fine: Uint8Array }[] {
+  computeRect(tx0: number, tz0: number, tx1: number, tz1: number, keep: 'always' | 'if-room' = 'always'): { t: number; fine: Uint8Array }[] {
     const d = this.dims;
     const T = LIGHT_TILE;
     tx0 = Math.max(0, tx0);
@@ -174,7 +175,7 @@ export class LightService {
             const src = ((bk + k) * d.ny + j) * ni + bi;
             fine.set(box.subarray(src * 2, (src + w) * 2), (k * d.ny + j) * w * 2);
           }
-        this.store(t, fine);
+        if (keep === 'always' || this.cachedBytes < CACHE_BUDGET) this.store(t, fine);
         out.push({ t, fine });
       }
     return out;

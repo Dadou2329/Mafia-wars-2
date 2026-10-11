@@ -45,6 +45,8 @@ export class LightStream {
   private queue: { t: number; fine: Uint8Array }[] = [];
   private coarseQueue: number[] = [];
   private box = new THREE.Box3();
+  /** La lumière fine autour de la caméra est-elle arrivée ? */
+  ready = false;
   private dst = new THREE.Vector3();
 
   constructor(
@@ -134,7 +136,8 @@ export class LightStream {
       this.upload(this.coarseSrc, this.coarseTex, this.box);
     }
     // plus grand rectangle de tuiles chargées autour de la caméra
-    if (!this.loaded(ctx, ctz)) {
+    this.ready = this.loaded(ctx, ctz);
+    if (!this.ready) {
       envUniforms.uLightWin.value.set(0, 0, 0, 0);
       return;
     }
