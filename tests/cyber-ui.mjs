@@ -49,6 +49,11 @@ A.on('console', (m) => {
   errors.push(m.text().slice(0, 300));
   console.log('   [erreur de la page]', m.text().slice(0, 300));
 });
+// processus de rendu tué (mémoire) : les évaluations en cours ne reviendraient jamais
+A.on('crash', () => {
+  console.log('ÉCHEC  la page a planté (processus de rendu tué, mémoire insuffisante ?)');
+  process.exit(2);
+});
 A.on('pageerror', (e) => {
   errors.push(`pageerror: ${e.message}`);
   console.log('   [exception de la page]', e.message, (e.stack ?? '').split('\n').slice(1, 4).join(' | '));
@@ -86,6 +91,9 @@ const pressFor = async (key, open, name) => {
   return ok;
 };
 const action = (txt) => `.cy-actions .btn:has-text("${txt}")`;
+// lectures du DOM : la page peut geler plusieurs dizaines de secondes après une téléportation
+const textOf = (sel) => A.locator(sel).first().textContent({ timeout: 150000 }).catch(() => '');
+const attrOf = (sel, name) => A.locator(sel).first().getAttribute(name, { timeout: 150000 }).catch(() => null);
 const isOpen = () => A.evaluate(() => !!document.querySelector('.cy-root') && !document.querySelector('.cy-root').classList.contains('hidden'));
 /** État de la partie qui décide où vont les touches (en cas d'échec). */
 const diag = () =>
@@ -172,7 +180,7 @@ const money0 = await A.evaluate(() => window.__app.game.priv.money);
 await pressFor('KeyI', true, 'touche I : écran ouvert');
 check('pas de menu de pause par-dessus', await A.evaluate(() => !document.querySelector('.modal-layer')));
 await sleep(800);
-check('bandeau « Station : … — installation possible »', /installation possible/.test((await A.textContent('.cy-station')) ?? ''));
+check('bandeau « Station : … — installation possible »', /installation possible/.test((await textOf('.cy-station')) ?? ''));
 await shot('cyber-01-ouvert.png');
 
 // achat du grappin : il se pose tout seul au bras gauche
@@ -204,7 +212,7 @@ await waitCyber('achat : lame posée au bras droit', '(c) => c.owned.lame === 1 
 await ready();
 await click('.cy-slot[data-slot="brasG"]');
 await click('.cy-item[data-id="lame"]');
-check('remplacement annoncé (« Remplace : Grappin… »)', /Remplace : Grappin/.test((await A.textContent('.cy-actions')) ?? ''));
+check('remplacement annoncé (« Remplace : Grappin… »)', /Remplace : Grappin/.test((await textOf('.cy-actions')) ?? ''));
 await shot('cyber-04-remplacement.png');
 await click(action('Déplacer'));
 await waitCyber('déplacement : lame au bras gauche, bras droit libre, grappin en réserve', '(c) => c.equip.brasG === "lame" && !c.equip.brasD && c.owned.grappin === 2');
@@ -249,29 +257,33 @@ await shot('cyber-07-hud.png');
 // ------------------------------------------------------------------ hors station
 if (clinic) await A.evaluate((c) => window.__app.net.act({ a: 'debugTp', x: c.x + 30 * Math.sin(c.yaw), z: c.z + 30 * Math.cos(c.yaw), yaw: c.yaw }), clinic);
 await waitCyber('hors station (priv.cyber.station = null)', '(c) => c.station === null');
+await sleep(4000);
 await pressFor('KeyI', true, 'hors station : écran rouvert (touche I)');
 await sleep(800);
-check('hors station : bandeau « consultation seulement »', /consultation seulement/.test((await A.textContent('.cy-station')) ?? ''));
+check('hors station : bandeau « consultation seulement »', /consultation seulement/.test((await textOf('.cy-station')) ?? ''));
 await click('.cy-item[data-id="poing"]');
-const offBuy = await A.getAttribute(action('Acheter'), 'aria-disabled');
+const offBuy = await attrOf(action('Acheter'), 'aria-disabled');
 check('hors station : « Acheter » refusé', offBuy === 'true');
 await A.locator(action('Acheter')).first().click({ force: true });
 await sleep(400);
-check('hors station : la raison s’affiche', /Hors station/.test((await A.textContent('.cy-feedback')) ?? ''));
+check('hors station : la raison s’affiche', /Hors station/.test((await textOf('.cy-feedback')) ?? ''));
 await waitCyber('hors station : aucun achat', '(c) => !c.owned.poing', 3000);
 await shot('cyber-08-hors-station.png');
 await pressFor('KeyI', false, 'touche I : écran refermé');
 
 // ------------------------------------------------------------------ téléphone : appli Implants
 await A.keyboard.press('Tab');
-await A.waitForFunction(() => !document.querySelector('.phone')?.classList.contains('hidden'), null, WAIT).catch(() => {});
+const phoneOpen = await A.waitForFunction(() => !document.querySelector('.phone')?.classList.contains('hidden'), null, WAIT)
+  .then(() => true)
+  .catch(() => false);
+check('téléphone ouvert (Tab)', phoneOpen, phoneOpen ? '' : await diag());
 await sleep(1000);
 await A.evaluate(() => [...document.querySelectorAll('.phone-app')].find((b) => /Implants/.test(b.textContent ?? ''))?.click());
 await A.waitForFunction(() => /emplacements occupés/.test(document.querySelector('.phone-body')?.textContent ?? ''), null, WAIT).catch(() => {});
-check('téléphone : appli Implants', /emplacements occupés/.test((await A.textContent('.phone-body')) ?? ''));
+check('téléphone : appli Implants', /emplacements occupés/.test((await textOf('.phone-body')) ?? ''));
 await A.evaluate(() => [...document.querySelectorAll('.phone-body .phone-btn')].find((b) => /^Itinéraire/.test(b.textContent ?? ''))?.click());
 await A.waitForFunction(() => /Effacer l’itinéraire/.test(document.querySelector('.phone-body')?.textContent ?? ''), null, WAIT).catch(() => {});
-check('téléphone : itinéraire vers la clinique', /Effacer l’itinéraire/.test((await A.textContent('.phone-body')) ?? ''));
+check('téléphone : itinéraire vers la clinique', /Effacer l’itinéraire/.test((await textOf('.phone-body')) ?? ''));
 await shot('cyber-09-telephone.png');
 await A.evaluate(() => [...document.querySelectorAll('.phone-body .phone-btn')].find((b) => /écran CYBERNÉTIQUE/.test(b.textContent ?? ''))?.click());
 await A.waitForFunction(() => !document.querySelector('.cy-root')?.classList.contains('hidden'), null, WAIT).catch(() => {});

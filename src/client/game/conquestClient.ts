@@ -355,7 +355,7 @@ export class ConquestClient implements ClientModule {
   private markers: OpMarker[] = [];
   private geos: THREE.BufferGeometry[];
   private hack: HackGame;
-  private acc = 1;
+  private lastRefresh = -1;
 
   constructor(gc: GameClient) {
     this.gc = gc;
@@ -415,6 +415,13 @@ export class ConquestClient implements ClientModule {
   private prog(v: OpView): number {
     const dt = Math.min(1.2, nowS() - v.t);
     return Math.max(0, Math.min(1, v.o.p + v.o.rate * dt));
+  }
+
+  /** Un de nos lieutenants a l'ordre de prendre ce bâtiment (son nom), sinon ''. */
+  private ltEnRoute(bid: number): string {
+    const name = BUILDINGS[bid].name;
+    const lt = this.gc.priv.lieutenants.find((l) => l.alive && l.order === 'attack_building' && l.targetName === name);
+    return lt ? lt.name : '';
   }
 
   /** Étape à mener maintenant (caméras déjà coupées : la première étape « terminal » est acquise). */
@@ -556,12 +563,12 @@ export class ConquestClient implements ClientModule {
 
   // ------------------------------------------------------------------ boucle
 
-  update(dt: number, now: number): void {
+  update(_dt: number, now: number): void {
     this.hack.update();
     for (const m of this.markers) m.update(now);
-    this.acc += dt;
-    if (this.acc < 0.1) return;
-    this.acc = 0;
+    // 10 fois par seconde (horloge réelle : à chaque image si les images sont lentes)
+    if (now - this.lastRefresh < 0.1 && now >= this.lastRefresh) return;
+    this.lastRefresh = now;
     this.refresh();
   }
 
@@ -620,7 +627,7 @@ export class ConquestClient implements ClientModule {
     const n = plan.steps.length;
     const idx = this.curIndex(bid, plan, op);
     const p = v ? this.prog(v) : 0;
-    const sig = JSON.stringify([bid, mode, op && { ...op, p: Math.round(p * 50), rate: undefined }, idx, this.locked(bid), gc.pub.buildings[bid]?.guards, this.owner(bid), gc.pub.territories?.[gc.you]]);
+    const sig = JSON.stringify([bid, mode, op && { ...op, p: Math.round(p * 50), rate: undefined }, idx, this.locked(bid), gc.pub.buildings[bid]?.guards, this.owner(bid), gc.pub.territories?.[gc.you], mode !== 'threat' && this.ltEnRoute(bid)]);
     if (sig === this.panelSig) return;
     this.panelSig = sig;
     const el = this.panel;
@@ -672,6 +679,8 @@ export class ConquestClient implements ClientModule {
     const line = (cls: string, ...c: (string | HTMLElement)[]) => h('div', { class: `mw-op-state ${cls}` }, ...c);
     if (this.locked(bid)) return line('bad', `QG imprenable : contrôlez ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} (vous en avez ${gc.pub.territories[gc.you]}).`);
     if (!op) {
+      const lt = this.ltEnRoute(bid);
+      if (lt) return line('', h('b', null, lt), ` est en route vers ${s.place}.`);
       if (s.key === 'terminal') return line('', `Piratez le terminal de sécurité près de l’entrée (${actionKey(settings.bindings, 'interact')}).`);
       return line('', 'Rendez-vous à l’objectif (repère) et appuyez sur ', h('b', null, actionKey(settings.bindings, 'interact')), ', ou envoyez un lieutenant.');
     }
@@ -687,7 +696,14 @@ export class ConquestClient implements ClientModule {
     const lt = op.lt ?? 'un lieutenant';
     const boss = mode === 'mine' ? 'Vous' : BOSS_NAME[op.slot];
     const who = by === 3 ? `${boss} et ${lt}` : by === 1 ? boss : by === 2 ? lt : '';
-    if (!who) return line('warn', mode === 'mine' ? `Personne à l’œuvre : l’étape se perd. Rendez-vous ${aPlace(s.place)}.` : 'Personne à l’œuvre pour l’instant.');
+    if (!who) {
+      if (mode !== 'mine') return line('warn', 'Personne à l’œuvre pour l’instant.');
+      // un lieutenant en route (son assaut le mène ici) ; sinon : où aller, ou l'étape se perd
+      const lt = this.ltEnRoute(bid);
+      if (lt) return line('', h('b', null, lt), ` se rend ${aPlace(s.place)}.`);
+      if (op.p <= 0) return line('', `Rendez-vous ${aPlace(s.place)} et appuyez sur `, h('b', null, actionKey(settings.bindings, 'interact')), ', ou envoyez un lieutenant.');
+      return line('warn', `Personne à l’œuvre : l’étape se perd. Rendez-vous ${aPlace(s.place)}.`);
+    }
     return line('', h('b', null, who), by === 3 ? ' — progression accélérée' : '');
   }
 

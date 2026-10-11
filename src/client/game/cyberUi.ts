@@ -857,9 +857,12 @@ export class CyberUi implements ClientModule {
 
   // ======================================================================= aperçu
 
-  /** Aperçu 3D du parrain (characters/preview.ts) dans un canevas neuf ; silhouette en cas d'échec. */
+  /**
+   * Aperçu 3D du parrain (characters/preview.ts) dans un canevas neuf ; silhouette en cas d'échec,
+   * et en qualité « basse » (machines modestes : pas de second contexte WebGL).
+   */
   private ensurePreview(): void {
-    if (this.preview || this.previewFailed || this.host.noPreview) return;
+    if (this.preview || this.previewFailed || this.host.noPreview || settings.quality === 'basse') return;
     const canvas = h('canvas', { class: 'cy-canvas' });
     // sous les légendes de la scène (indice, aperçu), au-dessus de la grille
     this.stage.insertBefore(canvas, this.figure.nextSibling);

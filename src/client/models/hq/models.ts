@@ -512,10 +512,10 @@ export function hoverBikeModel(): M {
 
 // ====================================================================== recrutement automatique
 
-/** Borne de recrutement : grand écran, lecteur d'identité, fente des contrats, projecteur holographique. */
 /** Écran de la borne (la toile se pose au fond du cadre). */
 export const KIOSK_ZONE: ScreenZone = { x0: 4, y0: 13, x1: 11, y1: 26, z: 7.15, cells: [[3, 12, 12, 27]] };
 
+/** Borne de recrutement : grand écran, lecteur d'identité, fente des contrats, projecteur holographique. */
 export function kioskModel(): M {
   const m = back(15, 33, 10);
   m.box(1, 0, 1, 14, 2, 10, K.black);

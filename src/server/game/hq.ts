@@ -82,16 +82,6 @@ export function hqDefenseMul(g: Game, bid: number): number {
   return s && has(g, s, 'security') ? HQ.doorMul : 1;
 }
 
-/** Délai de transmission des ordres (communications avancées). */
-export function orderDelayMul(g: Game, slot: Slot): number {
-  return has(g, slot, 'comms') ? 0.5 : 1;
-}
-
-/** Opérations simultanées supplémentaires (communications avancées). */
-export function extraOps(g: Game, slot: Slot): number {
-  return has(g, slot, 'comms') ? 1 : 0;
-}
-
 /** Grenades en poche au maximum (armurerie avancée). */
 export function grenadeMax(g: Game, slot: Slot): number {
   return GRENADE_MAX + (has(g, slot, 'armory2') ? HQ.grenadeBonus : 0);

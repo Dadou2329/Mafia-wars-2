@@ -4,7 +4,6 @@ import { Anim, CharKind, FLAG, LIEUTENANT_NAMES, RECRUITER_NAME, WEAPONS, Weapon
 import {
   BOSS_NAME,
   BOSS_SHOP,
-  CAPTURE_TIME,
   DE_BOSS,
   DISTRICT_BONUS,
   HP,

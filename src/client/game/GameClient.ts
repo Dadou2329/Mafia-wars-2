@@ -895,7 +895,9 @@ export class GameClient {
 
   private frame = (t: number): void => {
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min(0.05, Math.max(0.001, (t - this.last) / 1000));
+    // temps réel écoulé (interface) et pas de simulation plafonné (images très lentes)
+    const realDt = Math.max(0.001, (t - this.last) / 1000);
+    const dt = Math.min(0.05, realDt);
     this.last = t;
     const now = t / 1000;
     const input = this.app.input;
@@ -1114,12 +1116,12 @@ export class GameClient {
     audio.update(dt);
     this.updateFootsteps(dt, list);
     // ------------------------------------------------- interface (à 10 Hz)
-    this.hudAcc += dt;
+    this.hudAcc += realDt;
     if (this.hudAcc > 0.1) {
       this.hudAcc = 0;
       this.updateHud(now, me);
     }
-    this.mapAcc += dt;
+    this.mapAcc += realDt;
     if (this.mapAcc > 0.15) {
       this.mapAcc = 0;
       drawMinimap(this.hud.minimapCanvas, this.map, this.player.pos.x, this.player.pos.z, this.player.yaw, this.store, this.pub, this.priv, this.you, this.selfId, this.activeEvent);
@@ -1317,21 +1319,19 @@ export class GameClient {
       const hz = this.pub.heists.find((h) => h.slot === this.you)!;
       hud.setCapture(`Braquage ${deNomFr(BUILDINGS[hz.b].name)} — ${Math.round(hz.p * 100)} % : restez près du coffre !`, hz.p, false);
     } else if (bid >= 0 && BUILDINGS[bid].capturable) {
+      // prise de contrôle : le panneau de l'opération (objectifs) prend le relais quand il est affiché
       const st = this.pub.buildings[bid];
       const def = BUILDINGS[bid];
-      if (st.cap > 0 || st.contested) {
-        const who = st.capBy === this.myFaction ? 'Capture' : 'Ennemis en train de capturer';
-        hud.setCapture(`${def.name} — ${st.contested ? 'CONTESTÉ !' : `${who} : ${Math.round(st.cap * 100)} %`}`, st.cap, st.contested);
-      } else if (st.owner === Faction.DADOU || st.owner === Faction.EVEN) {
-        if (st.owner !== this.myFaction) hud.setCapture(`${def.name} — tenu par ${st.owner === Faction.DADOU ? 'Dadou' : 'Even'}. Éliminez ses hommes et restez à l’intérieur pour le prendre.`, 0, false);
+      if (st.owner === Faction.DADOU || st.owner === Faction.EVEN) {
+        if (st.owner !== this.myFaction) hud.setCapture(`${def.name} — tenu par ${st.owner === Faction.DADOU ? 'Dadou' : 'Even'}. Prenez-en le contrôle : menez l’opération (objectifs marqués).`, 0, false);
         else hud.setCapture(null);
       } else if (st.guards > 0) {
         const gang = DISTRICTS.find((x) => x.id === def.district)?.gang ?? 'un gang local';
-        hud.setCapture(`${def.name} — tenu par ${leNom(gang)}. Éliminez les défenseurs et restez à l’intérieur.`, 0, false);
+        hud.setCapture(`${def.name} — tenu par ${leNom(gang)}. Éliminez les défenseurs et menez l’opération (objectifs marqués).`, 0, false);
       } else if (def.price > 0) {
-        hud.setCapture(`${def.name} — à vendre : ${formatMoney(def.price)} (${actionKey(settings.bindings, 'interact')}), ou restez à l’intérieur pour le prendre.`, 0, false);
+        hud.setCapture(`${def.name} — à vendre : ${formatMoney(def.price)} (${actionKey(settings.bindings, 'interact')}), ou prenez-en le contrôle (objectifs marqués).`, 0, false);
       } else {
-        hud.setCapture(`${def.name} — sans protection : restez à l’intérieur pour le prendre.`, 0, false);
+        hud.setCapture(`${def.name} — sans protection : menez l’opération pour en prendre le contrôle.`, 0, false);
       }
     } else hud.setCapture(null);
     // événement aléatoire

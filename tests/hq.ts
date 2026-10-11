@@ -8,7 +8,8 @@ import { Game, SLOTS, otherSlot, slotFaction } from '../src/server/game/Game';
 import { HQ, HQ_HOOKS, HQ_UPGRADES, anchorOf, clinicsOf, eliteGuards, hqDefenseMul, opsSpeedMul, stationSeat } from '../src/server/game/hq';
 import { stationNear } from '../src/server/game/cyber';
 import { BUILDINGS, BUILDING_BY_KEY, DISTRICTS, Faction, RESIDENCES, keyBuildings } from '../src/shared/city/plan';
-import { CLINICS, clinicSeat } from '../src/shared/city/gen/clinics';
+import { CLINICS, CLINIC_REACH, clinicSeat } from '../src/shared/city/gen/clinics';
+import { opPlan, opRadius } from '../src/shared/conquest';
 import { HQ_FOOTPRINT } from '../src/shared/city/gen/residences';
 import { AMMO_PRICE, BOSS_SHOP, TAXI_PRICE, UPGRADE_BY_ID, UPGRADES, VEHICLE_CALL_COOLDOWN } from '../src/shared/constants';
 import { GRENADE_MAX } from '../src/shared/grenade';
@@ -127,6 +128,10 @@ for (const c of CLINICS) {
     ok = !!p && Math.hypot(p[e] - nx, p[e + 1] - nz) < 1.5;
   }
   check(`${c.name} (${b.def.name}) : fauteuil accessible depuis la rue`, ok);
+  // invites distinctes : un objectif de conquête ne masque pas la clinique (ni l'inverse)
+  const dist = (a: { x: number; z: number }) => Math.hypot(a.x - seat.x, a.z - seat.z);
+  const clash = (opPlan(b, false)?.steps ?? []).filter((st) => Math.abs(st.anchor.y - seat.y) < 1.6 && dist(st.anchor) < opRadius(st.kind) + CLINIC_REACH);
+  check(`${c.name} : à l’écart des objectifs de conquête`, clash.length === 0, clash.map((st) => `${st.key} à ${dist(st.anchor).toFixed(1)} m`).join(', '));
 }
 // équité : les cliniques sont en miroir (Grand Central au centre)
 {
@@ -413,6 +418,33 @@ for (const slot of SLOTS) {
   check('communications : rapport sur l’attaque d’un bâtiment', notes(slot).some((t) => /^Rapport/.test(t) && t.includes(target.name.split(' ')[0])), notes(slot).join(' | '));
   check('communications : position exacte de l’assaillant', !!p.hqUp?.watch?.some((wt) => Math.hypot(wt.x - raider.x, wt.z - raider.z) < 2));
   g.kill(raider, null);
+}
+{
+  // communications : chaque lieutenant voit à 30 m autour de lui (loin du QG et des bâtiments tenus)
+  const slot: Slot = 'even';
+  const lt = g.factions[slot].lieutenants.map((id) => g.ents.get(id)).find((e) => e?.alive);
+  const mine = BUILDINGS.filter((b) => g.bstate.get(b.id)!.owner === slotFaction(slot)).map((b) => g.building(b.id).center);
+  const far = BUILDINGS.map((b) => g.building(b.id)).find((b) => [g.hq(slot).center, ...mine].every((c) => Math.hypot(c.x - b.center.x, c.z - b.center.z) > 90));
+  if (!lt || !far) check('communications : un lieutenant loin du QG', false);
+  else {
+    const o = far.doors[0].out;
+    lt.x = o.x;
+    lt.z = o.z;
+    lt.y = o.y ?? 0;
+    const raider = g.spawnGangster('dadou')!;
+    raider.x = o.x + 18;
+    raider.z = o.z;
+    raider.y = o.y ?? 0;
+    raider.invulnerable = true;
+    raider.ai!.mode = 'hold';
+    raider.ai!.post = { x: raider.x, z: raider.z, y: raider.y };
+    run(g, 1.2);
+    const p = g.privateState(slot);
+    const w = p.hqUp?.watch?.find((wt) => Math.hypot(wt.x - raider.x, wt.z - raider.z) < 3);
+    check('communications : un ennemi repéré à 18 m d’un lieutenant', !!w && w.site === lt.name, w ? w.site : 'non repéré');
+    check('communications : il apparaît sur les cartes', p.spotted.some((sp) => Math.hypot(sp.x - raider.x, sp.z - raider.z) < 4));
+    g.kill(raider, null);
+  }
 }
 
 // drones

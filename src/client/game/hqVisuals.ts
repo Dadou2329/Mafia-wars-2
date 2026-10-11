@@ -11,7 +11,7 @@ import { AMMO_PRICE, BOSS_NAME, TAXI_PRICE } from '../../shared/constants';
 import { GRENADE_MAX } from '../../shared/grenade';
 import { BUILDINGS, FILLERS, Faction, WORLD_D, WORLD_W } from '../../shared/city/plan';
 import type { BuildingInfo, HqAnchor } from '../../shared/city/gen/context';
-import { CLINIC_SEAT_DEPTH, clinicSeat } from '../../shared/city/gen/clinics';
+import { CLINIC_REACH, CLINIC_SEAT_DEPTH, clinicSeat } from '../../shared/city/gen/clinics';
 import { HQ_FOOTPRINT } from '../../shared/city/gen/residences';
 import { leNom } from '../../shared/french';
 import { M as MAT } from '../../shared/materials';
@@ -520,9 +520,17 @@ export class HqVisuals implements ClientModule {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     const mat = additive(SPRITE_FRAG, SPRITE_VERT, { uMap: { value: tex } });
+    mat.uniforms.uAlpha.value = 1.3;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.0), mat);
-    mesh.position.set(d.x + n[0] * 1.3, (b.floorY ?? 0) + 4.1, d.z + n[1] * 1.3);
+    // sous l'enseigne du bâtiment (qu'elle ne doit pas masquer), au-dessus de la porte
+    const fy = b.floorY ?? 0;
+    const y = b.sign ? Math.max(fy + 3.0, Math.min(fy + 4.1, b.sign.y - b.sign.h / 2 - 0.65)) : fy + 4.1;
+    mesh.position.set(d.x + n[0] * 1.3, y, d.z + n[1] * 1.3);
     mesh.rotation.y = Math.atan2(n[0], n[1]);
+    // panneau sombre derrière le néon : l'enseigne reste lisible en plein jour
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 1.1), new THREE.MeshBasicMaterial({ color: 0x03070b, transparent: true, opacity: 0.7, depthWrite: false }));
+    back.position.z = -0.03;
+    mesh.add(back);
     this.group.add(mesh);
     this.signs.push({ b, mesh, mat, canvas, tex, state: '' });
   }
@@ -1066,10 +1074,14 @@ export class HqVisuals implements ClientModule {
     this.group.add(holder);
     p.fx.push(holder);
     const prev = p.update;
+    const cam = this.gc.camera.position;
     p.update = (now, near) => {
       prev?.(now, near);
       holder.visible = near;
-      if (near) holder.rotation.y = now * 0.8;
+      if (!near) return;
+      // toujours face au regard (le texte ne passe jamais à l'envers), léger flottement
+      holder.rotation.y = Math.atan2(cam.x - holder.position.x, cam.z - holder.position.z);
+      holder.position.y = p.a.y + 2.32 + Math.sin(now * 1.3) * 0.03;
     };
   }
 
@@ -1217,7 +1229,7 @@ export class HqVisuals implements ClientModule {
     c.textAlign = 'center';
     c.fillStyle = accent;
     c.font = `900 14px ${MAP_FONT_TITLE}`;
-    c.fillText('RECRUTEMENT', W / 2, 20);
+    c.fillText('RECRUTEMENT', W / 2, 20, W - 10);
     c.fillRect(10, 27, W - 20, 2);
     if (!mine) {
       c.fillStyle = '#ff5060';
@@ -1247,7 +1259,7 @@ export class HqVisuals implements ClientModule {
     c.fill();
     c.fillStyle = '#d8e4ee';
     c.font = `800 11px ${MAP_FONT_TITLE}`;
-    c.fillText('RÉSERVE DU QG', W / 2, 104);
+    c.fillText('RÉSERVE DU QG', W / 2, 104, W - 12);
     c.fillStyle = full ? '#7dffb0' : '#ffd24a';
     c.font = `900 30px ${MAP_FONT_TITLE}`;
     c.fillText(String(Math.min(pool, 999)), W / 2, 136);
@@ -1257,11 +1269,11 @@ export class HqVisuals implements ClientModule {
     c.fillRect(12, 146, (W - 24) * (full ? 1 : broke ? 0.08 : (t / 15) % 1), 9);
     c.fillStyle = '#d8e4ee';
     c.font = `700 10px ${MAP_FONT}`;
-    c.fillText(full ? 'Réserve complète' : broke ? 'Fonds insuffisants' : 'Recrue suivante…', W / 2, 170);
+    c.fillText(full ? 'Réserve complète' : broke ? 'Fonds insuffisants' : 'Recrue suivante…', W / 2, 170, W - 8);
     const n = priv.hqUp?.recruits ?? 0;
-    c.fillText(`${n} recrue${n > 1 ? 's' : ''} · 80 $`, W / 2, 186);
+    c.fillText(`${n} recrue${n > 1 ? 's' : ''} · 80 $`, W / 2, 186, W - 8);
     c.fillStyle = 'rgba(216,228,238,0.6)';
-    c.fillText('seuil : 4 hommes', W / 2, 200);
+    c.fillText('seuil : 4 hommes', W / 2, 200, W - 8);
     c.textAlign = 'left';
   }
 
@@ -1273,7 +1285,7 @@ export class HqVisuals implements ClientModule {
     c.fillStyle = '#0a1420';
     c.fillRect(0, 0, W, H);
     const ops = mine ? (this.gc.priv.hqUp?.ops ?? []) : [];
-    const accent = p.slot === 'dadou' ? '#ff5a6a' : '#7fb0ff';
+    const accent = p.slot === 'dadou' ? '#ff6a78' : '#8cbcff';
     z.cells.forEach(([x0, y0, x1, y1], i) => {
       const X = (x0 + 1 - z.x0) * sx;
       const Y = (z.y1 - y1 + 1) * sy;
@@ -1283,68 +1295,86 @@ export class HqVisuals implements ClientModule {
       c.beginPath();
       c.rect(X, Y, w, h);
       c.clip();
-      c.fillStyle = '#10263c';
+      const g = c.createLinearGradient(0, Y, 0, Y + h);
+      g.addColorStop(0, '#163252');
+      g.addColorStop(1, '#0c1b2e');
+      c.fillStyle = g;
       c.fillRect(X, Y, w, h);
       if (!mine) {
         c.fillStyle = '#ff5060';
-        c.font = `800 13px ${MAP_FONT_TITLE}`;
-        c.fillText('ACCÈS REFUSÉ', X + 8, Y + h / 2);
+        c.font = `800 15px ${MAP_FONT_TITLE}`;
+        c.fillText('ACCÈS REFUSÉ', X + 8, Y + h / 2 + 5);
         c.restore();
         return;
       }
       if (i < 3) {
         const op = ops[i];
         c.fillStyle = accent;
-        c.font = `800 11px ${MAP_FONT_TITLE}`;
-        c.fillText(`OPÉRATION ${i + 1}`, X + 6, Y + 13);
+        c.fillRect(X, Y, w, 18);
+        c.fillStyle = '#0a1018';
+        c.font = `900 13px ${MAP_FONT_TITLE}`;
+        c.fillText(`OPÉRATION ${i + 1}`, X + 5, Y + 14);
         if (!op) {
-          c.fillStyle = 'rgba(200,220,255,0.5)';
-          c.font = `600 12px ${MAP_FONT}`;
-          c.fillText('En attente d’ordres', X + 6, Y + 34);
+          c.fillStyle = 'rgba(210,228,255,0.75)';
+          c.font = `700 13px ${MAP_FONT}`;
+          c.fillText('En attente', X + 6, Y + 40);
+          c.fillText('d’ordres', X + 6, Y + 56);
         } else {
           const b = BUILDINGS[op.b];
-          c.fillStyle = '#e8f4ff';
+          c.fillStyle = '#f2f8ff';
+          c.font = `800 14px ${MAP_FONT}`;
+          c.fillText(op.name, X + 5, Y + 35, w - 80);
+          c.fillStyle = 'rgba(210,228,255,0.85)';
           c.font = `600 12px ${MAP_FONT}`;
-          c.fillText(op.name, X + 6, Y + 30);
-          c.fillStyle = 'rgba(200,220,255,0.75)';
-          c.fillText(b ? b.name : '', X + 6, Y + 45);
-          c.fillStyle = 'rgba(255,255,255,0.15)';
-          c.fillRect(X + 6, Y + h - 20, w - 12, 9);
+          c.fillText(b ? b.name : '', X + 5, Y + 50, w - 10);
+          c.fillStyle = 'rgba(255,255,255,0.18)';
+          c.fillRect(X + 5, Y + h - 14, w - 10, 10);
           c.fillStyle = accent;
-          c.fillRect(X + 6, Y + h - 20, (w - 12) * op.p, 9);
-          c.fillStyle = '#e8f4ff';
-          c.font = `700 11px ${MAP_FONT_TITLE}`;
-          c.fillText(`${Math.round(op.p * 100)} %${op.eta >= 0 ? ` · ${op.eta} s` : ''}`, X + 6, Y + h - 25);
+          c.fillRect(X + 5, Y + h - 14, (w - 10) * op.p, 10);
+          c.fillStyle = '#ffffff';
+          c.font = `800 12px ${MAP_FONT_TITLE}`;
+          c.fillText(`${Math.round(op.p * 100)} %${op.eta >= 0 ? ` · ${op.eta} s` : ''}`, X + w - 70, Y + 35);
         }
       } else if (i === 3) {
         // carte des cibles
-        c.strokeStyle = 'rgba(120,200,255,0.35)';
+        c.strokeStyle = 'rgba(140,210,255,0.5)';
         c.strokeRect(X + 4, Y + 4, w - 8, h - 8);
         const k = Math.min((w - 8) / WORLD_W, (h - 8) / WORLD_D);
+        const ox = X + 4 + (w - 8 - WORLD_W * k) / 2;
+        c.strokeStyle = 'rgba(140,210,255,0.22)';
+        c.beginPath();
+        for (let gx = 0; gx <= WORLD_W; gx += 100) {
+          c.moveTo(ox + gx * k, Y + 4);
+          c.lineTo(ox + gx * k, Y + 4 + WORLD_D * k);
+        }
+        c.stroke();
         for (const op of ops) {
           const b = this.gc.world.buildings[op.b];
           if (!b) continue;
-          const px = X + 4 + b.center.x * k;
+          const px = ox + b.center.x * k;
           const py = Y + 4 + b.center.z * k;
           c.strokeStyle = accent;
+          c.lineWidth = 2;
           c.beginPath();
-          c.arc(px, py, 4 + (t * 6) % 6, 0, Math.PI * 2);
+          c.arc(px, py, 4 + ((t * 6) % 7), 0, Math.PI * 2);
           c.stroke();
+          c.lineWidth = 1;
         }
         const hq = this.gc.world.buildings[p.bid];
         c.fillStyle = '#ffd24a';
-        c.fillRect(X + 4 + hq.center.x * k - 2, Y + 4 + hq.center.z * k - 2, 5, 5);
+        c.fillRect(ox + hq.center.x * k - 3, Y + 4 + hq.center.z * k - 3, 6, 6);
       } else {
         c.fillStyle = accent;
-        c.font = `900 15px ${MAP_FONT_TITLE}`;
-        c.fillText('CENTRE D’OPÉRATIONS', X + 6, Y + 18);
-        c.fillStyle = '#e8f4ff';
+        c.font = `900 17px ${MAP_FONT_TITLE}`;
+        c.fillText('OPÉRATIONS', X + 6, Y + 21, w - 12);
+        c.fillStyle = '#f2f8ff';
+        c.font = `700 14px ${MAP_FONT}`;
+        c.fillText(`${ops.length} en cours`, X + 6, Y + 42);
+        c.fillText('Prises ×1,35', X + 6, Y + 60);
+        c.fillStyle = 'rgba(210,228,255,0.7)';
         c.font = `600 12px ${MAP_FONT}`;
-        c.fillText(`${ops.length} opération${ops.length > 1 ? 's' : ''} en cours`, X + 6, Y + 38);
-        c.fillText(`Vitesse des prises : ×1,35`, X + 6, Y + 54);
-        c.fillStyle = 'rgba(200,220,255,0.6)';
         const s = Math.floor(this.gc.pub.elapsed);
-        c.fillText(`T+${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`, X + 6, Y + h - 8);
+        c.fillText(`T+${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`, X + 6, Y + h - 6);
       }
       c.restore();
     });
@@ -1512,7 +1542,7 @@ export class HqVisuals implements ClientModule {
     for (const p of this.clinics) {
       const b = gc.world.buildings[p.bid];
       const s = clinicSeat(b.clinic!);
-      if (!close(s.x, s.y, s.z, 2.6)) continue;
+      if (!close(s.x, s.y, s.z, CLINIC_REACH)) continue;
       const rival = gc.you === 'dadou' ? 'even' : 'dadou';
       if (gc.pub.buildings[p.bid]?.owner === FACTION[rival])
         return { key, text: 'Clinique fermée', sub: `${BOSS_NAME[rival]} contrôle ${leNom(b.def.name)}`, run: () => gc.hud.notify(`Clinique fermée : ${BOSS_NAME[rival]} contrôle ${leNom(b.def.name)}. Reprenez le bâtiment ou trouvez une autre clinique.`, 'bad') };
@@ -1528,7 +1558,7 @@ export class HqVisuals implements ClientModule {
       switch (p.id) {
         case 'cyberstation': {
           const s = clinicSeat({ name: '', ...p.a });
-          if (close(s.x, s.y, s.z, 2.6)) return { key, text: 'Station cybernétique', sub: 'Implants : achat, installation, améliorations, configurations', run: () => openCyberScreen(gc) };
+          if (close(s.x, s.y, s.z, CLINIC_REACH)) return { key, text: 'Station cybernétique', sub: 'Implants : achat, installation, améliorations, configurations', run: () => openCyberScreen(gc) };
           break;
         }
         case 'autorecruit':

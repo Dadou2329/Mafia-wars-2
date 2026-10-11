@@ -36,6 +36,10 @@ const DEPTH = 7;
 const CLEAR = 6;
 /** Distance du centre du fauteuil au mur (m) : point d'installation. */
 export const CLINIC_SEAT_DEPTH = 0.95;
+/** Portée de l'invite de la clinique autour du fauteuil (m), voir client/game/hqVisuals.ts. */
+export const CLINIC_REACH = 2.6;
+/** Objectifs de conquête « tenir » ou « grimper » (zone de 4 m) ; les autres se font à 2,4 m. */
+const HOLD_KEYS = new Set(['clinic', 'counter', 'docks', 'hall', 'hall_top', 'kitchen', 'stage', 'suite', 'vip', 'roof']);
 
 /** Point d'installation d'une clinique (centre du fauteuil). */
 export function clinicSeat(c: ClinicInfo): { x: number; y: number; z: number } {
@@ -242,7 +246,9 @@ function candidates(f: Frame, info: BuildingInfo, axis = false): Pick[] {
   const avoid: { x: number; z: number; y: number; r: number }[] = [{ x: door.in.x, z: door.in.z, y: door.in.y ?? info.floorY, r: 4.5 }];
   if (info.vault) avoid.push({ x: info.vault.x, z: info.vault.z, y: info.vault.y ?? info.floorY, r: 3 });
   if (info.terminal) avoid.push({ x: info.terminal.x, z: info.terminal.z, y: info.terminal.y ?? info.floorY, r: 3 });
-  for (const o of info.ops ?? []) avoid.push({ x: o.x, z: o.z, y: o.y, r: 2.6 });
+  // les invites des objectifs de conquête et celle de la clinique ne doivent pas se recouvrir
+  // (le test ajoute 1,2 m : distance du fauteuil ≥ zone de l'objectif + portée de la clinique + 0,2 m)
+  for (const o of info.ops ?? []) avoid.push({ x: o.x, z: o.z, y: o.y, r: (HOLD_KEYS.has(o.key) ? 4 : 2.4) + CLINIC_REACH + 0.2 - 1.2 });
   for (const e of info.elevator ?? []) avoid.push({ x: e.x, z: e.z, y: e.y, r: 3 });
   const out: Pick[] = [];
   info.floors.forEach((fl, fi) => {
