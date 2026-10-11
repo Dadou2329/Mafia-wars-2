@@ -20,6 +20,10 @@ const WEAPON_SHORT: Record<Weapon, string> = {
   [Weapon.KNIFE]: 'Lame',
   [Weapon.CLUB]: 'Matraque',
   [Weapon.SMG]: 'PM',
+  [Weapon.ARM_PISTOL]: 'Viper',
+  [Weapon.ARM_BLADE]: 'Mantis',
+  [Weapon.ARM_FIST]: 'Vérins',
+  [Weapon.ARM_WHIP]: 'Fouet',
 };
 
 export class Hud {
@@ -69,6 +73,8 @@ export class Hud {
   private scores!: HTMLElement;
   private newsTimer = 0;
   private lastWanted = 0;
+  /** Arme de bras sortie avec chargeur (pistolet d'avant-bras) : remplace l'arme tenue à l'affichage (abilityHud.ts). */
+  armWeapon: { name: string; ammo: number; ammoMax?: number } | null = null;
 
   constructor(readonly slot: Slot) {
     const fc = FACTION_COLOR[slot];
@@ -247,9 +253,15 @@ export class Hud {
     const def = WEAPONS[w];
     this.wname.textContent = def.name.toUpperCase();
     if (def.ranged) {
-      this.ammo.innerHTML = `${mag} <small>/ ${reserve}</small>`;
+      this.ammo.innerHTML = `${mag} <small>/ ${reserve < 0 ? '∞' : reserve}</small>`;
     } else this.ammo.textContent = '—';
-    this.reload.textContent = reloading ? 'Rechargement…' : def.ranged && mag === 0 ? (reserve > 0 ? 'Appuyez sur R pour recharger' : 'Plus de munitions !') : '';
+    this.reload.textContent = reloading ? 'Rechargement…' : def.ranged && mag === 0 ? (reserve !== 0 ? 'Appuyez sur R pour recharger' : 'Plus de munitions !') : '';
+    const arm = this.armWeapon;
+    if (arm) {
+      this.wname.textContent = arm.name.toUpperCase();
+      this.ammo.innerHTML = `${arm.ammo} <small>/ ∞</small>`;
+      this.reload.textContent = arm.ammo <= 0 ? 'Rechargement…' : '';
+    }
     const key = owned.join(',') + ':' + w;
     if (this.slots.dataset.key !== key) {
       this.slots.dataset.key = key;
@@ -336,7 +348,15 @@ export class Hud {
     setTimeout(() => k.remove(), 8000);
   }
 
+  /**
+   * Filtre de la barre de capture (prise de contrôle par objectifs, conquestClient.ts) : renvoie
+   * le texte à afficher à la place (null : masquée), ou undefined pour laisser la demande telle quelle.
+   */
+  captureFilter: ((text: string | null, progress: number, contested: boolean) => { text: string | null; progress: number; contested: boolean } | undefined) | null = null;
+
   setCapture(text: string | null, progress = 0, contested = false): void {
+    const f = this.captureFilter?.(text, progress, contested);
+    if (f) ({ text, progress, contested } = f);
     if (!text) {
       this.capture.classList.add('hidden');
       return;

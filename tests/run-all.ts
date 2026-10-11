@@ -569,11 +569,11 @@ check('la pluie est partagée par le serveur', typeof g.publicState().rain === '
 
 // ---------------------------------------------------------------------------- protocole
 section('Protocole');
-const snap = encodeSnapshot(12.5, 77, [{ id: 3, x: 101.25, y: 21.5, z: 164.5, yaw: 1.2, pitch: -0.3, vx: 1.5, vz: -2, anim: 1, flags: 5, weapon: 1, hp: 0.5 }]);
+const snap = encodeSnapshot(12.5, 77, [{ id: 3, x: 101.25, y: 21.5, z: 164.5, yaw: 1.2, pitch: -0.3, vx: 1.5, vz: -2, anim: 1, flags: 5, weapon: 1, hp: 0.5, fx: 0x1203 }]);
 const dec = decodeSnapshot(snap);
 check(
-  'instantané binaire encodé/décodé (étages compris)',
-  dec.ents.length === 1 && Math.abs(dec.ents[0].x - 101.25) < 0.02 && Math.abs(dec.ents[0].z - 164.5) < 0.02 && Math.abs(dec.ents[0].y - 21.5) < 0.05 && dec.ents[0].anim === 1 && Math.abs(dec.ents[0].hp - 0.5) < 0.01,
+  'instantané binaire encodé/décodé (étages et états cybernétiques compris)',
+  dec.ents.length === 1 && Math.abs(dec.ents[0].x - 101.25) < 0.02 && Math.abs(dec.ents[0].z - 164.5) < 0.02 && Math.abs(dec.ents[0].y - 21.5) < 0.05 && dec.ents[0].anim === 1 && Math.abs(dec.ents[0].hp - 0.5) < 0.01 && dec.ents[0].fx === 0x1203,
   JSON.stringify(dec.ents[0]),
 );
 

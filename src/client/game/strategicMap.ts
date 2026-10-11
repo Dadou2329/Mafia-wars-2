@@ -45,6 +45,8 @@ import { MAP_FONT, MAP_FONT_TITLE, MAP_SCALE } from './cityMap';
 import type { GameClient } from './GameClient';
 import { leNom } from '../../shared/french';
 import { GRENADE_MAX, GRENADE_PRICE } from '../../shared/grenade';
+import { conquestCard, conquestMapLabel } from './conquestClient';
+import { OFFICE_UPGRADES, armoryPrices, drawHqOverlay, officeStatus } from './hqVisuals';
 
 /** Zoom maximal de la carte stratégique (la ville entière tient dans le cadre au zoom 1). */
 const MAX_ZOOM = 7;
@@ -277,6 +279,8 @@ export class StrategicMap {
       p.pool,
       p.escort,
       p.upgrades,
+      p.tier,
+      p.hqUp?.armory,
       p.weapons,
       p.ammo,
       p.lieutenants.map((l) => [l.id, l.name, l.alive, l.men, l.menStart, l.order, l.targetName, l.state, Math.round(l.progress * 20), Math.ceil(l.recoverIn / 5)]),
@@ -552,6 +556,18 @@ export class StrategicMap {
           c.fillRect(x + 4 / S, y + hh - 12 / S, w - 8 / S, 8 / S);
           c.fillStyle = st.capBy === Faction.DADOU ? '#ff5050' : '#6fa0ff';
           c.fillRect(x + 4 / S, y + hh - 12 / S, (w - 8 / S) * st.cap, 8 / S);
+          // étape de l'opération de prise de contrôle en cours (« 2/3 »)
+          const lbl = conquestMapLabel(gc, b.id);
+          if (lbl) {
+            c.font = `700 ${Math.round(13 / S)}px ${MAP_FONT}`;
+            c.textAlign = 'center';
+            c.textBaseline = 'bottom';
+            c.lineWidth = 3 / S;
+            c.strokeStyle = 'rgba(0,0,0,0.85)';
+            c.strokeText(`${st.contested ? '⚠ ' : ''}${lbl}`, x + w / 2, y + hh - 14 / S);
+            c.fillStyle = st.contested ? '#ffb340' : '#ffffff';
+            c.fillText(`${st.contested ? '⚠ ' : ''}${lbl}`, x + w / 2, y + hh - 14 / S);
+          }
         }
       }
       const isSel = this.sel?.kind === 'building' && this.sel.id === b.id;
@@ -709,6 +725,8 @@ export class StrategicMap {
       c.fillStyle = '#e8f6ff';
       c.fillText(`${lt.name} (${lt.men})`, lt.x * M, lt.z * M + r + 10 / S);
     }
+    // cliniques et renseignements des équipements du QG
+    drawHqOverlay(c, gc, S, now);
     // le parrain
     const p = gc.player.pos;
     c.save();
@@ -974,7 +992,8 @@ export class StrategicMap {
     card.appendChild(h('div', { class: 'sm-owner', style: `color:${OWNER_CSS[st?.owner ?? 0] ?? '#b8c4d8'}` }, this.ownerText(id)));
     if (def.capturable && def.income) card.appendChild(h('div', null, 'Revenus : ', h('b', { class: 'c-good' }, `+${def.income} $/min`)));
     card.appendChild(h('p', { class: 'sm-blurb' }, def.blurb));
-    if (st && st.cap > 0) card.appendChild(h('div', { class: 'c-bad' }, `Capture en cours : ${Math.round(st.cap * 100)} %${st.contested ? ' (contesté)' : ''}`));
+    const opCard = conquestCard(gc, id);
+    if (opCard) card.appendChild(opCard);
     if (def.security) card.appendChild(h('div', { class: 'dim' }, `Sécurité : ${def.security >= 2 ? 'caméras, tourelles automatiques, coffre verrouillé' : 'caméras'}${gc.pub.hacked?.includes(id) ? ' — PIRATÉE' : ''}. Piratez le terminal près de l’entrée.`));
     if (def.heist) card.appendChild(h('div', { class: 'dim' }, `Coffre : ${formatMoney(def.heist.reward)} (${def.heist.label.toLowerCase()}).`));
     const hz = gc.pub.heists?.find((x) => x.b === id);
@@ -1402,25 +1421,28 @@ export class StrategicMap {
 
   private renderUpgrades(b: HTMLElement): void {
     const p = this.gc.priv;
-    const cats: [string, string][] = [
-      ['gang', 'Équipement des hommes'],
-      ['hq', 'Quartier général'],
+    const cats: [string, string, (id: string) => boolean][] = [
+      ['gang', 'Équipement des hommes', () => true],
+      ['hq', 'Quartier général', (id) => !OFFICE_UPGRADES.has(id)],
+      ['hq', 'Équipements du bureau', (id) => OFFICE_UPGRADES.has(id)],
     ];
-    for (const [cat, title] of cats) {
+    for (const [cat, title, keep] of cats) {
       const box = h('div', { class: 'sm-upgrades' });
-      for (const u of UPGRADES.filter((x) => x.category === cat)) {
+      for (const u of UPGRADES.filter((x) => x.category === cat && keep(x.id))) {
         const owned = p.upgrades.includes(u.id);
         const missing = u.requires && !p.upgrades.includes(u.requires) ? UPGRADE_BY_ID[u.requires].name : null;
+        const locked = !owned && u.tier && p.tier < u.tier ? `${tierDef(u.tier).name} ou mieux` : null;
         box.appendChild(
           h(
             'div',
-            { class: `sm-upg${owned ? ' owned' : ''}` },
+            { class: `sm-upg${owned ? ' owned' : ''}${locked ? ' mw-hq-locked' : ''}` },
             h('div', { class: 'sm-upg-name' }, u.name, owned ? h('span', { class: 'c-good' }, ' ✔') : null),
             h('div', { class: 'dim sm-small' }, u.desc),
             missing ? h('div', { class: 'c-bad sm-small' }, `Nécessite : ${missing}`) : null,
+            locked ? h('div', { class: 'c-bad sm-small' }, `Logement requis : ${locked}`) : null,
             owned
-              ? h('div', { class: 'c-good sm-small' }, 'Acquis')
-              : this.actionBtn(`Acheter — ${formatMoney(u.price)}`, '', () => this.act({ a: 'upgrade', id: u.id }, 'purchase'), p.money < u.price || !!missing),
+              ? h('div', { class: 'c-good sm-small' }, OFFICE_UPGRADES.has(u.id) ? `Acquis — ${officeStatus(u.id, p, this.gc.pub, this.gc.you)}` : 'Acquis')
+              : this.actionBtn(`Acheter — ${formatMoney(u.price)}`, '', () => this.act({ a: 'upgrade', id: u.id }, 'purchase'), p.money < u.price || !!missing || !!locked),
           ),
         );
       }
@@ -1444,16 +1466,18 @@ export class StrategicMap {
       return;
     }
     const box = h('div', { class: 'sm-upgrades' });
+    const price = armoryPrices(p);
     for (const item of BOSS_SHOP) {
       const def = WEAPONS[item.weapon];
       const owned = p.weapons.includes(item.weapon);
+      const cost = price.weapon(item.price);
       box.appendChild(
         h(
           'div',
           { class: `sm-upg${owned ? ' owned' : ''}` },
           h('div', { class: 'sm-upg-name' }, def.name, owned ? h('span', { class: 'c-good' }, ' ✔') : null),
           h('div', { class: 'dim sm-small' }, this.weaponDesc(item.weapon)),
-          owned ? h('div', { class: 'c-good sm-small' }, 'Dans votre arsenal') : this.actionBtn(`Acheter — ${formatMoney(item.price)}`, '', () => this.act({ a: 'buyWeapon', w: item.weapon }, 'purchase'), p.money < item.price),
+          owned ? h('div', { class: 'c-good sm-small' }, 'Dans votre arsenal') : this.actionBtn(`Acheter — ${formatMoney(cost)}`, '', () => this.act({ a: 'buyWeapon', w: item.weapon }, 'purchase'), p.money < cost),
         ),
       );
     }
@@ -1466,14 +1490,14 @@ export class StrategicMap {
       this.section(
         'Munitions',
         h('p', { class: 'dim' }, ammo || 'Aucune arme à feu.'),
-        this.actionBtn(`Faire le plein — ${formatMoney(AMMO_PRICE)}`, '', () => this.act({ a: 'buyAmmo' }, 'purchase'), p.money < AMMO_PRICE),
+        this.actionBtn(`Faire le plein — ${formatMoney(price.ammo)}`, '', () => this.act({ a: 'buyAmmo' }, 'purchase'), p.money < price.ammo),
       ),
     );
     b.appendChild(
       this.section(
         'Grenades',
-        h('p', { class: 'dim' }, `Touche ${actionKey(settings.bindings, 'grenade')} pour lancer. Le souffle blesse vos ennemis (pas vos hommes), brise les vitres… et attire le NYPD. En poche : ${p.grenades}/${GRENADE_MAX}.`),
-        this.actionBtn(`Acheter une grenade — ${formatMoney(GRENADE_PRICE)}`, '', () => this.act({ a: 'buyGrenade' }, 'purchase'), p.money < GRENADE_PRICE || p.grenades >= GRENADE_MAX),
+        h('p', { class: 'dim' }, `Touche ${actionKey(settings.bindings, 'grenade')} pour lancer. Le souffle blesse vos ennemis (pas vos hommes), brise les vitres… et attire le NYPD. En poche : ${p.grenades}/${price.grenadeMax}.`),
+        this.actionBtn(`Acheter une grenade — ${formatMoney(GRENADE_PRICE)}`, '', () => this.act({ a: 'buyGrenade' }, 'purchase'), p.money < GRENADE_PRICE || p.grenades >= price.grenadeMax),
       ),
     );
   }

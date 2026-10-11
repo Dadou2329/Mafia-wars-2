@@ -1,17 +1,24 @@
 // Téléphone du parrain (touche Tab) : alertes, garage et livraison de véhicules, taxi volant,
-// lieutenants (ordres rapides), recrutement à distance, immobilier (emménager), drones, carte.
-// Il complète le bureau du QG (la carte stratégique) sans le remplacer.
+// lieutenants (ordres rapides), recrutement à distance, immobilier (emménager), drones, implants
+// (installés, clinique la plus proche, itinéraire), carte. Il complète le bureau du QG (la carte
+// stratégique) et l'écran CYBERNÉTIQUE sans les remplacer.
 
 import '../ui/phone.css';
 import { DISTRICTS, RESIDENCES } from '../../shared/city/plan';
-import { DE_BOSS, RECRUIT_BUNDLES, TAXI_PRICE, UPGRADE_BY_ID, VEHICLES, tierDef } from '../../shared/constants';
+import { DE_BOSS, RECRUIT_BUNDLES, UPGRADE_BY_ID, VEHICLES, tierDef } from '../../shared/constants';
+import { IMPLANTS, IMPLANT_BY_ID, SLOTS, qualityOf } from '../../shared/implants';
 import { formatMoney } from '../../shared/util';
 import { audio } from '../audio/AudioEngine';
+import { actionKey } from '../input/bindings';
+import { settings } from '../settings';
 import { h, clear } from '../ui/dom';
+import { chipKey, controlFor, distText, hex, hqStationUpgrade, implantIcon, qualityColor, slotTag, stationName } from './cyberFormat';
+import { cyberUiOf } from './cyberUi';
+import { taxiPrice } from './hqVisuals';
 import type { GameClient } from './GameClient';
 import { aNom, deNom } from '../../shared/french';
 
-type AppId = 'home' | 'alerts' | 'garage' | 'taxi' | 'crew' | 'recruit' | 'estate' | 'drones' | 'convoys' | 'map';
+type AppId = 'home' | 'alerts' | 'garage' | 'taxi' | 'crew' | 'recruit' | 'estate' | 'drones' | 'convoys' | 'cyber' | 'map';
 
 const ICONS: Record<Exclude<AppId, 'home'>, string> = {
   alerts: '<path d="M12 3a5 5 0 0 0-5 5v4l-2 3h14l-2-3V8a5 5 0 0 0-5-5z"/><path d="M10 18a2 2 0 0 0 4 0"/>',
@@ -22,6 +29,7 @@ const ICONS: Record<Exclude<AppId, 'home'>, string> = {
   estate: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/><path d="M4 20h16"/>',
   drones: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/><path d="M8 8l1.5 1.5M16 8l-1.5 1.5M8 16l1.5-1.5M16 16l-1.5-1.5"/>',
   convoys: '<rect x="2" y="7" width="12" height="9" rx="1"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/><path d="M6 11.5h4"/>',
+  cyber: '<rect x="6" y="6" width="12" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>',
   map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
 };
 
@@ -34,6 +42,7 @@ const LABEL: Record<Exclude<AppId, 'home'>, string> = {
   estate: 'Immobilier',
   drones: 'Drones',
   convoys: 'Convois',
+  cyber: 'Implants',
   map: 'Carte',
 };
 
@@ -85,11 +94,12 @@ export class Phone {
     this.go(app);
   }
 
-  close(): void {
+  /** keepUi : un autre panneau prend le relais (la souris reste libre). */
+  close(keepUi = false): void {
     if (!this.open) return;
     this.open = false;
     this.el.classList.add('hidden');
-    this.gc.setUiOpen(false);
+    if (!keepUi) this.gc.setUiOpen(false);
     audio.play('ui_close', { volume: 0.5 });
   }
 
@@ -174,18 +184,34 @@ export class Phone {
       }
       case 'taxi': {
         const hq = gc.world.buildings[gc.pub.hq[gc.you]];
+        const price = taxiPrice(p);
+        // navette du QG (amélioration « transport ») : gratuite, même recherché par la police
+        const shuttle = p.upgrades.includes('transport');
         this.body.appendChild(
           h(
             'div',
             { class: 'phone-card' },
             h('h3', null, 'Retour au QG'),
-            h('p', null, `Un taxi volant vous dépose ${aNom(hq.def.name)}. Impossible si la police vous recherche ou en plein combat.`),
-            h('div', { class: 'row' }, this.btn(`Appeler — ${formatMoney(TAXI_PRICE)}`, () => (this.act({ a: 'goHome' }), this.close()), p.money < TAXI_PRICE || p.wanted > 0 || p.vehicle >= 0)),
+            h(
+              'p',
+              null,
+              shuttle
+                ? `La navette de votre QG vous dépose ${aNom(hq.def.name)}, même avec la police aux trousses. Impossible en plein combat.`
+                : `Un taxi volant vous dépose ${aNom(hq.def.name)}. Impossible si la police vous recherche ou en plein combat.`,
+            ),
+            h(
+              'div',
+              { class: 'row' },
+              this.btn(`Appeler — ${price > 0 ? formatMoney(price) : 'gratuit'}`, () => (this.act({ a: 'goHome' }), this.close()), p.money < price || (p.wanted > 0 && !shuttle) || p.vehicle >= 0),
+            ),
           ),
         );
-        if (p.wanted > 0) this.body.appendChild(h('p', { class: 'phone-note' }, 'La police vous recherche : semez-la d’abord.'));
+        if (p.wanted > 0 && !shuttle) this.body.appendChild(h('p', { class: 'phone-note' }, 'La police vous recherche : semez-la d’abord.'));
         break;
       }
+      case 'cyber':
+        this.renderCyber();
+        break;
       case 'crew': {
         if (p.lieutenants.length === 0) this.body.appendChild(h('p', { class: 'phone-note' }, 'Aucun lieutenant.'));
         for (const lt of p.lieutenants) {
@@ -300,5 +326,77 @@ export class Phone {
       default:
         break;
     }
+  }
+
+  /** Appli « Implants » : état, clinique la plus proche (itinéraire), implants installés. */
+  private renderCyber(): void {
+    const gc = this.gc;
+    const p = gc.priv;
+    const c = p.cyber;
+    const ui = cyberUiOf(gc);
+    const used = SLOTS.filter((s) => c.equip[s.id]);
+    const owned = Object.keys(c.owned).length;
+    // état et accès à l'écran complet
+    this.body.appendChild(
+      h(
+        'div',
+        { class: `phone-card phone-cyber-state${c.station ? ' ok' : ''}` },
+        h('h3', null, `${used.length}/${SLOTS.length} emplacements occupés`),
+        h('p', null, `${owned}/${IMPLANTS.length} implants possédés · ${c.station ? `en station (${c.station === 'qg' ? 'QG' : stationName(c.station, gc.world)}) : installation possible` : 'hors station : consultation seulement'}`),
+        h('div', { class: 'row' }, this.btn(c.station ? 'Ouvrir l’écran CYBERNÉTIQUE' : 'Consulter l’écran CYBERNÉTIQUE', () => this.openCyber(), !ui)),
+      ),
+    );
+    // clinique la plus proche : distance et itinéraire
+    const near = ui ? (ui.nearestStation(true) ?? ui.nearestStation(false)) : null;
+    const where = h('div', { class: 'phone-card' }, h('h3', null, near?.spot.clinic === false ? 'Station la plus proche' : 'Clinique la plus proche'));
+    if (!near) where.appendChild(h('p', null, 'Aucune clinique accessible pour l’instant (celles que tient votre rival vous sont fermées).'));
+    else {
+      const on = ui?.routeTarget?.key === near.spot.key;
+      where.appendChild(h('p', null, `${near.spot.name} — ${distText(near.dist)}`));
+      where.appendChild(
+        h(
+          'div',
+          { class: 'row' },
+          this.btn(on ? 'Effacer l’itinéraire' : 'Itinéraire', () => {
+            ui?.setRoute(on ? null : near.spot);
+            audio.play('ui_click', { volume: 0.6 });
+            this.render();
+          }),
+          on ? h('span', { class: 'phone-note' }, 'Suivez la balise cyan (mini-carte).') : null,
+        ),
+      );
+    }
+    const up = hqStationUpgrade(p);
+    if (up && !up.owned) where.appendChild(h('p', { class: 'phone-note' }, `Station au QG : amélioration « ${up.name} » (${formatMoney(up.price)}), au bureau.`));
+    this.body.appendChild(where);
+    // implants installés et leur commande
+    const list = h('div', { class: 'phone-card' }, h('h3', null, 'Implants installés'));
+    if (used.length === 0) list.appendChild(h('p', null, 'Aucun implant installé. Les cliniques et la station de votre QG en vendent et les posent.'));
+    for (const s of used) {
+      const id = c.equip[s.id]!;
+      const d = IMPLANT_BY_ID[id];
+      if (!d) continue;
+      const lv = c.owned[id] ?? 1;
+      const ctl = controlFor(c.equip, id, s.id);
+      list.appendChild(
+        h(
+          'div',
+          { class: 'phone-implant', style: `--ic:${hex(d.color)};--qc:${qualityColor(d, lv)}`, title: ctl.text },
+          h('span', { class: 'cy-ico', html: implantIcon(id) }),
+          h('div', { class: 'phone-implant-txt' }, h('b', null, d.name), h('small', null, `${slotTag(s.id)} · ${qualityOf(d, lv)} · niv. ${lv}`)),
+          h('span', { class: `phone-key${ctl.key ? '' : ' auto'}` }, chipKey(ctl.action, id)),
+        ),
+      );
+    }
+    this.body.appendChild(list);
+    this.body.appendChild(h('p', { class: 'phone-note' }, `Touche ${actionKey(settings.bindings, 'cyber')} : écran CYBERNÉTIQUE — achats et pose en station.`));
+  }
+
+  /** Passe la main à l'écran CYBERNÉTIQUE (sans rendre la souris au jeu entre les deux). */
+  private openCyber(): void {
+    const ui = cyberUiOf(this.gc);
+    if (!ui) return;
+    this.close(true);
+    ui.open();
   }
 }

@@ -2,7 +2,7 @@
 // validée par le serveur), corps à corps.
 
 import * as THREE from 'three';
-import { CharKind, FLAG, WEAPONS, WEAPON_SLOTS, Weapon } from '../../shared/characters';
+import { CharKind, FLAG, WEAPONS, WEAPON_SLOTS, Weapon, isArmWeapon, type WeaponDef } from '../../shared/characters';
 import { VEHICLES } from '../../shared/constants';
 import { MATERIALS, Pattern } from '../../shared/materials';
 import { makeRayHit, type VoxelWorld } from '../../shared/voxel';
@@ -96,13 +96,23 @@ export class WeaponSystem {
   nextFireAt = 0;
   private hit = makeRayHit();
   onReloadStart: (() => void) | null = null;
+  /** Caractéristiques modifiées (armes de bras selon le niveau de l'implant). */
+  readonly stats = new Map<Weapon, WeaponDef>();
+  /** Cadence (accélérateur de réflexes : < 1) et dispersion (assistance de visée) multipliées. */
+  cooldownMul = 1;
+  spreadMul = 1;
 
   constructor(private world: VoxelWorld) {}
+
+  /** Caractéristiques effectives d'une arme. */
+  def(w: Weapon): WeaponDef {
+    return this.stats.get(w) ?? WEAPONS[w];
+  }
 
   setOwned(list: Weapon[], ammo: Record<number, number>): void {
     this.owned = [...list].sort((a, b) => a - b);
     for (const w of this.owned) {
-      const def = WEAPONS[w];
+      const def = this.def(w);
       if (!def.ranged) continue;
       const tot = ammo[w] ?? 0;
       this.total.set(w, tot);
@@ -110,6 +120,11 @@ export class WeaponSystem {
       if ((this.mag.get(w) ?? 0) > tot) this.mag.set(w, tot);
     }
     if (!this.owned.includes(this.current)) this.current = this.owned.includes(Weapon.PISTOL) ? Weapon.PISTOL : this.owned[0];
+  }
+
+  /** Munitions de réserve (pistolet d'avant-bras : illimitées, −1). */
+  reserveShown(w: Weapon): number {
+    return w === Weapon.ARM_PISTOL ? -1 : this.reserve(w);
   }
 
   reserve(w: Weapon): number {
@@ -125,7 +140,7 @@ export class WeaponSystem {
   }
 
   startReload(now: number): boolean {
-    const def = WEAPONS[this.current];
+    const def = this.def(this.current);
     if (!def.ranged || now < this.reloadUntil) return false;
     const m = this.mag.get(this.current) ?? 0;
     const tot = this.total.get(this.current) ?? 0;
@@ -134,7 +149,7 @@ export class WeaponSystem {
     const w = this.current;
     setTimeout(() => {
       const tot2 = this.total.get(w) ?? 0;
-      this.mag.set(w, Math.min(WEAPONS[w].magazine, tot2));
+      this.mag.set(w, Math.min(this.def(w).magazine, tot2));
     }, def.reload * 1000);
     this.onReloadStart?.();
     return true;
@@ -153,8 +168,11 @@ export class WeaponSystem {
   }
 
   next(dir: number): void {
-    const i = this.owned.indexOf(this.current);
-    this.current = this.owned[(i + dir + this.owned.length) % this.owned.length];
+    // les armes de bras se sortent avec la touche du bras, pas à la molette
+    const list = this.owned.filter((w) => !isArmWeapon(w));
+    if (list.length === 0) return;
+    const i = list.indexOf(this.current);
+    this.current = list[(i + dir + list.length) % list.length];
     this.reloadUntil = 0;
   }
 
@@ -164,17 +182,17 @@ export class WeaponSystem {
    */
   fire(now: number, o: THREE.Vector3, d: THREE.Vector3, store: EntityStore, selfId: number, spreadMul: number, selfVehicle = -1): ShotResult | null {
     const w = this.current;
-    const def = WEAPONS[w];
+    const def = this.def(w);
     if (!def.ranged || !this.canFire(now)) return null;
     const m = this.mag.get(w) ?? 0;
     if (m <= 0) return null;
     this.mag.set(w, m - 1);
-    this.total.set(w, Math.max(0, (this.total.get(w) ?? 0) - 1));
-    this.nextFireAt = now + def.cooldown;
+    if (w !== Weapon.ARM_PISTOL) this.total.set(w, Math.max(0, (this.total.get(w) ?? 0) - 1));
+    this.nextFireAt = now + def.cooldown * this.cooldownMul;
     const res: ShotResult = { muzzleDir: d.clone(), ends: [] };
     const tmp = new THREE.Vector3();
     for (let p = 0; p < def.pellets; p++) {
-      const spread = def.spread * spreadMul;
+      const spread = def.spread * spreadMul * this.spreadMul;
       tmp.copy(d);
       if (spread > 0) {
         tmp.x += (Math.random() - 0.5) * 2 * spread;
@@ -218,9 +236,9 @@ export class WeaponSystem {
 
   /** Cible de corps à corps : le plus proche devant soi. */
   meleeTarget(now: number, x: number, y: number, z: number, yaw: number, store: EntityStore, selfId: number, myFaction: number): ClientEnt | null | undefined {
-    const def = WEAPONS[this.current];
+    const def = this.def(this.current);
     if (def.ranged || !this.canFire(now)) return undefined;
-    this.nextFireAt = now + def.cooldown;
+    this.nextFireAt = now + def.cooldown * this.cooldownMul;
     let best: ClientEnt | null = null;
     let bd = def.range + 0.4;
     const fx = Math.sin(yaw);

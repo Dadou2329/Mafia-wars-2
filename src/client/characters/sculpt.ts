@@ -14,12 +14,12 @@ export class Sculpt {
   readonly y0: number;
   readonly z0: number;
 
-  /** Bornes continues (en voxels) ; chaque case de la grille couvre [i, i+1). */
-  constructor(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) {
+  /** Bornes continues (en voxels) ; chaque case de la grille couvre [i, i+1). `res` : taille d'un voxel (m). */
+  constructor(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, res = RES) {
     this.x0 = x0;
     this.y0 = y0;
     this.z0 = z0;
-    this.m = new VoxelModel(Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)), Math.max(1, Math.round(z1 - z0)), RES);
+    this.m = new VoxelModel(Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)), Math.max(1, Math.round(z1 - z0)), res);
     this.m.setOrigin(-x0, -y0, -z0);
   }
 
@@ -185,7 +185,7 @@ export class Sculpt {
 
   /** Copie miroir gauche/droite (x → −x) dans une nouvelle grille. */
   mirrored(): Sculpt {
-    const r = new Sculpt(-(this.x0 + this.m.sx), -this.x0, this.y0, this.y0 + this.m.sy, this.z0, this.z0 + this.m.sz);
+    const r = new Sculpt(-(this.x0 + this.m.sx), -this.x0, this.y0, this.y0 + this.m.sy, this.z0, this.z0 + this.m.sz, this.m.res);
     const m = this.m;
     for (let j = 0; j < m.sy; j++)
       for (let k = 0; k < m.sz; k++)

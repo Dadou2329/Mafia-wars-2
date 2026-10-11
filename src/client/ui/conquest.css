@@ -1,0 +1,275 @@
+/* Prise de contrôle par objectifs (conquestClient.ts) : panneau d'opération, piratage interactif.
+   Classes préfixées mw-op-. */
+
+/* ---------------------------------------------------------- panneau de l'opération */
+.mw-op-panel {
+  position: absolute;
+  top: 11%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 470px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 14px 9px;
+  background:
+    var(--scanlines),
+    linear-gradient(180deg, rgba(12, 14, 30, 0.86), rgba(6, 7, 16, 0.72));
+  border: 1px solid rgba(124, 140, 255, 0.42);
+  border-top: 2px solid var(--op-c, var(--cyan));
+  border-radius: 3px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 16px color-mix(in srgb, var(--op-c, #4fd8ff) 25%, transparent);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--text);
+  pointer-events: none;
+}
+.mw-op-panel.hidden {
+  display: none;
+}
+.mw-op-panel.mine {
+  --op-c: #4fd8ff;
+}
+.mw-op-panel.threat {
+  --op-c: #ff3b4d;
+  animation: mw-op-threat 1.4s ease-in-out infinite;
+}
+.mw-op-panel.preview {
+  --op-c: #b05cff;
+}
+@keyframes mw-op-threat {
+  50% {
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), 0 0 26px rgba(255, 59, 77, 0.55);
+  }
+}
+.mw-op-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.mw-op-tag {
+  color: var(--op-c, var(--cyan));
+  white-space: nowrap;
+}
+.mw-op-name {
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mw-op-sub {
+  margin: 1px 0 5px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+.mw-op-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mw-op-step {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  column-gap: 6px;
+  color: var(--text-dim);
+}
+.mw-op-step .ico {
+  font-family: var(--font-title);
+  font-size: 12px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.mw-op-step.done {
+  color: #8fe9c2;
+}
+.mw-op-step.done .ico {
+  color: var(--good);
+}
+.mw-op-step.cur {
+  color: #ffffff;
+  font-weight: 700;
+}
+.mw-op-step.cur .ico {
+  color: var(--op-c, var(--cyan));
+  animation: mw-op-blink 1s steps(2) infinite;
+}
+.mw-op-step .who {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+@keyframes mw-op-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.mw-op-bar {
+  grid-column: 2 / 4;
+  height: 6px;
+  margin: 2px 0 1px;
+  background: rgba(3, 4, 12, 0.75);
+  border: 1px solid rgba(124, 140, 255, 0.5);
+  overflow: hidden;
+}
+.mw-op-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #b05cff, var(--op-c, #4fd8ff));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--op-c, #4fd8ff) 70%, transparent);
+}
+.mw-op-bar.undo i {
+  background: linear-gradient(90deg, #ffb340, #ffe08a);
+}
+.mw-op-bar.contested i {
+  background: repeating-linear-gradient(45deg, #ff2a4d, #ff2a4d 8px, #6a0a1c 8px, #6a0a1c 16px);
+}
+.mw-op-state {
+  grid-column: 2 / 4;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.mw-op-state b {
+  color: var(--op-c, var(--cyan));
+}
+.mw-op-state.bad,
+.mw-op-state .bad {
+  color: var(--bad);
+}
+.mw-op-state.warn {
+  color: var(--alert);
+}
+.mw-op-foot {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(124, 140, 255, 0.22);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.mw-op-foot .heist {
+  color: var(--brass-hi);
+}
+
+/* ---------------------------------------------------------- piratage interactif */
+.mw-op-hack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(2, 6, 16, 0.25), rgba(2, 4, 10, 0.72));
+  pointer-events: auto;
+  cursor: crosshair;
+  z-index: 30;
+  font-family: var(--font-body);
+  color: var(--text);
+}
+.mw-op-hack.hidden {
+  display: none;
+}
+.mw-op-hack .box {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 18px 16px;
+  background:
+    var(--scanlines),
+    linear-gradient(180deg, rgba(6, 18, 30, 0.95), rgba(3, 8, 16, 0.92));
+  border: 1px solid rgba(79, 216, 255, 0.55);
+  border-top: 2px solid #4fd8ff;
+  box-shadow: 0 0 30px rgba(79, 216, 255, 0.25), 0 10px 34px rgba(0, 0, 0, 0.6);
+  border-radius: 3px;
+  user-select: none;
+}
+.mw-op-hack .ttl {
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 0.16em;
+  color: #9ff0ff;
+  text-transform: uppercase;
+}
+.mw-op-hack .txt {
+  margin: 4px 0 10px;
+  font-size: 15px;
+  color: var(--text-dim);
+}
+.mw-op-hack .locks {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.mw-op-hack .locks i {
+  flex: 1;
+  height: 10px;
+  border: 1px solid rgba(79, 216, 255, 0.5);
+  background: rgba(79, 216, 255, 0.06);
+}
+.mw-op-hack .locks i.on {
+  background: #4fd8ff;
+  box-shadow: 0 0 10px rgba(79, 216, 255, 0.9);
+}
+.mw-op-hack .track {
+  position: relative;
+  height: 46px;
+  background:
+    repeating-linear-gradient(90deg, rgba(79, 216, 255, 0.08) 0 1px, transparent 1px 24px),
+    rgba(1, 6, 12, 0.85);
+  border: 1px solid rgba(79, 216, 255, 0.45);
+  overflow: hidden;
+}
+.mw-op-hack .zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(62, 232, 160, 0.55), rgba(62, 232, 160, 0.22));
+  border-left: 2px solid #3ee8a0;
+  border-right: 2px solid #3ee8a0;
+  box-shadow: 0 0 14px rgba(62, 232, 160, 0.55);
+}
+.mw-op-hack .needle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: -1px;
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff, 0 0 20px rgba(79, 216, 255, 0.9);
+}
+.mw-op-hack .timer {
+  margin-top: 10px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.mw-op-hack .timer i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffb340, #ff4d5e);
+}
+.mw-op-hack .hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.mw-op-hack.ok .box {
+  border-color: rgba(62, 232, 160, 0.8);
+  border-top-color: #3ee8a0;
+}
+.mw-op-hack.fail .box {
+  border-color: rgba(255, 77, 94, 0.8);
+  border-top-color: #ff4d5e;
+  animation: mw-op-shake 0.35s linear 2;
+}
+@keyframes mw-op-shake {
+  25% {
+    transform: translateX(-6px);
+  }
+  75% {
+    transform: translateX(6px);
+  }
+}

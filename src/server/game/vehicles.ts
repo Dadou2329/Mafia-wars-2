@@ -14,6 +14,7 @@ import { MAT_SOLID } from '../../shared/materials';
 import type { Game } from './Game';
 import { otherSlot, slotFaction } from './Game';
 import type { Ent, Vec2 } from './types';
+import { param } from './cyber';
 
 export const vdef = (e: Ent): VehicleDef => VEHICLES[e.veh!.def];
 
@@ -314,7 +315,7 @@ export function driveInput(g: Game, slot: Slot, e: Ent, x: number, y: number, z:
       const last = e.veh!.rammed.get(o.id) ?? -10;
       if (g.time - last < 1.2) return;
       e.veh!.rammed.set(o.id, g.time);
-      g.damage(o, Math.min(140, sp * 5.5), boss, false, o.x, o.y + 1, o.z);
+      g.damage(o, Math.min(140, sp * 5.5), boss, false, o.x, o.y + 1, o.z, 'impact');
       if (o.role === 'police') g.addHeat(slot, 1);
     });
   }
@@ -380,7 +381,9 @@ function updateDrone(g: Game, e: Ent, dt: number): void {
   e.y += (a.alt - e.y) * Math.min(1, dt * 1.5);
   if (a.phase === 'go' && d < 4) {
     a.phase = 'hover';
-    a.until = g.time + DRONE_REVEAL;
+    // liaison neuronale : les drones de reconnaissance restent plus longtemps
+    const owner = e.veh!.owner;
+    a.until = g.time + DRONE_REVEAL * (owner ? param(g.factions[owner].cyber, 'liaisonDrone', 'recon', 1) : 1);
     if (slot && a.district) {
       g.factions[slot].droneReveal = { district: a.district, until: a.until };
       g.notify(slot, `Le drone survole ${leNom(DISTRICT_BY_ID[a.district as DistrictId].name)} : les ennemis apparaissent sur vos cartes.`, 'good');
@@ -449,7 +452,7 @@ export function explodeVehicle(g: Game, e: Ent, attacker: Ent | null): void {
       if (!o.alive || o === e || o.flags & FLAG.HIDDEN) return;
       if (Math.abs(o.y - e.y) > 3) return;
       const d = Math.sqrt(d2);
-      g.damage(o, Math.round(95 * (1 - d / 5.5)), attacker, false, o.x, o.y + 1, o.z);
+      g.damage(o, Math.round(95 * (1 - d / 5.5)), attacker, false, o.x, o.y + 1, o.z, 'explosion');
     });
   }
   if (veh.owner && def.cls === 'drone') {

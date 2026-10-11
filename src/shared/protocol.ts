@@ -3,6 +3,7 @@
 import type { Anim, CharKind, Weapon } from './characters';
 import type { BossId, DistrictId } from './city/plan';
 import type { OrderType } from './constants';
+import type { Equipment, SlotId } from './implants';
 
 export type Slot = BossId;
 
@@ -45,6 +46,8 @@ export interface EntityInfo {
   /** Lieutenant associé (gangsters d'escouade) ou -1. */
   squad?: number;
   custom?: Record<string, unknown>;
+  /** Implants visibles (parrains) : « emplacement=identifiant:niveau » (voir implants.ts). */
+  cyber?: string[];
 }
 
 export interface BuildingPub {
@@ -88,6 +91,45 @@ export interface PublicState {
   /** Convois blindés en route (camion, propriétaire, position, butin) et butins à ramasser. */
   convoys: { id: number; slot: Slot | null; x: number; z: number; reward: number; dest: string; p: number }[];
   loot: { x: number; z: number; reward: number }[];
+  /** Équipements visibles du QG de chaque parrain (voir server/game/hq.ts) : le rival les voit s'il s'y introduit. */
+  hqUpg?: Record<Slot, string[]>;
+  /** Trophées exposés dans le QG de chaque parrain (salle des trophées). */
+  hqTrophies?: Record<Slot, number>;
+  /** Opérations de prise de contrôle en cours (voir shared/conquest.ts). */
+  ops?: OpPub[];
+}
+
+/** Opération de prise de contrôle en cours (état public : tout est reconstruit à la reconnexion). */
+export interface OpPub {
+  /** Bâtiment visé. */
+  b: number;
+  /** Parrain qui mène l'opération. */
+  slot: Slot;
+  /** Étape en cours (index) et nombre d'étapes. */
+  step: number;
+  n: number;
+  /** Progression de l'étape en cours (0..1). */
+  p: number;
+  /** Vitesse actuelle (/s, négative quand l'étape se perd) : interpolation côté client. */
+  rate: number;
+  contested: boolean;
+  /** Opérateurs à l'œuvre : 1 = le parrain, 2 = un lieutenant (bits). */
+  by: number;
+  /** Nom du lieutenant à l'œuvre. */
+  lt?: string;
+  /** Auteurs des étapes accomplies (« Dadou », « Vinnie Moretti »). */
+  who: string[];
+  /** Porteur de l'objet emporté (id d'entité). */
+  carrier?: number;
+  /** Objet tombé (porteur abattu) : position [x, y, z]. */
+  drop?: [number, number, number];
+  /** Reprise de l'étape précédente par le propriétaire (0..1) et qui la mène (bits). */
+  undo?: number;
+  undoBy?: number;
+  /** QG imprenable pour l'instant (quartiers insuffisants). */
+  locked?: boolean;
+  /** Défenseurs du gang encore debout : la dernière étape attend qu'ils soient éliminés. */
+  gang?: number;
 }
 
 export interface LieutenantStatus {
@@ -143,6 +185,46 @@ export interface PrivateState {
   convoyIn: number;
   /** Ennemis repérés (positions approximatives pour la carte). */
   spotted: { x: number; z: number; n: number }[];
+  /** Implants cybernétiques. */
+  cyber: CyberState;
+  /** Équipements du QG (informations réservées à leur propriétaire), voir server/game/hq.ts. */
+  hqUp?: HqPrivate;
+}
+
+/** Informations des équipements du QG (état privé). */
+export interface HqPrivate {
+  /** Carte holographique : garnisons exactes [bâtiment, défenseurs] et lieutenants du rival près de votre territoire. */
+  garrisons?: [number, number][];
+  rivalOps?: { name: string; x: number; z: number; order: string; target: string; b?: number; p?: number }[];
+  /** Surveillance, drone de patrouille, rapports des lieutenants : ennemis repérés près d'un de vos sites. */
+  watch?: { site: string; x: number; z: number; n: number }[];
+  /** Centre d'opérations : opérations de vos lieutenants (bâtiment visé, progression 0..1, temps restant estimé en s). */
+  ops?: { lt: number; name: string; b: number; p: number; eta: number }[];
+  /** Recrues engagées par le terminal de recrutement. */
+  recruits?: number;
+  /** Salle des trophées : trophées (bâtiments clés, quartiers) et bonus de prestige ($/min). */
+  trophies?: { kind: 'key' | 'district'; name: string }[];
+  prestige?: number;
+  /** Armurerie avancée : remise sur les armes (coefficient), prix des munitions, grenades en poche au maximum. */
+  armory?: { weaponMul: number; ammo: number; grenadeMax: number };
+  /** Drone de patrouille en vol au-dessus du QG. */
+  patrol?: boolean;
+}
+
+/** Implants d'un parrain (état privé). */
+export interface CyberState {
+  /** Implants possédés et leur niveau (1 à n). */
+  owned: Record<string, number>;
+  /** Implant installé dans chaque emplacement. */
+  equip: Equipment;
+  /** Configurations enregistrées (null : vide). */
+  loadouts: (Equipment | null)[];
+  /** Recharge restante des capacités (s), par implant. */
+  cd: Record<string, number>;
+  /** Charges disponibles (esquive…), par implant. */
+  charges: Record<string, number>;
+  /** Le parrain est à une clinique ou à une station cybernétique (installation possible). */
+  station: string | null;
 }
 
 // ---------------------------------------------------------------------------- événements
@@ -175,7 +257,20 @@ export type GameEvent =
   /** Explosion (véhicule détruit…). */
   | { t: 'boom'; x: number; y: number; z: number; r: number }
   | { t: 'glass'; x: number; y: number; z: number; r: number }
-  | { t: 'grenade'; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number };
+  | { t: 'grenade'; id: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }
+  /** Implants visibles d'un personnage modifiés (installation, retrait). */
+  | { t: 'cyber'; id: number; cyber: string[] }
+  /**
+   * Capacité cybernétique déclenchée (effets visuels et sonores chez tous) : ab = identifiant de
+   * l'implant ou de l'effet ('grappin', 'grappin-fin', 'esquive', 'doubleSaut', 'repulseur',
+   * 'choc', 'roquette', 'onde'…), (x, y, z) origine, (x2, y2, z2) cible ou direction, v valeur.
+   */
+  | { t: 'ab'; id: number; ab: string; x: number; y: number; z: number; x2?: number; y2?: number; z2?: number; v?: number; targets?: number[] }
+  /**
+   * Opération de prise de contrôle (effets et alertes) : lancée, étape réussie, étape reprise par
+   * le propriétaire, objet tombé / ramassé / rendu, alarme (piratage raté), échec. step = étape.
+   */
+  | { t: 'op'; b: number; slot: Slot; ev: 'start' | 'step' | 'undo' | 'drop' | 'pickup' | 'return' | 'alarm' | 'fail'; step: number; x?: number; y?: number; z?: number };
 
 export interface MatchStats {
   kills: number;
@@ -217,12 +312,35 @@ export type ClientAction =
   | { a: 'convoy' }
   | { a: 'quick'; cmd: 'follow' | 'attack' | 'defend' | 'retreat'; target?: number; building?: number; x?: number; z?: number }
   | { a: 'customize'; custom: Record<string, unknown> }
+  /**
+   * Implants : acheter (id), améliorer (id), installer (id dans slot), retirer (slot),
+   * enregistrer la configuration courante (n), appliquer une configuration (n). L'installation
+   * et les configurations exigent une clinique ou la station cybernétique du QG.
+   */
+  | { a: 'cyber'; op: 'buy' | 'upgrade' | 'equip' | 'unequip' | 'save' | 'load'; id?: string; slot?: SlotId; n?: number }
+  /**
+   * Capacité cybernétique : id de l'implant, o origine (œil), d direction de visée,
+   * p point visé (grappin), target entité visée, on (bouclier maintenu, visions).
+   */
+  | { a: 'ab'; id: string; o?: number[]; d?: number[]; p?: number[]; target?: number; on?: boolean; slot?: SlotId; v?: number }
+  /**
+   * Prise de contrôle : le parrain mène l'objectif k du bâtiment b (ou le reprend s'il est à lui),
+   * en restant sur place ; k vide : il arrête. ok : issue du piratage interactif (true réussi,
+   * false raté → alarme).
+   */
+  | { a: 'op'; b: number; k: string; ok?: boolean }
   | { a: 'interact'; what: string }
   | { a: 'rematch' }
   /** Outil de test : téléportation (serveur lancé avec MW_DEBUG=1 uniquement). */
   | { a: 'debugTp'; x: number; z: number; y?: number; yaw?: number; dayTime?: number; rain?: number }
+  /** Outil de test : ajoute de l'argent (serveur lancé avec MW_DEBUG=1 uniquement). */
+  | { a: 'debugMoney'; n: number }
+  /** Outil de test : installe un implant au niveau voulu (serveur lancé avec MW_DEBUG=1 uniquement). */
+  | { a: 'debugCyber'; id: string; lv: number; slot: SlotId }
   /** Outil de test : termine la partie (serveur lancé avec MW_DEBUG=1 uniquement). */
-  | { a: 'debugEnd' };
+  | { a: 'debugEnd' }
+  /** Outil de test : élimine les défenseurs (voyous, tourelles) d'un bâtiment (MW_DEBUG=1 uniquement). */
+  | { a: 'debugClear'; b: number };
 
 // ---------------------------------------------------------------------------- instantanés binaires
 
@@ -240,10 +358,12 @@ export interface SnapEntity {
   flags: number;
   weapon: Weapon;
   hp: number; // 0..1
+  /** États cybernétiques visibles (bits CFX, voir implants.ts). */
+  fx: number;
 }
 
 export const SNAP_HEADER = 12;
-export const SNAP_REC = 16;
+export const SNAP_REC = 18;
 
 export function encodeSnapshot(time: number, tick: number, ents: SnapEntity[]): ArrayBuffer {
   const buf = new ArrayBuffer(SNAP_HEADER + ents.length * SNAP_REC);
@@ -267,6 +387,7 @@ export function encodeSnapshot(time: number, tick: number, ents: SnapEntity[]): 
     dv.setUint8(o + 13, e.flags);
     dv.setUint8(o + 14, e.weapon);
     dv.setUint8(o + 15, Math.max(0, Math.min(255, Math.round(e.hp * 255))));
+    dv.setUint16(o + 16, e.fx & 0xffff, true);
     o += SNAP_REC;
   }
   return buf;
@@ -293,6 +414,7 @@ export function decodeSnapshot(buf: ArrayBuffer): { time: number; tick: number; 
       flags: dv.getUint8(o + 13),
       weapon: dv.getUint8(o + 14) as Weapon,
       hp: dv.getUint8(o + 15) / 255,
+      fx: dv.getUint16(o + 16, true),
     };
     o += SNAP_REC;
   }

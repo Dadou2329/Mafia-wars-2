@@ -86,7 +86,13 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
 | --- | --- | --- |
 | Se déplacer | W A S D | Z Q S D |
 | Sprinter | Maj gauche | Maj gauche |
-| Sauter / s’accroupir | Espace / C | Espace / C |
+| Sauter / s’accroupir (appui bref : bascule, appui long : maintenu) | Espace / C | Espace / C |
+| Glisser | C en sprintant | C en sprintant |
+| Implant du bras gauche / droit (grappin, arme de bras, bouclier…) | F / X | F / X |
+| Esquive (implant des jambes) | Z | W |
+| Capacités 1 à 5 (surcharge, scanner, camouflage, réflexes, drone…) | T Y H J U | T Y H J U |
+| Mode de vision (thermique, nocturne) | N | N |
+| Écran CYBERNÉTIQUE | I | I |
 | Tirer / frapper | clic gauche | clic gauche |
 | Viser (au volant d’une moto ou d’une voiture : tirer par la portière) | clic droit | clic droit |
 | Recharger | R | R |

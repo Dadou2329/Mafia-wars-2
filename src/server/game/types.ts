@@ -3,6 +3,7 @@
 import type { Anim, CharKind, Weapon } from '../../shared/characters';
 import type { OrderType } from '../../shared/constants';
 import type { Slot } from '../../shared/protocol';
+import type { CyberRuntime } from './cyber';
 
 export type Role = 'boss' | 'gangster' | 'lieutenant' | 'thug' | 'police' | 'guard' | 'barman' | 'vehicle' | 'turret';
 export type Mode = 'pool' | 'escort' | 'squad' | 'guard' | 'patrol' | 'flee' | 'hold' | 'idle' | 'ride';
@@ -111,6 +112,15 @@ export interface Ent {
   removeAt: number;
   /** Entités pour lesquelles les infos ont été envoyées. */
   custom?: Record<string, unknown>;
+  /** États visibles (bits CFX) propres à l'entité : brûlure, étourdissement, électrocution. */
+  fx: number;
+  /** Brûlure : dégâts par seconde, fin, auteur ; dégâts accumulés pas encore appliqués. */
+  burn?: { dps: number; until: number; by: number };
+  burnAcc?: number;
+  /** Étourdi jusqu'à cet instant (n'agit plus). */
+  stunUntil?: number;
+  /** Projection en cours (répulseur, poing) : vitesse et fin. */
+  knock?: { vx: number; vz: number; until: number };
 }
 
 export interface Order {
@@ -199,7 +209,9 @@ export interface FactionState {
   droneAt: number;
   droneReveal: { district: string; until: number } | null;
   /** Piratage d'un terminal en cours. */
-  hack: { b: number; start: number; done: number } | null;
+  hack: { b: number; start: number; done: number; reach?: number } | null;
+  /** Implants cybernétiques. */
+  cyber: CyberRuntime;
 }
 
 export interface BState {

@@ -31,9 +31,28 @@ export const XS = {
   IRIS: 0xf0002f, // iris (couleur des yeux), distinct de la pupille
 } as const;
 
+/**
+ * Couleurs lumineuses des implants : couleur sRGB (24 bits) + drapeau GLOW + canal d'intensité
+ * (0 à 15, bits 25 à 28). Le maillage les range dans les emplacements de shader 48 à 63 en
+ * gardant leur couleur ; le matériau des personnages (charMaterial.ts) les rend émissives selon
+ * l'intensité de leur canal, propre à chaque personnage (bouclier levé, surcharge, sprint…).
+ */
+export const GLOW_FLAG = 0x1000000;
+
+/** Couleur lumineuse `rgb` sur le canal d'intensité `ch` (voir GLOW_CH dans cyber.ts). */
+export function glow(rgb: number, ch: number): number {
+  return GLOW_FLAG | ((ch & 15) << 25) | (rgb & 0xffffff);
+}
+
+/** La couleur est-elle lumineuse (implant) ? */
+export function isGlow(c: number): boolean {
+  return c >= GLOW_FLAG && (c & GLOW_FLAG) !== 0;
+}
+
 /** Index de shader d'une couleur (0 = couleur sRGB fixe). */
 export function charSlotIndex(c: number): number {
   if (c < 0xf00000) return 0;
+  if (c >= GLOW_FLAG) return c & GLOW_FLAG ? 48 + ((c >>> 25) & 15) : 0;
   const s = SLOT_INDEX[c];
   if (s !== undefined) return s;
   if (c >= 0xf00020 && c <= 0xf0002f) return 32 + (c - 0xf00020);
@@ -160,9 +179,11 @@ export function meshChar(m: VoxelModel, aoKeep = -1): THREE.BufferGeometry {
             for (let jj = 0; jj < ht; jj++) for (let ii = 0; ii < wd; ii++) mask[(j + jj) * du + i + ii] = 0;
             const c = colors[raw >> 8];
             const slot = charSlotIndex(c);
-            const cr = slot ? 255 : (c >> 16) & 255;
-            const cg = slot ? 255 : (c >> 8) & 255;
-            const cb = slot ? 255 : c & 255;
+            // les couleurs lumineuses (48+) gardent leur teinte ; les emplacements de palette sont blancs
+            const keep = slot === 0 || slot >= 48;
+            const cr = keep ? (c >> 16) & 255 : 255;
+            const cg = keep ? (c >> 8) & 255 : 255;
+            const cb = keep ? c & 255 : 255;
             // coins dans l'ordre direct vu de l'extérieur
             const cu = dir > 0 ? [i, i + wd, i + wd, i] : [i, i, i + wd, i + wd];
             const cw = dir > 0 ? [j, j, j + ht, j + ht] : [j, j + ht, j + ht, j];
@@ -202,7 +223,7 @@ export function meshChar(m: VoxelModel, aoKeep = -1): THREE.BufferGeometry {
 /** Couleurs qui doivent survivre à la réduction (néons, yeux) : priorité dans le vote. */
 function weight(c: number): number {
   const s = charSlotIndex(c);
-  if (s === 7 || (s >= 8 && s <= 15)) return 2.5; // lumineux
+  if (s === 7 || (s >= 8 && s <= 15) || s >= 48) return 2.5; // lumineux (néons, implants)
   if (s === 28 || c === XS.IRIS) return 1.6; // yeux
   return 1;
 }

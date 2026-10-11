@@ -92,7 +92,7 @@ function sections(): Section[] {
             .map((d) => leNom(d.name))
             .join(', ')} et ${leNom(DISTRICTS[DISTRICTS.length - 1].name)}. Astoria et Long Island City sont dans le Queens, Williamsburg et Bushwick à Brooklyn.`,
         ),
-        p('Pour prendre un bâtiment, entrez-y avec vos hommes et restez-y tant qu’aucun défenseur ennemi n’est présent : plus vous êtes nombreux, plus la prise est rapide.'),
+        p('Pour prendre un bâtiment, menez son opération de prise de contrôle : un objectif court pour une boutique (prendre le comptoir), deux ou trois étapes pour un bâtiment clé (pirater le serveur, forcer la chambre forte et emporter l’acte de propriété, prendre le bureau de la direction…), l’assaut le plus long pour un QG. Vos lieutenants mènent chaque étape sur place pendant que leurs hommes les couvrent ; vous pouvez les rejoindre pour aller plus vite. Un ennemi près de l’objectif le conteste ; abattre l’opérateur l’interrompt ; le propriétaire peut reprendre une étape volée. Un braquage, lui, ne rapporte que de l’argent : le bâtiment ne change pas de mains.'),
         p('Si la partie a une durée limitée, le parrain qui contrôle le plus de quartiers à la fin du temps l’emporte.'),
       ],
     },

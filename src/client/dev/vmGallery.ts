@@ -7,15 +7,29 @@
 // (maintenu : rafale) · R recharger · W marcher · Maj courir · Espace sauter · N jour/nuit/intérieur
 // · M repère de bouche du canon · P pause · glisser la souris (Maj + clic) pour tourner la tête.
 //
+// Bras cybernétiques : ?vm&arms=grappin,pistoletBras (implants des bras gauche et droit, « - »
+// pour aucun ; &lv=1..5 niveau), ou &cyber=brasG=grappin:3,brasD=lame:2, ou &preset=combat (voir
+// la galerie des personnages). Clavier : 9 / 8 sortir-rentrer l'arme du bras gauche / droit ·
+// Q / E capacité du bras gauche / droit (grappin tiré puis lâché, bouclier levé puis baissé,
+// répulseur, arc électrique, roquettes, piratage ; arme de bras : sortie) · C charge du poing
+// hydraulique (une fois : charge, deux fois : coup chargé) · X posture de déplacement (glissade,
+// esquive, course murale, escalade, saut, réception, grappin) · V vision (normale, thermique).
+//
 // API pour les captures automatiques : window.__vm (set, step, fire, burst, swing, reload,
-// reloadAt, render…). Avec ?vm&still la boucle d'animation est arrêtée : on avance le temps avec
-// __vm.step(). Avec ?vm&inspect les modèles sont affichés à plat, en grand, pour les vérifier
-// (?vm&inspect=pistol,smg%2Bdadou… ; sans liste : tous).
+// reloadAt, render, cyber, arm, ability, action, move, grapple, charge…). Avec ?vm&still la
+// boucle d'animation est arrêtée : on avance le temps avec __vm.step(). Avec ?vm&inspect les
+// modèles sont affichés à plat, en grand, pour les vérifier (?vm&inspect=pistol,smg%2Bdadou… ;
+// cy-grappin… : avant-bras mécaniques déployés ; sans liste : tous).
 
 import * as THREE from 'three';
-import { WEAPONS, Weapon } from '../../shared/characters';
+import { IMPLANT_ARM_WEAPON, isArmWeapon, WEAPONS, Weapon } from '../../shared/characters';
 import type { Slot } from '../../shared/protocol';
-import { Viewmodel } from '../game/viewmodel';
+import { CyberShaderData, patchCharMaterial } from '../characters/charMaterial';
+import { meshChar } from '../characters/charMesher';
+import { ARM_IMPLANTS, type ArmImplant } from '../characters/cyber';
+import { Viewmodel, type MoveState } from '../game/viewmodel';
+import { cyberForearmFP, fpMech } from '../models/cyberArms';
+import { CYBER_PRESETS } from './charGallery';
 import type { PlayerController } from '../game/player';
 import type { WeaponSystem } from '../game/weapons';
 import { meshModel } from '../models/modelMesher';
@@ -27,6 +41,35 @@ type EnvKind = 'day' | 'night' | 'indoor';
 
 const WEAPON_NAMES: Record<number, string> = Object.fromEntries(Object.values(WEAPONS).map((d) => [d.id, d.name]));
 const ORDER = [Weapon.FISTS, Weapon.PISTOL, Weapon.SHOTGUN, Weapon.RIFLE, Weapon.KNIFE, Weapon.CLUB, Weapon.SMG];
+const MOVES: MoveState[] = ['normal', 'slide', 'dash', 'wallrunL', 'wallrunR', 'climb', 'air', 'land', 'grapple'];
+const MOVE_NAMES: Record<MoveState, string> = {
+  normal: 'normale',
+  sprint: 'course',
+  slide: 'glissade',
+  dash: 'esquive',
+  wallrunL: 'course murale (mur à gauche)',
+  wallrunR: 'course murale (mur à droite)',
+  climb: 'escalade',
+  air: 'en l’air',
+  land: 'réception',
+  grapple: 'grappin',
+};
+
+/** Implants des bras d'après l'adresse (?arms=, ?cyber=, ?preset=). */
+function cyberFromParams(params: URLSearchParams): string[] {
+  const raw = params.get('cyber');
+  if (raw) return raw.split(',').filter(Boolean);
+  const preset = params.get('preset');
+  if (preset && CYBER_PRESETS[preset]) return CYBER_PRESETS[preset];
+  const arms = params.get('arms');
+  if (!arms) return [];
+  const lv = params.get('lv') ?? '3';
+  const [l, r] = arms.split(',');
+  const out: string[] = [];
+  if (l && l !== '-') out.push(`brasG=${l}:${lv}`);
+  if (r && r !== '-') out.push(`brasD=${r}:${lv}`);
+  return out;
+}
 
 /** Volume de lumière minimal (2×2×2, uniforme) : ciel, lampes. */
 function lightTexture(): THREE.Data3DTexture {
@@ -168,7 +211,7 @@ export function startVmGallery(root: HTMLElement): void {
   const weapons = {
     current: Weapon.PISTOL as Weapon,
     reloadUntil: 0,
-    mag: new Map<Weapon, number>(ORDER.filter((w) => WEAPONS[w].ranged).map((w) => [w, WEAPONS[w].magazine])),
+    mag: new Map<Weapon, number>([...ORDER, Weapon.ARM_PISTOL].filter((w) => WEAPONS[w].ranged).map((w) => [w, WEAPONS[w].magazine])),
     reloading(now: number) {
       return now < this.reloadUntil;
     },
@@ -185,7 +228,17 @@ export function startVmGallery(root: HTMLElement): void {
     /** Bouton de tir maintenu (rafale du Wasp). */
     trigger: false,
     nextShot: 0,
+    // implants des bras
+    cyber: cyberFromParams(params),
+    armOut: null as 'L' | 'R' | null,
+    prevWeapon: Weapon.PISTOL as Weapon,
+    move: 'normal' as MoveState,
+    grapple: null as 'L' | 'R' | null,
+    shield: null as 'L' | 'R' | null,
+    charging: null as 'L' | 'R' | null,
+    vision: 'normal' as 'normal' | 'thermal',
   };
+  vm.setCyber(state.cyber);
   let now = 1;
   let flashT = 0;
 
@@ -250,6 +303,97 @@ export function startVmGallery(root: HTMLElement): void {
     weapons.current = w;
     weapons.reloadUntil = 0;
     state.nextShot = 0;
+    if (!isArmWeapon(w) && state.armOut) {
+      state.armOut = null;
+      vm.setArmOut(null);
+    }
+  };
+
+  // ---------------------------------------------------------------- implants des bras
+  const armId = (side: 'L' | 'R'): string | null => {
+    const slot = side === 'L' ? 'brasG=' : 'brasD=';
+    const it = state.cyber.find((x) => x.startsWith(slot));
+    return it ? it.slice(slot.length).split(':')[0] : null;
+  };
+  /** Sortir (ou rentrer) l'arme du bras. */
+  const armOut = (side: 'L' | 'R' | null) => {
+    if (!side || state.armOut === side) {
+      if (isArmWeapon(weapons.current)) setWeapon(state.prevWeapon);
+      state.armOut = null;
+      vm.setArmOut(null);
+      return;
+    }
+    const id = armId(side);
+    const w = id ? IMPLANT_ARM_WEAPON[id] : undefined;
+    if (w === undefined) return;
+    if (!isArmWeapon(weapons.current)) state.prevWeapon = weapons.current;
+    setWeapon(w);
+    state.armOut = side;
+    vm.setArmOut(side);
+  };
+  /** Grappin : tiré vers le haut de la ruelle, puis lâché. */
+  const grapple = (side: 'L' | 'R' | null) => {
+    if (state.grapple) {
+      vm.armAction(state.grapple, 'grapple-release');
+      vm.setGrappleTarget(null);
+      state.grapple = null;
+      if (state.move === 'grapple') move('normal');
+    }
+    if (!side) return;
+    state.grapple = side;
+    vm.setGrappleTarget(new THREE.Vector3(side === 'L' ? -2.4 : 2.4, 4.6, -7.5));
+    vm.armAction(side, 'grapple-fire');
+  };
+  const move = (m: MoveState, t?: number) => {
+    state.move = m;
+    vm.setMoveState(m, t);
+    player.onGround = m !== 'air' && m !== 'wallrunL' && m !== 'wallrunR' && m !== 'grapple' && m !== 'climb';
+  };
+  /** Capacité du bras (touche Q / E en jeu). */
+  const ability = (side: 'L' | 'R') => {
+    const id = armId(side);
+    switch (id) {
+      case 'grappin':
+        grapple(state.grapple ? null : side);
+        break;
+      case 'bouclier':
+        state.shield = state.shield ? null : side;
+        vm.armAction(side, state.shield ? 'shield-on' : 'shield-off');
+        break;
+      case 'repulseur':
+        vm.armAction(side, 'repulse');
+        break;
+      case 'choc':
+        vm.armAction(side, 'shock');
+        break;
+      case 'roquettes':
+        vm.armAction(side, 'rockets');
+        break;
+      case 'outils':
+        vm.armAction(side, 'hack');
+        break;
+      case 'pistoletBras':
+      case 'lame':
+      case 'poing':
+      case 'fouet':
+        armOut(side);
+        break;
+      default:
+        break;
+    }
+  };
+  /** Poing hydraulique : début de charge, puis coup chargé. */
+  const charge = () => {
+    const side = state.armOut;
+    if (!side || weapons.current !== Weapon.ARM_FIST) return;
+    if (!state.charging) {
+      state.charging = side;
+      vm.armAction(side, 'charge-start');
+    } else {
+      vm.armAction(state.charging, 'charge-release');
+      state.charging = null;
+      vm.swing();
+    }
   };
 
   // ---------------------------------------------------------------- simulation
@@ -281,6 +425,7 @@ export function startVmGallery(root: HTMLElement): void {
     const dir = new THREE.Vector3(Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), Math.cos(player.yaw) * Math.cos(player.pitch));
     camera.lookAt(camera.position.clone().add(dir));
     camera.updateMatrixWorld(true);
+    vm.setMoveState(state.move);
     vm.update(dt, player as unknown as PlayerController, weapons as unknown as WeaponSystem, now);
     if (flashT > 0) {
       flashT -= dt;
@@ -321,6 +466,16 @@ export function startVmGallery(root: HTMLElement): void {
     bar.appendChild(b);
   };
   for (const w of ORDER) button(`${w + 1} ${WEAPON_NAMES[w]}`, () => setWeapon(w));
+  button('9 arme bras G', () => armOut('L'));
+  button('8 arme bras D', () => armOut('R'));
+  button('Q capacité G', () => ability('L'));
+  button('E capacité D', () => ability('R'));
+  button('C charge', charge);
+  button('X posture', () => move(MOVES[(MOVES.indexOf(state.move) + 1) % MOVES.length]));
+  button('V vision', () => {
+    state.vision = state.vision === 'normal' ? 'thermal' : 'normal';
+    vm.setVision(state.vision);
+  });
   button('L Dadou/Even', () => api.set({ look: state.look === 'dadou' ? 'even' : 'dadou' }));
   button('A viser', () => (state.aimToggle = player.aiming = !player.aiming));
   button('F tirer/frapper', fire);
@@ -333,11 +488,24 @@ export function startVmGallery(root: HTMLElement): void {
   button('P pause', () => (state.paused = !state.paused));
   const hud = () => {
     const w = weapons.current;
-    info.innerHTML = `<b>Vue subjective</b> — ${WEAPON_NAMES[w]} — ${state.look === 'dadou' ? 'Dadou' : 'Even'} — ${state.env}<br>` + `${player.aiming ? 'visée · ' : ''}${state.walk ? (player.sprint ? 'course · ' : 'marche · ') : ''}${weapons.reloading(now) ? 'rechargement · ' : ''}munitions ${WEAPONS[w].ranged ? weapons.mag.get(w) : '—'}${state.paused ? ' · pause' : ''}`;
+    info.innerHTML =
+      `<b>Vue subjective</b> — ${WEAPON_NAMES[w]} — ${state.look === 'dadou' ? 'Dadou' : 'Even'} — ${state.env}<br>` +
+      `${player.aiming ? 'visée · ' : ''}${state.walk ? (player.sprint ? 'course · ' : 'marche · ') : ''}${weapons.reloading(now) ? 'rechargement · ' : ''}munitions ${WEAPONS[w].ranged ? weapons.mag.get(w) : '—'}${state.paused ? ' · pause' : ''}<br>` +
+      `bras G : ${armId('L') ?? 'chair'} · bras D : ${armId('R') ?? 'chair'} · posture : ${MOVE_NAMES[state.move]}${state.vision === 'thermal' ? ' · thermique' : ''}`;
   };
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k >= '1' && k <= '7') setWeapon((Number(k) - 1) as Weapon);
+    else if (k === '9') armOut('L');
+    else if (k === '8') armOut('R');
+    else if (k === 'q') ability('L');
+    else if (k === 'e') ability('R');
+    else if (k === 'c') charge();
+    else if (k === 'x') move(MOVES[(MOVES.indexOf(state.move) + 1) % MOVES.length]);
+    else if (k === 'v') {
+      state.vision = state.vision === 'normal' ? 'thermal' : 'normal';
+      vm.setVision(state.vision);
+    }
     else if (k === 'l') api.set({ look: state.look === 'dadou' ? 'even' : 'dadou' });
     else if (k === 'a') state.aimToggle = player.aiming = !player.aiming;
     else if (k === 'f') fire();
@@ -431,6 +599,24 @@ export function startVmGallery(root: HTMLElement): void {
       render();
     },
     jump: () => (state.jumpT = 0),
+    /** Implants (liste « emplacement=identifiant:niveau » ou nom d'un préréglage). */
+    cyber(list: string[] | string) {
+      state.cyber = typeof list === 'string' ? (CYBER_PRESETS[list] ?? list.split(',').filter(Boolean)) : list;
+      vm.setCyber(state.cyber);
+    },
+    /** Sortir l'arme du bras ('L', 'R') ou la rentrer (null). */
+    arm: armOut,
+    ability,
+    action: (side: 'L' | 'R', a: string) => vm.armAction(side, a),
+    move,
+    grapple,
+    charge,
+    vision(m: 'normal' | 'thermal') {
+      state.vision = m;
+      vm.setVision(m);
+    },
+    /** La vue elle-même (mise au point). */
+    viewmodel: vm,
     render,
     now: () => now,
     muzzle() {
@@ -541,6 +727,52 @@ function startInspect(renderer: THREE.WebGLRenderer, which: string): void {
         const a = VM.armModels(side, pose, look(boss));
         const f = mesh(a.forearm, a.wrist, [-0.6, 0, 0]);
         return group(mesh(a.hand), f);
+      };
+    }
+  }
+  // avant-bras mécaniques (vue subjective) : coque, pièces déployées, main mécanique
+  const cd = new CyberShaderData(1);
+  for (let ch = 0; ch < 16; ch++) cd.setGlow(0, ch, 1.4);
+  cd.flush();
+  const cmat = patchCharMaterial(createObjectMaterial({ noFog: true, key: 'inspect-cy' }), cd);
+  const cmesh = (m: Parameters<typeof meshChar>[0], pos: [number, number, number] = [0, 0, 0]) => {
+    const o = new THREE.Mesh(meshChar(m, 3), cmat);
+    o.position.set(...pos);
+    return o;
+  };
+  const S2 = Math.SQRT1_2;
+  for (const id of ARM_IMPLANTS as readonly ArmImplant[]) {
+    for (const side of ['R', 'L'] as const) {
+      groups[`cy${side === 'L' ? 'L' : ''}-${id}`] = () => {
+        const lk = look(side === 'L' ? 'even' : 'dadou');
+        const a = cyberForearmFP(id, 3, side, lk);
+        const g = group(cmesh(a.forearm));
+        const podAx = new THREE.Vector3(S2, side === 'L' ? S2 : -S2, 0);
+        const pivots = new Map<string, THREE.Group>();
+        for (const p of a.parts) {
+          const pivot = new THREE.Group();
+          pivot.position.set(...p.pivot);
+          const m = cmesh(p.model, [-p.pivot[0], -p.pivot[1], -p.pivot[2]]);
+          pivot.add(m);
+          pivots.set(p.name, pivot);
+          // pièces en position déployée
+          if (p.name === 'plateA' || p.name === 'plateB') pivot.rotation.z = -Math.sign(p.pivot[0]) * Math.PI;
+          else if (p.name === 'barrel') pivot.position.z -= a.travel.barrel ?? 0;
+          else if (p.name === 'blade') pivot.position.z -= a.travel.blade ?? 0;
+          else if (p.name === 'rods') pivot.position.z += a.travel.rods ?? 0;
+          else if (p.name === 'probe') pivot.position.z -= a.travel.probe ?? 0;
+          else if (p.name === 'pod') pivot.quaternion.setFromAxisAngle(podAx, 0.5);
+          else if (p.name === 'cover') {
+            const pod = a.parts.find((q) => q.name === 'pod');
+            const qp = new THREE.Quaternion().setFromAxisAngle(podAx, 0.5);
+            if (pod) pivot.position.sub(new THREE.Vector3(...pod.pivot)).applyQuaternion(qp).add(new THREE.Vector3(...pod.pivot));
+            pivot.quaternion.copy(qp).multiply(new THREE.Quaternion().setFromAxisAngle(podAx, -1.7));
+          }
+          g.add(pivot);
+        }
+        const h = VM.mechHandModel(side, id === 'fouet' ? 'relax' : 'wfist', lk, fpMech(id, side));
+        g.add(cmesh(h.hand, [-h.wrist[0], -h.wrist[1], -h.wrist[2]]));
+        return g;
       };
     }
   }

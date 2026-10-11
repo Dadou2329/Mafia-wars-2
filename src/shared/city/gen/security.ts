@@ -39,6 +39,11 @@ export function placeSecurity(ctx: GenContext, info: BuildingInfo): void {
     if (info.terminal) break;
   }
   if (!info.terminal) info.terminal = { x: door.in.x + ix * 0.8, z: door.in.z + iz * 0.8, y };
+  // objectif « couper les caméras » des opérations de prise de contrôle (shared/conquest.ts)
+  if (info.def.capturable) {
+    const t = info.terminal;
+    (info.ops ??= []).push({ key: 'terminal', x: Math.round(t.x * 100) / 100, y: t.y ?? y, z: Math.round(t.z * 100) / 100, floor: 0 });
+  }
   // caméras : au-dessus de la porte (dehors) et dans l'entrée
   const outYaw = Math.atan2(-ix, -iz);
   ctx.prop('SECURITY_CAMERA', door.x - ix * 0.25 + sx * 1.6, y + 3.1, door.z - iz * 0.25 + sz * 1.6, outYaw, 0, info.id);

@@ -33,7 +33,20 @@ export type SfxName =
   | 'police_siren' | 'police_radio'
   | 'car_horn' | 'hover_pass' | 'drone_pass' | 'subway_train' | 'vehicle_door' | 'vehicle_crash'
   // anciens noms conservés : sifflet → sirène, fiacre → voiture volante, hennissement → klaxon
-  | 'police_whistle' | 'horse_clop' | 'carriage_wheels' | 'neigh';
+  | 'police_whistle' | 'horse_clop' | 'carriage_wheels' | 'neigh'
+  // implants cybernétiques (sfx_cyber.ts)
+  // grappin, treuil
+  | 'grapple_fire' | 'grapple_hit' | 'grapple_release' | 'winch_yank'
+  // armes de bras
+  | 'arm_deploy' | 'arm_retract' | 'arm_pistol' | 'arm_pistol_far' | 'blade_slash' | 'blade_hit' | 'fist_heavy' | 'fist_charge' | 'whip_crack'
+  // bouclier, répulseur, décharges, roquettes
+  | 'shield_up' | 'shield_hit' | 'shield_break' | 'shield_down' | 'repulsor' | 'shock_zap' | 'emp_burst' | 'rocket_launch' | 'rocket_hit'
+  // déplacements augmentés
+  | 'dash_whoosh' | 'jump_thrust' | 'leap_charge' | 'leap_launch' | 'slide_start' | 'wallrun_step' | 'mantle_grab' | 'land_heavy' | 'ground_quake'
+  // yeux, peau, système neuronal, torse
+  | 'scan_ping' | 'vision_on' | 'vision_off' | 'camo_on' | 'camo_off' | 'reflex_on' | 'reflex_off' | 'overcharge_on' | 'second_wind' | 'nano_heal' | 'drone_deploy' | 'tool_hack' | 'mark_ping' | 'threat_warn'
+  // clinique et écran des implants
+  | 'implant_install' | 'implant_upgrade' | 'implant_remove' | 'cyber_ui_hover' | 'cyber_ui_select';
 
 /** Tous les SfxName, dans l'ordre de déclaration (tests, menus de débogage, préchargement). */
 export const SFX_NAMES: readonly SfxName[] = [
@@ -54,6 +67,12 @@ export const SFX_NAMES: readonly SfxName[] = [
   'police_siren', 'police_radio',
   'car_horn', 'hover_pass', 'drone_pass', 'subway_train', 'vehicle_door', 'vehicle_crash',
   'police_whistle', 'horse_clop', 'carriage_wheels', 'neigh',
+  'grapple_fire', 'grapple_hit', 'grapple_release', 'winch_yank',
+  'arm_deploy', 'arm_retract', 'arm_pistol', 'arm_pistol_far', 'blade_slash', 'blade_hit', 'fist_heavy', 'fist_charge', 'whip_crack',
+  'shield_up', 'shield_hit', 'shield_break', 'shield_down', 'repulsor', 'shock_zap', 'emp_burst', 'rocket_launch', 'rocket_hit',
+  'dash_whoosh', 'jump_thrust', 'leap_charge', 'leap_launch', 'slide_start', 'wallrun_step', 'mantle_grab', 'land_heavy', 'ground_quake',
+  'scan_ping', 'vision_on', 'vision_off', 'camo_on', 'camo_off', 'reflex_on', 'reflex_off', 'overcharge_on', 'second_wind', 'nano_heal', 'drone_deploy', 'tool_hack', 'mark_ping', 'threat_warn',
+  'implant_install', 'implant_upgrade', 'implant_remove', 'cyber_ui_hover', 'cyber_ui_select',
 ];
 
 export interface PlayOptions {
@@ -73,11 +92,15 @@ export interface PlayOptions {
  * Sons continus (véhicules, sources permanentes) joués en boucle par `audio.loop()`.
  * La hauteur (`pitch`) suit le régime : 1 ≈ ralenti, 2,5 = pleine vitesse.
  */
-export type LoopName = 'engine_car' | 'engine_moto' | 'engine_heavy' | 'vtol' | 'drone' | 'alarm' | 'siren';
+export type LoopName =
+  | 'engine_car' | 'engine_moto' | 'engine_heavy' | 'vtol' | 'drone' | 'alarm' | 'siren'
+  // implants : treuil du grappin, raclement de glissade, bourdonnement du bouclier et du camouflage
+  | 'grapple_reel' | 'slide_scrape' | 'shield_hum' | 'camo_hum';
 
 /** Tous les LoopName. */
 export const LOOP_NAMES: readonly LoopName[] = [
   'engine_car', 'engine_moto', 'engine_heavy', 'vtol', 'drone', 'alarm', 'siren',
+  'grapple_reel', 'slide_scrape', 'shield_hum', 'camo_hum',
 ];
 
 export interface LoopOptions {

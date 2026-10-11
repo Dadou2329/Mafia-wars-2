@@ -1,6 +1,7 @@
 /**
  * Tampons des sons continus joués par `audio.loop()` : moteurs (voiture,
- * moto, poids lourd), ADAV, drone, alarme d'immeuble et sirène de police.
+ * moto, poids lourd), ADAV, drone, alarme d'immeuble, sirène de police, et les
+ * implants (treuil du grappin, raclement de glissade, bouclier, camouflage).
  *
  * Chaque tampon est mono et EXACTEMENT périodique : les composantes tonales
  * ont des fréquences multiples de 1/L, et tout ce qui passe par un filtre
@@ -336,6 +337,156 @@ function* sirenLoop(fs: number, _rng: Rng): Generator<undefined, Float32Array<Ar
   return d;
 }
 
+/* ------------------------------------------------------------------ implants */
+
+/** Impulsions périodiques (cliquets) : n par boucle, décroissance exponentielle de constante tau. */
+function pulseTrain(N: number, fs: number, n: number, tau: number): Float32Array<ArrayBuffer> {
+  const d = new Float32Array(N);
+  const step = N / n;
+  const k = Math.exp(-1 / (tau * fs));
+  for (let p = 0; p < n; p++) {
+    const i0 = Math.floor(p * step);
+    let a = 1;
+    for (let j = 0; j < step && a > 1e-3; j++) {
+      d[(i0 + j) % N] += a;
+      a *= k;
+    }
+  }
+  return d;
+}
+
+/** Treuil du grappin : moteur qui siffle, denture, cliquets du cabestan, câble qui file. */
+function* grappleReelLoop(fs: number, rng: Rng): Generator<undefined, Float32Array<ArrayBuffer>, unknown> {
+  const L = 2;
+  const N = L * fs;
+  const f0 = periodicHz(150, L);
+  const mod = periodicMod(N, L, rng, 4);
+  yield;
+  const whine = harmonics(N, fs, f0, [1, 0.55, 0.35, 0.5, 0.2, 0.15, 0.1, 0.25, 0.08, 0.05, 0.04, 0.06], rng, mod, 0.3);
+  yield;
+  const gear = amArray(N, fs, periodicHz(f0 / 3, L), 0.25);
+  const ratchet = pulseTrain(N, fs, 36, 0.012);
+  const ticks = pulseTrain(N, fs, 36, 0.0008);
+  const noise = whiteNoise(N, rng);
+  yield;
+  const hissBp = Biquad.bandpass(fs, 3200, 1.2);
+  const tick = new Resonator(fs, 2600, 0.008);
+  const rumble = Biquad.lowpass(fs, 90, 0.7);
+  const out = Biquad.lowpass(fs, 7000, 0.7);
+  const d = new Float32Array(N);
+  for (let i = 0; i < 2 * N; i++) {
+    const k = i % N;
+    const w = noise[k];
+    let x = whine[k] * gear[k] * 0.45 + hissBp.process(w) * (0.12 + 0.35 * ratchet[k]) + tick.process(ticks[k] * w) * 0.5 + rumble.process(w) * 1.1;
+    x = out.process(x);
+    if (i >= N) d[k] = x;
+    if ((i & YIELD_MASK) === YIELD_MASK) yield;
+  }
+  return d;
+}
+
+/** Glissade : raclement granuleux (bruit en bandes modulé), étincelles qui crépitent, frottement grave. */
+function* slideScrapeLoop(fs: number, rng: Rng): Generator<undefined, Float32Array<ArrayBuffer>, unknown> {
+  const L = 2;
+  const N = L * fs;
+  const grit = periodicMod(N, L, rng, 48, 8);
+  const slow = periodicMod(N, L, rng, 5);
+  const noise = whiteNoise(N, rng);
+  yield;
+  // étincelles : excitations brèves à des instants fixes (donc périodiques)
+  const exc = new Float32Array(N);
+  for (let r = 0; r < 70; r++) {
+    const i0 = Math.floor(rng() * N);
+    const a = rr(rng, 0.2, 1);
+    for (let j = 0; j < 10; j++) exc[(i0 + j) % N] += (rng() * 2 - 1) * a;
+  }
+  yield;
+  const b1 = Biquad.bandpass(fs, 1600, 0.8);
+  const b2 = Biquad.bandpass(fs, 3800, 1.5);
+  const spark = new Resonator(fs, 4600, 0.002);
+  const sparkHp = Biquad.highpass(fs, 2500, 0.7);
+  const rumble = Biquad.lowpass(fs, 140, 0.7);
+  const out = Biquad.lowpass(fs, 9000, 0.7);
+  const d = new Float32Array(N);
+  for (let i = 0; i < 2 * N; i++) {
+    const k = i % N;
+    const w = noise[k];
+    const rough = 0.55 + 0.45 * Math.abs(grit[k]);
+    let x = (b1.process(w) * 0.9 + b2.process(w) * 0.6) * rough * (0.85 + 0.15 * slow[k]);
+    x += sparkHp.process(spark.process(exc[k])) * 0.12 + rumble.process(w) * 1.4;
+    x = out.process(x);
+    if (i >= N) d[k] = x;
+    if ((i & YIELD_MASK) === YIELD_MASK) yield;
+  }
+  return d;
+}
+
+/** Bouclier d'énergie : bourdon électrique à battements lents, miroitement aigu, crépitements rares. */
+function* shieldHumLoop(fs: number, rng: Rng): Generator<undefined, Float32Array<ArrayBuffer>, unknown> {
+  const L = 2;
+  const N = L * fs;
+  const amps = [1, 0.6, 0.45, 0.3, 0.22, 0.15, 0.1, 0.08];
+  const a = harmonics(N, fs, periodicHz(110, L), amps, rng);
+  yield;
+  const b = harmonics(N, fs, periodicHz(110.5, L), amps, rng);
+  yield;
+  const sh1 = sine(N, fs, periodicHz(1320, L), 0.035, rng);
+  const sh2 = sine(N, fs, periodicHz(1980, L), 0.02, rng);
+  const am1 = amArray(N, fs, periodicHz(3, L), 0.8);
+  const am2 = amArray(N, fs, periodicHz(4.5, L), 0.8, 1.3);
+  const exc = new Float32Array(N);
+  for (let r = 0; r < 14; r++) {
+    const i0 = Math.floor(rng() * N);
+    for (let j = 0; j < 6; j++) exc[(i0 + j) % N] += (rng() * 2 - 1) * rr(rng, 0.3, 1);
+  }
+  yield;
+  const crack = new Resonator(fs, 5200, 0.0015);
+  const body = Biquad.lowpass(fs, 1800, 0.9);
+  const out = Biquad.lowpass(fs, 6000, 0.7);
+  const d = new Float32Array(N);
+  for (let i = 0; i < 2 * N; i++) {
+    const k = i % N;
+    let x = body.process((a[k] + b[k]) * 0.35) + sh1[k] * am1[k] + sh2[k] * am2[k] + crack.process(exc[k]) * 0.08;
+    x = out.process(x);
+    if (i >= N) d[k] = x;
+    if ((i & YIELD_MASK) === YIELD_MASK) yield;
+  }
+  return d;
+}
+
+/** Camouflage optique : souffle aérien qui respire, notes de verre en trémolo, pulsation grave. */
+function* camoHumLoop(fs: number, rng: Rng): Generator<undefined, Float32Array<ArrayBuffer>, unknown> {
+  const L = 3;
+  const N = L * fs;
+  const noise = whiteNoise(N, rng);
+  const pinkG = new PinkGen();
+  const pk = new Float32Array(N);
+  for (let i = 0; i < 2 * N; i++) {
+    const v = pinkG.next(noise[i % N]);
+    if (i >= N) pk[i - N] = v;
+    if ((i & 32767) === 32767) yield;
+  }
+  const breath = amArray(N, fs, periodicHz(0.667, L), 0.45);
+  const glass = new Float32Array(N);
+  for (const [f, ph] of [[880, 0], [1318.5, 1.7], [1760, 3.1]] as const) {
+    const tone = sine(N, fs, periodicHz(f, L), 0.03, rng);
+    const trem = amArray(N, fs, periodicHz(5, L), 0.6, ph);
+    for (let i = 0; i < N; i++) glass[i] += tone[i] * trem[i];
+    yield;
+  }
+  const throb = sine(N, fs, periodicHz(55, L), 0.12, rng);
+  const throbAm = amArray(N, fs, periodicHz(1.333, L), 0.7);
+  const air = Biquad.bandpass(fs, 2200, 0.8);
+  const d = new Float32Array(N);
+  for (let i = 0; i < 2 * N; i++) {
+    const k = i % N;
+    const x = air.process(pk[k]) * 0.8 * breath[k] + glass[k] + throb[k] * throbAm[k];
+    if (i >= N) d[k] = x;
+    if ((i & YIELD_MASK) === YIELD_MASK) yield;
+  }
+  return d;
+}
+
 const MAKERS: Record<LoopName, (fs: number, rng: Rng) => Generator<undefined, Float32Array<ArrayBuffer>, unknown>> = {
   engine_car: engineCar,
   engine_moto: engineMoto,
@@ -344,10 +495,15 @@ const MAKERS: Record<LoopName, (fs: number, rng: Rng) => Generator<undefined, Fl
   drone: droneLoop,
   alarm: alarmLoop,
   siren: sirenLoop,
+  grapple_reel: grappleReelLoop,
+  slide_scrape: slideScrapeLoop,
+  shield_hum: shieldHumLoop,
+  camo_hum: camoHumLoop,
 };
 
 const SEEDS: Record<LoopName, number> = {
   engine_car: 11, engine_moto: 22, engine_heavy: 33, vtol: 44, drone: 55, alarm: 66, siren: 77,
+  grapple_reel: 88, slide_scrape: 99, shield_hum: 111, camo_hum: 122,
 };
 
 /** Tâche génératrice : tampon bouclable du son continu `name`. */

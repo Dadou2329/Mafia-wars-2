@@ -12,6 +12,7 @@ import type { BankName } from './resources';
 import * as C from './sfx_combat';
 import type { SfxCtx } from './sfx_combat';
 import * as M from './sfx_misc';
+import * as Y from './sfx_cyber';
 import * as U from './sfx_ui';
 import type { SfxName } from './types';
 
@@ -65,6 +66,10 @@ const TRAIN: SpatialProfile = { ref: 12, rolloff: 0.6, cull: 300, hrtf: false };
 const BUILDING: SpatialProfile = { ref: 3, rolloff: 1, cull: 60, hrtf: false };
 const REWARD: SpatialProfile = { ref: 3, rolloff: 1, cull: 50, hrtf: false };
 const SIGNAL: SpatialProfile = { ref: 12, rolloff: 0.7, cull: 250, hrtf: false };
+/* Implants : bruitages proches (servos), capacités (jets, bouclier), chocs lourds. */
+const CY_FOLEY: SpatialProfile = { ref: 3, rolloff: 1.2, cull: 50, hrtf: true };
+const CY_ACT: SpatialProfile = { ref: 5, rolloff: 1, cull: 110, hrtf: true };
+const CY_HEAVY: SpatialProfile = { ref: 8, rolloff: 0.8, cull: 260, hrtf: true };
 
 const noop: SynthFn = (s) => s.t;
 
@@ -165,4 +170,56 @@ export const SFX: Record<SfxName, SfxDef> = {
   horse_clop: { synth: M.hoverThrum, gain: 0.5, priority: 3, maxInst: 6, send: 0.1, spatial: VEHICLE },
   carriage_wheels: { synth: hoverPassQuiet, gain: 0.35, priority: 3, maxInst: 3, send: 0.15, spatial: VEHICLE },
   neigh: { synth: M.carHorn, gain: 0.4, priority: 4, maxInst: 2, send: 0.3, spatial: HORN },
+
+  // implants cybernétiques (sfx_cyber.ts)
+  grapple_fire: { synth: Y.grappleFire, gain: 0.85, priority: 7, maxInst: 3, send: 0.2, spatial: CY_ACT },
+  grapple_hit: { synth: Y.grappleHit, gain: 1.0, priority: 7, maxInst: 3, send: 0.3, spatial: CY_ACT },
+  grapple_release: { synth: Y.grappleRelease, gain: 1.0, priority: 6, maxInst: 3, send: 0.1, spatial: CY_FOLEY },
+  winch_yank: { synth: Y.winchYank, gain: 0.42, priority: 7, maxInst: 2, send: 0.2, spatial: CY_ACT },
+  arm_deploy: { synth: Y.armDeploy, gain: 0.45, priority: 6, maxInst: 3, send: 0.05, spatial: CY_FOLEY },
+  arm_retract: { synth: Y.armRetract, gain: 0.38, priority: 6, maxInst: 3, send: 0.05, spatial: CY_FOLEY },
+  arm_pistol: { synth: Y.armPistol, gain: 1.15, priority: 8, maxInst: 8, send: 0.5, spatial: GUN, far: { dist: 70, synth: Y.armPistolFar, gain: 1.4 } },
+  arm_pistol_far: { synth: Y.armPistolFar, gain: 0.8, priority: 6, maxInst: 6, send: 0.7, spatial: GUN },
+  blade_slash: { synth: Y.bladeSlash, gain: 0.9, priority: 7, maxInst: 4, send: 0.1, spatial: MELEE },
+  blade_hit: { synth: Y.bladeHit, gain: 1.0, priority: 7, maxInst: 4, send: 0.1, spatial: MELEE },
+  fist_heavy: { synth: Y.fistHeavy, gain: 0.66, priority: 8, maxInst: 3, send: 0.25, spatial: CY_HEAVY },
+  fist_charge: { synth: Y.fistCharge, gain: 0.7, priority: 6, maxInst: 2, send: 0.05, spatial: CY_FOLEY },
+  whip_crack: { synth: Y.whipCrack, gain: 0.9, priority: 7, maxInst: 3, send: 0.2, spatial: CY_ACT },
+  shield_up: { synth: Y.shieldUp, gain: 0.37, priority: 7, maxInst: 2, send: 0.15, spatial: CY_ACT },
+  shield_hit: { synth: Y.shieldHit, gain: 1.0, priority: 7, maxInst: 6, send: 0.15, spatial: CY_ACT },
+  shield_break: { synth: Y.shieldBreak, gain: 0.7, priority: 8, maxInst: 2, send: 0.3, spatial: CY_HEAVY },
+  shield_down: { synth: Y.shieldDown, gain: 0.75, priority: 6, maxInst: 2, send: 0.1, spatial: CY_ACT },
+  repulsor: { synth: Y.repulsor, gain: 0.55, priority: 8, maxInst: 2, send: 0.35, spatial: CY_HEAVY },
+  shock_zap: { synth: Y.shockZap, gain: 1.15, priority: 8, maxInst: 3, send: 0.25, spatial: CY_HEAVY },
+  emp_burst: { synth: Y.empBurst, gain: 0.5, priority: 8, maxInst: 2, send: 0.35, spatial: CY_HEAVY },
+  rocket_launch: { synth: Y.rocketLaunch, gain: 0.85, priority: 7, maxInst: 6, send: 0.3, spatial: CY_HEAVY },
+  rocket_hit: { synth: Y.rocketHit, gain: 0.68, priority: 9, maxInst: 4, send: 0.55, spatial: HEAVY },
+  dash_whoosh: { synth: Y.dashWhoosh, gain: 0.9, priority: 7, maxInst: 3, send: 0.15, spatial: CY_ACT },
+  jump_thrust: { synth: Y.jumpThrust, gain: 0.8, priority: 6, maxInst: 3, send: 0.12, spatial: CY_ACT },
+  leap_charge: { synth: Y.leapCharge, gain: 0.8, priority: 5, maxInst: 2, send: 0.05, spatial: CY_FOLEY },
+  leap_launch: { synth: Y.leapLaunch, gain: 0.57, priority: 7, maxInst: 2, send: 0.25, spatial: CY_HEAVY },
+  slide_start: { synth: Y.slideStart, gain: 0.9, priority: 5, maxInst: 2, send: 0.08, spatial: CY_FOLEY },
+  wallrun_step: { synth: Y.wallrunStep, gain: 0.7, priority: 3, maxInst: 4, send: 0.05, spatial: STEP, step: true },
+  mantle_grab: { synth: Y.mantleGrab, gain: 0.9, priority: 5, maxInst: 2, send: 0.05, spatial: CY_FOLEY },
+  land_heavy: { synth: Y.landHeavy, gain: 0.55, priority: 7, maxInst: 3, send: 0.2, spatial: CY_ACT },
+  ground_quake: { synth: Y.groundQuake, gain: 0.68, priority: 9, maxInst: 2, send: 0.5, spatial: CY_HEAVY },
+  scan_ping: { synth: Y.scanPing, gain: 0.8, priority: 8, maxInst: 2, send: 0.45, spatial: CY_ACT },
+  vision_on: { synth: Y.visionOn, gain: 0.8, priority: 9, maxInst: 2, send: 0, spatial: null },
+  vision_off: { synth: Y.visionOff, gain: 0.6, priority: 9, maxInst: 2, send: 0, spatial: null },
+  camo_on: { synth: Y.camoOn, gain: 0.8, priority: 7, maxInst: 2, send: 0.15, spatial: CY_ACT },
+  camo_off: { synth: Y.camoOff, gain: 0.62, priority: 7, maxInst: 2, send: 0.15, spatial: CY_ACT },
+  reflex_on: { synth: Y.reflexOn, gain: 0.4, priority: 8, maxInst: 2, send: 0.2, spatial: CY_ACT },
+  reflex_off: { synth: Y.reflexOff, gain: 0.6, priority: 7, maxInst: 2, send: 0.1, spatial: CY_ACT },
+  overcharge_on: { synth: Y.overchargeOn, gain: 0.5, priority: 8, maxInst: 2, send: 0.2, spatial: CY_ACT },
+  second_wind: { synth: Y.secondWind, gain: 0.46, priority: 9, maxInst: 2, send: 0.25, spatial: CY_ACT },
+  nano_heal: { synth: Y.nanoHeal, gain: 1.0, priority: 4, maxInst: 2, send: 0.1, spatial: CY_FOLEY },
+  drone_deploy: { synth: Y.droneDeploy, gain: 0.8, priority: 6, maxInst: 2, send: 0.15, spatial: CY_ACT },
+  tool_hack: { synth: Y.toolHack, gain: 1.4, priority: 6, maxInst: 2, send: 0.05, spatial: CY_FOLEY },
+  mark_ping: { synth: Y.markPing, gain: 1.0, priority: 8, maxInst: 2, send: 0, spatial: null },
+  threat_warn: { synth: Y.threatWarn, gain: 0.7, priority: 9, maxInst: 1, send: 0, spatial: null },
+  implant_install: { synth: Y.implantInstall, gain: 0.8, priority: 9, maxInst: 1, send: 0.05, spatial: null },
+  implant_upgrade: { synth: Y.implantUpgrade, gain: 0.5, priority: 9, maxInst: 1, send: 0.05, spatial: null },
+  implant_remove: { synth: Y.implantRemove, gain: 0.4, priority: 9, maxInst: 1, send: 0.05, spatial: null },
+  cyber_ui_hover: { synth: Y.cyberUiHover, gain: 1.6, priority: 8, maxInst: 3, send: 0, spatial: null },
+  cyber_ui_select: { synth: Y.cyberUiSelect, gain: 0.8, priority: 9, maxInst: 2, send: 0, spatial: null },
 };

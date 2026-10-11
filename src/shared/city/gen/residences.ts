@@ -6,7 +6,7 @@ import { M } from '../../materials';
 import { Rng, hash32 } from '../../util';
 import { VOXEL } from '../../voxel';
 import type { BuildingDef } from '../plan';
-import type { BuildingInfo, GenContext } from './context';
+import type { BuildingInfo, GenContext, HqAnchor } from './context';
 import { Frame } from './frame';
 import { FACE, Furnisher, furnishRoom, type Room } from './furnish';
 import { FACADE_DEFAULT, band, cladFace, curtainBlock, entrance, hollowBlock, ledRing, piers, storefront, windowColumns, windowRow, type Facade, type Wall } from './facade';
@@ -45,6 +45,61 @@ function paletteOf(boss: 'dadou' | 'even' | null): Palette {
   if (boss === 'dadou') return { cloth: M.CLOTH_RED, wallpaper: M.WP_RED, carpet: M.CARPET_RED, metal: M.GOLD, led: M.LED_RED, neon: M.NEON_RED, neonVariant: 2, sofa: 1 };
   if (boss === 'even') return { cloth: M.CLOTH_NAVY, wallpaper: M.WP_BLUE, carpet: M.CARPET_BLUE, metal: M.SILVER, led: M.LED_BLUE, neon: M.NEON_BLUE, neonVariant: 3, sofa: 2 };
   return { cloth: M.CLOTH_WHITE, wallpaper: M.WP_GOLD, carpet: M.CARPET_GREY, metal: M.CHROME, led: M.LED_WHITE, neon: M.NEON_CYAN, neonVariant: 1, sofa: 0 };
+}
+
+// ======================================================================= équipements du QG
+// Chaque logement réserve un emplacement à chaque équipement du QG qu'on peut y acheter (voir
+// server/game/hq.ts) : le client y fait apparaître le modèle quand le parrain l'achète. Les
+// emplacements longent les murs ou les coins libres (jamais devant une porte, le bureau, le
+// rabatteur ou l'armurerie) ; « elite1…4 » sont les postes des gardes d'élite.
+
+/**
+ * Encombrement des équipements posés au sol, en mètres : largeur (le long du mur), profondeur
+ * (depuis le mur, l'emplacement est le milieu du dos), hauteur. Les modèles du client s'y tiennent.
+ */
+export const HQ_FOOTPRINT: Record<string, [number, number, number]> = {
+  surveil: [2.6, 0.45, 2.4],
+  comms: [1.6, 0.9, 2.3],
+  dronecmd: [1.6, 0.55, 2.2],
+  opscenter: [2.4, 1.0, 1.9],
+  trophies: [2.0, 0.4, 2.3],
+  armory2: [2.0, 0.5, 2.2],
+  autorecruit: [0.9, 0.6, 2.0],
+  cyberstation: [2.4, 1.75, 2.3],
+};
+
+/** Emplacement local (voxels) : point d'appui du modèle (dos au mur, ou centre), étage, orientation. */
+interface UpgSpot {
+  id: string;
+  lx: number;
+  lz: number;
+  ly: number;
+  yaw: number;
+  s?: number;
+  h?: number;
+}
+
+function spot(list: UpgSpot[], fu: Furnisher, id: string, lx: number, lz: number, yaw = 0, s?: number, h?: number): void {
+  list.push({ id, lx, lz, ly: fu.lv.floorTop, yaw, s, h });
+}
+
+/** Emplacement dans la rue (ly : couche du sol, le trottoir par défaut). */
+function streetSpot(list: UpgSpot[], id: string, lx: number, lz: number, yaw: number, ly = 1): void {
+  list.push({ id, lx, lz, ly, yaw });
+}
+
+/** Emplacements en coordonnées du monde (m), dans les informations du bâtiment. */
+function exposeSpots(info: BuildingInfo, f: Frame, list: UpgSpot[]): void {
+  if (list.length === 0) return;
+  const out: Record<string, HqAnchor> = {};
+  for (const s of list) {
+    const p = f.pt(s.lx, s.lz);
+    const a: HqAnchor = { x: p.x, y: s.ly * VOXEL, z: p.z, yaw: f.yaw(s.yaw) };
+    if (s.s !== undefined) a.s = s.s;
+    if (s.h !== undefined) a.h = s.h;
+    out[s.id] = a;
+  }
+  info.hqAnchors = out;
 }
 
 export function buildResidence(ctx: GenContext, def: BuildingDef): BuildingInfo {
@@ -154,8 +209,17 @@ function buildHideout(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.againstWall(bath, 'TOILET', 'left', bath.z1 - 6);
   fu.againstWall(bath, 'SINK', 'left', bath.z0 + 4);
   fu.lights(bath, 'BARE_BULB', 10);
+  // équipements du QG (palier 1) : carte holographique sur la table, écrans de surveillance au
+  // mur du fond de l'appartement, terminal de recrutement contre le mur près du comptoir
+  const upg: UpgSpot[] = [];
+  fu.lv = l1;
+  spot(upg, fu, 'holomap', tx, tz, 0, 1.2, 0.78);
+  spot(upg, fu, 'surveil', apt.x0 + 22, apt.z1, Math.PI);
+  fu.lv = g0;
+  spot(upg, fu, 'autorecruit', shop.x1, shop.z1 - 10, -HALF_PI);
   f.prop('DOOR_LEAF', doorLx + doorW / 2, g0.floorTop, 1.5, 0, 0);
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, wallTop, wallTop + 30);
+  exposeSpots(info, f, upg);
   info.sign = signFor(f, signY, doorLx, doorW);
   // la moto de départ attend devant la porte
   const g = f.pt(doorLx - 6, -5);
@@ -264,8 +328,23 @@ function buildGarage(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.lights(arm, 'CEILING_LIGHT', 10);
   fu.mark('armory', (arm.x0 + arm.x1) / 2, arm.z0 + 4);
   for (const r of rooms) finishWalls(f, floors[r.floor], r.x0, r.z0, r.x1, r.z1, r.floor === 0 ? M.BRICK_DARK : M.BRICK_RED, 0);
+  // équipements du QG (paliers 1 et 2) : coin des opérations le long du mur avant de l'atelier
+  // (hors du passage des véhicules), trophées au fond du bureau vitré, armurerie et recrutement à l'étage
+  const upg: UpgSpot[] = [];
+  fu.lv = g0;
+  spot(upg, fu, 'holomap', ocx, (off.z0 + off.z1) / 2, 0, 2.0, 0.92);
+  spot(upg, fu, 'security', doorLx + doorW / 2, 2, 0, doorW * VOXEL);
+  spot(upg, fu, 'cyberstation', bayX + bayW + 9, bay.z0, 0);
+  spot(upg, fu, 'surveil', bayX + bayW + 24, bay.z0, 0);
+  spot(upg, fu, 'comms', bayX + bayW + 36, bay.z0, 0);
+  spot(upg, fu, 'trophies', off.x1 - 4, off.z1, Math.PI);
+  streetSpot(upg, 'transport', bayX + bayW + 22, -6, Math.PI);
+  fu.lv = l1;
+  spot(upg, fu, 'autorecruit', lounge.x0 + 37.2, lounge.z0 + 18, -HALF_PI);
+  spot(upg, fu, 'armory2', (arm.x0 + arm.x1) / 2 + 15, arm.z0, 0);
   f.prop('DOOR_LEAF', doorLx + doorW / 2, g0.floorTop, 1.5, 0, 0);
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, wallTop, wallTop + 8);
+  exposeSpots(info, f, upg);
   info.sign = signFor(f, g0.ceil - 4, doorLx, doorW);
   return info;
 }
@@ -373,8 +452,29 @@ function buildLoft(ctx: GenContext, def: BuildingDef): BuildingInfo {
   fu.againstWall(dress, 'WARDROBE', 'right', dress.z0 + 6);
   fu.lights(dress, 'CEILING_LIGHT', 10);
   for (const r of rooms) finishWalls(f, floors[r.floor], r.x0, r.z0, r.x1, r.z1, r.kind === 'armory' ? M.CONCRETE_DARK : M.BRICK_RED, 0);
+  // équipements du QG (paliers 1 à 3) : au rez-de-chaussée l'entrée, le recrutement et l'armurerie ;
+  // à l'étage, le mur du fond du loft (le seul sans fenêtres) et un îlot médical au milieu
+  const upg: UpgSpot[] = [];
+  fu.lv = g0;
+  spot(upg, fu, 'security', doorLx + doorW / 2, 2, 0, doorW * VOXEL);
+  spot(upg, fu, 'elite3', doorLx - 5, 9);
+  spot(upg, fu, 'elite4', doorLx + doorW + 5, 9);
+  spot(upg, fu, 'autorecruit', bar.x0 + 19, bar.z0 + 44, Math.PI);
+  spot(upg, fu, 'armory2', (arm.x0 + arm.x1) / 2 + 15, arm.z0, 0);
+  streetSpot(upg, 'transport', doorLx - 22, -6, Math.PI);
+  fu.lv = l1;
+  spot(upg, fu, 'holomap', dx, dz, 0, 2.4, 1.32);
+  spot(upg, fu, 'elite1', dx - 9, dz + 4);
+  spot(upg, fu, 'elite2', dx + 9, dz + 4);
+  spot(upg, fu, 'dronecmd', loft.x0 + 18, loft.z1, Math.PI);
+  spot(upg, fu, 'trophies', loft.x0 + 40, loft.z1, Math.PI);
+  spot(upg, fu, 'surveil', loft.x0 + 52, loft.z1, Math.PI);
+  spot(upg, fu, 'opscenter', loft.x0 + 64, loft.z1, Math.PI);
+  spot(upg, fu, 'comms', loft.x0 + 74, loft.z1, Math.PI);
+  spot(upg, fu, 'cyberstation', loft.x0 + 70, loft.z0 + 36, Math.PI);
   f.prop('DOOR_LEAF', doorLx + doorW / 2, g0.floorTop, 1.5, 0, 0);
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, wallTop, wallTop + 8);
+  exposeSpots(info, f, upg);
   info.sign = signFor(f, g0.ceil - 4, doorLx, doorW);
   const g = f.pt(doorLx - 8, -5);
   info.garage = { x: g.x, z: g.z, y: 0, yaw: f.yaw(HALF_PI) };
@@ -521,6 +621,15 @@ function buildTower(ctx: GenContext, def: BuildingDef): BuildingInfo {
   f.prop('FLAG_BANNER', W / 2 + 8, lobby.floorTop + 10, D - 2.6, Math.PI, 0);
   fu.lights(hall, deco ? 'CHANDELIER' : 'CEILING_LIGHT', 14);
   finishWalls(f, lobby, 2, 2, W - 2, D - 2, deco ? M.MARBLE : M.PLASTER_DARK, deco ? M.GRANITE_DARK : M.SLATS_DARK);
+  // équipements du QG dans le hall (sas de sécurité, gardes de l'entrée) et dans la rue
+  const upg: UpgSpot[] = [];
+  if (boss) {
+    const dc = doorLx + doorW / 2;
+    spot(upg, fu, 'security', dc, 2, 0, doorW * VOXEL);
+    spot(upg, fu, 'elite3', dc - 10, 10);
+    spot(upg, fu, 'elite4', dc + 10, 10);
+    streetSpot(upg, 'transport', dc - 26, -6, Math.PI);
+  }
   if (corp) {
     // tour de bureaux : étage de direction et salle des serveurs
     fu.lv = p1;
@@ -532,13 +641,14 @@ function buildTower(ctx: GenContext, def: BuildingDef): BuildingInfo {
     rooms.push(srv);
     furnishRoom(fu, srv, 0);
   } else if (tier === 4) {
-    penthouseRooms(fu, f, rooms, pal, x0, z0, x1, z1, ex0, ez0, sx0, sz0, p1, p2, roofTop);
+    penthouseRooms(fu, f, rooms, pal, x0, z0, x1, z1, ex0, ez0, sx0, sz0, p1, p2, roofTop, upg);
   } else {
-    towerRooms(fu, f, rooms, pal, x0, z0, x1, z1, ex0, ez0, sx0, sz0, p1, p2, roofTop);
+    towerRooms(fu, f, rooms, pal, x0, z0, x1, z1, ex0, ez0, sx0, sz0, p1, p2, roofTop, upg);
   }
   f.prop('DOOR_LEAF', doorLx + doorW / 2, lobby.floorTop, 1.5, 0, 0);
   const floors = [lobby, p1, p2];
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, roofTop, topLy);
+  exposeSpots(info, f, upg);
   info.sign = signFor(f, lobby.floorTop + 21, doorLx, doorW);
   info.elevator = stopPts.map((s) => ({ x: s.x, z: s.z, y: s.y, yaw: f.yaw(Math.PI), label: s.label }));
   // zones de capture : le hall et les deux étages (rectangles réels)
@@ -612,6 +722,7 @@ function penthouseRooms(
   p1: Levels,
   p2: Levels,
   roofTop: number,
+  upg: UpgSpot[],
 ): void {
   const ix0 = x0 + 2;
   const iz0 = z0 + 2;
@@ -651,6 +762,19 @@ function penthouseRooms(
   fu.p('WEAPON_RACK', cmd.x1 - 2, hz, -HALF_PI, 0, true);
   fu.mark('armory', cmd.x1 - 5, hz);
   fu.lights(cmd, 'CEILING_LIGHT', 12);
+  // équipements du QG : salle de commandement (baies vitrées, cloison), noyau de l'ascenseur,
+  // cage d'escalier, îlot médical dans le dégagement, recrutement près du bar
+  spot(upg, fu, 'holomap', hx, hz, 0, 3.0, 1.02);
+  spot(upg, fu, 'elite1', cmd.x0 + 5, hz - 8.5);
+  spot(upg, fu, 'elite2', cmd.x1 - 5, hz - 8.5);
+  spot(upg, fu, 'surveil', hx + 12, cmd.z1, Math.PI);
+  spot(upg, fu, 'opscenter', cmd.x0, cmd.z1 - 6, HALF_PI);
+  spot(upg, fu, 'trophies', cmd.x0, cmd.z0 + 6, HALF_PI);
+  spot(upg, fu, 'armory2', cmd.x1 - 7, cmd.z0, 0);
+  spot(upg, fu, 'comms', ex0, ez0 + ELEV_D / 2, -HALF_PI);
+  spot(upg, fu, 'dronecmd', sx0 - 2, sz0 + 6, -HALF_PI);
+  spot(upg, fu, 'cyberstation', ex0 + 21, cmdZ + 6, -HALF_PI);
+  spot(upg, fu, 'autorecruit', ix1, iz0 + 24, -HALF_PI);
   // ---------------------------------------------------------------- étage 2
   fu.lv = p2;
   const suite: Room = { kind: 'ph_suite', floor: 2, x0: ix0, z0: iz0, x1: ix1, z1: iz1 };
@@ -702,6 +826,7 @@ function towerRooms(
   p1: Levels,
   p2: Levels,
   roofTop: number,
+  upg: UpgSpot[],
 ): void {
   const ix0 = x0 + 2;
   const iz0 = z0 + 2;
@@ -730,6 +855,19 @@ function towerRooms(
   f.prop('FLAG_BANNER', hx - 10, p1.floorTop + 7, iz0 + 0.6, 0, 0);
   f.prop('FLAG_BANNER', hx + 10, p1.floorTop + 7, iz0 + 0.6, 0, 0);
   fu.lights(cmd, 'CEILING_LIGHT', 12);
+  // équipements du QG : baie du fond (surveillance, trophées, opérations), noyau de l'ascenseur,
+  // cage d'escalier, baie gauche près de l'armurerie, îlot médical à droite
+  spot(upg, fu, 'holomap', hx, hz, 0, 3.0, 1.02);
+  spot(upg, fu, 'elite1', hx - 16, hz);
+  spot(upg, fu, 'elite2', hx + 16, hz);
+  spot(upg, fu, 'surveil', ix0 + 26, iz1, Math.PI);
+  spot(upg, fu, 'trophies', ix0 + 38, iz1, Math.PI);
+  spot(upg, fu, 'opscenter', ix0 + 70, iz1, Math.PI);
+  spot(upg, fu, 'comms', ex0, ez0 + ELEV_D / 2, -HALF_PI);
+  spot(upg, fu, 'dronecmd', sx0 - 2, sz0 + 6, -HALF_PI);
+  spot(upg, fu, 'armory2', ix0, iz0 + 34, HALF_PI);
+  spot(upg, fu, 'cyberstation', ix0 + 74, iz0 + 28, Math.PI);
+  spot(upg, fu, 'autorecruit', hx + 14, ez0, -HALF_PI);
   fu.lv = p2;
   const office: Room = { kind: 'tw_office', floor: 2, x0: ix0, z0: iz0, x1: ix1, z1: iz1 };
   rooms.push(office);

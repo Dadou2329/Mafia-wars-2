@@ -96,7 +96,8 @@ export class Effects {
   private smokes: Smoke[] = [];
   private smokeMesh: THREE.InstancedMesh;
   private smokeAttr: THREE.InstancedBufferAttribute;
-  private flashes: { light: THREE.PointLight; life: number }[] = [];
+  /** Lumières d'éclair (nombre fixe) ; `max` > 0 : intensité qui décroît (voir light()). */
+  private flashes: { light: THREE.PointLight; life: number; max?: number; peak?: number }[] = [];
   private flashSprites: { mesh: THREE.Mesh; life: number }[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -177,6 +178,9 @@ export class Effects {
   muzzleFlash(p: THREE.Vector3, dir: THREE.Vector3, big = false, camera?: THREE.Camera): void {
     const f = this.flashes.find((x) => x.life <= 0) ?? this.flashes[0];
     f.life = 0.06;
+    f.max = 0;
+    f.light.color.setHex(0xffb060);
+    f.light.distance = 9;
     f.light.position.copy(p).addScaledVector(dir, 0.2);
     f.light.intensity = big ? 9 : 6;
     const s = this.flashSprites.find((x) => x.life <= 0) ?? this.flashSprites[0];
@@ -189,6 +193,39 @@ export class Effects {
     // fumée de poudre noire
     for (let i = 0; i < (big ? 6 : 3); i++) {
       this.addSmoke(p.x + dir.x * 0.3, p.y + dir.y * 0.3, p.z + dir.z * 0.3, dir.x * 1.2 + (Math.random() - 0.5) * 0.4, 0.3 + Math.random() * 0.3, dir.z * 1.2 + (Math.random() - 0.5) * 0.4, 1.4 + Math.random(), 0.12, 0.6, 0.75, 0.5);
+    }
+  }
+
+  /**
+   * Éclair lumineux coloré (explosion, décharge, impact) qui décroît en `life` secondes. Réutilise
+   * les lumières ponctuelles existantes (nombre fixe : aucun shader recompilé).
+   */
+  light(p: { x: number; y: number; z: number }, color: number, intensity: number, life: number, distance = 9): void {
+    const f = this.flashes.reduce((a, b) => (b.life < a.life ? b : a), this.flashes[0]);
+    f.life = life;
+    f.max = life;
+    f.peak = intensity;
+    f.light.color.setHex(color);
+    f.light.distance = distance;
+    f.light.position.set(p.x, p.y, p.z);
+    f.light.intensity = intensity;
+  }
+
+  /** Débris cubiques projetés autour de la direction (vx, vy, vz), avec une dispersion `spread` (m/s). */
+  spray(p: { x: number; y: number; z: number }, vx: number, vy: number, vz: number, spread: number, n: number, cols: number[], size = 0.045, life = 0.8): void {
+    const k = Math.round(n * this.quality);
+    for (let i = 0; i < k; i++) {
+      this.addPart(
+        p.x,
+        p.y,
+        p.z,
+        vx + (Math.random() - 0.5) * 2 * spread,
+        vy + Math.random() * spread,
+        vz + (Math.random() - 0.5) * 2 * spread,
+        life * (0.6 + Math.random() * 0.8),
+        size * (0.6 + Math.random() * 0.8),
+        new THREE.Color(cols[i % cols.length]),
+      );
     }
   }
 
@@ -285,6 +322,7 @@ export class Effects {
       if (f.life > 0) {
         f.life -= dt;
         if (f.life <= 0) f.light.intensity = 0;
+        else if (f.max) f.light.intensity = (f.peak ?? 0) * Math.pow(f.life / f.max, 1.6);
       }
     }
     for (const s of this.flashSprites) {

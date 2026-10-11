@@ -27,6 +27,7 @@ import {
 import { STAIR_D, STAIR_W, buildBox, computeFloors, cornice, finishWalls, fireEscape, parapet, stairShaft, waterTower, type Levels } from './structure';
 import { buildResidence } from './residences';
 import { buildLandmark } from './landmarks';
+import { placeOpAnchors, residenceOpAnchors } from './opAnchors';
 
 export type Family = 'walkup' | 'brownstone' | 'glass' | 'deco' | 'warehouse' | 'shophouse' | 'classical' | 'modern' | 'industrial' | 'theatre' | 'castle';
 
@@ -415,7 +416,12 @@ export function exposure(ctx: GenContext, f: Frame, building: number): Record<Wa
 }
 
 export function generateBuilding(ctx: GenContext, def: BuildingDef): BuildingInfo {
-  if (def.residence || def.type === 'corp') return buildResidence(ctx, def);
+  if (def.residence || def.type === 'corp') {
+    const info = buildResidence(ctx, def);
+    // objectifs des opérations de prise de contrôle (entrée, armurerie, bureau ; étages des tours)
+    if (def.capturable) info.ops = residenceOpAnchors(ctx, def, info);
+    return info;
+  }
   if (def.type === 'landmark') return buildLandmark(ctx, def);
   const rng = new Rng(hash32(def.id * 7919 + 101));
   const spec = specFor(def, rng);
@@ -519,6 +525,8 @@ export function generateBuilding(ctx: GenContext, def: BuildingDef): BuildingInf
     fu.reserve(2 + Math.floor((sx0 - 4) / 2) - 4, partZ - 5, 2 + Math.floor((sx0 - 4) / 2) + 5, partZ + 6);
     furnishRoom(fu, r, def.style ?? 0);
   }
+  // objectifs des opérations de prise de contrôle (consoles, registres, coffres posés ici)
+  const ops = def.capturable ? placeOpAnchors(ctx, def, f, floors, rooms, fu) : [];
   // battant de porte (animé côté client)
   f.prop('DOOR_LEAF', doorLx + doorW / 2, g0.floorTop, 1.5, 0, 0);
   // toit : château d'eau, climatiseurs, antennes
@@ -527,6 +535,7 @@ export function generateBuilding(ctx: GenContext, def: BuildingDef): BuildingInf
 
   const info = makeInfo(ctx, def, f, floors, rooms, doorLx, doorW, fu, roofOnTop ? roofTop : null, Math.max(roofTop + 6, wallTop));
   info.sign = signFor(f, signY, doorLx, doorW);
+  if (ops.length) info.ops = ops;
   return info;
 }
 

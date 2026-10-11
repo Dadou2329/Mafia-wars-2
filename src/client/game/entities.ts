@@ -63,6 +63,7 @@ export class EntityStore {
       e.view.look = info.look;
       e.view.gang = info.gang;
       e.view.custom = info.custom as BossCustom | undefined;
+      e.view.cyber = info.cyber;
       return e;
     }
     e = {
@@ -82,6 +83,8 @@ export class EntityStore {
         look: info.look,
         gang: info.gang,
         custom: info.custom as BossCustom | undefined,
+        cyber: info.cyber,
+        fx: 0,
         x: 0,
         y: 0,
         z: 0,
@@ -189,12 +192,21 @@ export class EntityStore {
         v.anim = last.anim;
         v.aiming = (last.flags & FLAG.AIM) !== 0;
         v.weapon = last.weapon;
+        v.fx = last.fx;
         // dans un ascenseur ou à l'intérieur d'un véhicule
         v.hidden = (last.flags & FLAG.HIDDEN) !== 0;
       }
       this.views.push(v);
     }
     return this.views;
+  }
+
+  /** Nouvelle apparence cybernétique d'un personnage (événement « cyber »). */
+  setCyber(id: number, cyber: string[]): void {
+    const e = this.ents.get(id);
+    if (!e) return;
+    e.info.cyber = cyber;
+    e.view.cyber = cyber;
   }
 
   /** Entités vivantes (pour les tirs et la visée). */

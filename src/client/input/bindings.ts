@@ -24,12 +24,23 @@ export type ActionId =
   | 'grenade'
   | 'phone'
   | 'chat'
-  | 'scores';
+  | 'scores'
+  // implants cybernétiques
+  | 'armLeft'
+  | 'armRight'
+  | 'dash'
+  | 'ability1'
+  | 'ability2'
+  | 'ability3'
+  | 'ability4'
+  | 'ability5'
+  | 'vision'
+  | 'cyber';
 
 export interface ActionDef {
   id: ActionId;
   label: string; // français
-  group: 'Déplacements' | 'Combat' | 'Commandement' | 'Interface';
+  group: 'Déplacements' | 'Combat' | 'Commandement' | 'Interface' | 'Implants';
   def: string[]; // codes par défaut (KeyW, Mouse0…)
 }
 
@@ -58,6 +69,16 @@ export const ACTIONS: ActionDef[] = [
   { id: 'view', label: 'Vue 1re / 3e personne', group: 'Interface', def: ['KeyV'] },
   { id: 'chat', label: 'Discuter', group: 'Interface', def: ['Enter'] },
   { id: 'scores', label: 'Bilan de la partie', group: 'Interface', def: ['KeyB'] },
+  { id: 'armLeft', label: 'Implant du bras gauche (grappin, arme…)', group: 'Implants', def: ['KeyF'] },
+  { id: 'armRight', label: 'Implant du bras droit', group: 'Implants', def: ['KeyX'] },
+  { id: 'dash', label: 'Esquive (implant des jambes)', group: 'Implants', def: ['KeyZ'] },
+  { id: 'ability1', label: 'Capacité 1', group: 'Implants', def: ['KeyT'] },
+  { id: 'ability2', label: 'Capacité 2', group: 'Implants', def: ['KeyY'] },
+  { id: 'ability3', label: 'Capacité 3', group: 'Implants', def: ['KeyH'] },
+  { id: 'ability4', label: 'Capacité 4', group: 'Implants', def: ['KeyJ'] },
+  { id: 'ability5', label: 'Capacité 5', group: 'Implants', def: ['KeyU'] },
+  { id: 'vision', label: 'Mode de vision (implant oculaire)', group: 'Implants', def: ['KeyN'] },
+  { id: 'cyber', label: 'Écran CYBERNÉTIQUE', group: 'Implants', def: ['KeyI'] },
 ];
 
 export type Bindings = Record<ActionId, string[]>;

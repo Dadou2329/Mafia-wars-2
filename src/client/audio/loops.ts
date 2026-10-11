@@ -46,6 +46,11 @@ const DEFS: Record<LoopName, LoopDef> = {
   drone: { gain: 0.32, ref: 2.5, rolloff: 1.1, cull: 80, send: 0.08, outdoor: true, doppler: true, cutoff: 3500, cutoffSlope: 0.8, gainSlope: 0.25, pitchMin: 0.5, pitchMax: 2.5 },
   alarm: { gain: 0.3, ref: 6, rolloff: 0.8, cull: 220, send: 0.35, outdoor: false, doppler: false, cutoff: 9000, cutoffSlope: 0, gainSlope: 0, pitchMin: 0.5, pitchMax: 2 },
   siren: { gain: 0.4, ref: 10, rolloff: 0.7, cull: 400, send: 0.35, outdoor: true, doppler: true, cutoff: 9000, cutoffSlope: 0, gainSlope: 0, pitchMin: 0.5, pitchMax: 2 },
+  // implants : sources portées par un personnage (pas d'étouffement « extérieur »)
+  grapple_reel: { gain: 0.3, ref: 3, rolloff: 1.1, cull: 60, send: 0.08, outdoor: false, doppler: true, cutoff: 7000, cutoffSlope: 0.5, gainSlope: 0.35, pitchMin: 0.6, pitchMax: 2.5 },
+  slide_scrape: { gain: 0.34, ref: 3, rolloff: 1.2, cull: 50, send: 0.06, outdoor: false, doppler: false, cutoff: 8000, cutoffSlope: 0.4, gainSlope: 0.4, pitchMin: 0.6, pitchMax: 2.5 },
+  shield_hum: { gain: 0.24, ref: 3, rolloff: 1.1, cull: 50, send: 0.12, outdoor: false, doppler: false, cutoff: 6000, cutoffSlope: 0, gainSlope: 0, pitchMin: 0.5, pitchMax: 2 },
+  camo_hum: { gain: 0.2, ref: 2.5, rolloff: 1.3, cull: 30, send: 0.08, outdoor: false, doppler: false, cutoff: 9000, cutoffSlope: 0, gainSlope: 0, pitchMin: 0.5, pitchMax: 2 },
 };
 
 /** Ce que le moteur fournit au gestionnaire (bus et réverbérations). */

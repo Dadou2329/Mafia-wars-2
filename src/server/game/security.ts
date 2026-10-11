@@ -13,6 +13,7 @@ import type { Game } from './Game';
 import { factionSlot, otherSlot, slotFaction } from './Game';
 import type { Ent, Vec2 } from './types';
 import { dispatchCruiser } from './police';
+import { param } from './cyber';
 
 export interface SecState {
   level: number;
@@ -142,19 +143,45 @@ export function securityOnCapture(g: Game, bid: number, owner: number): void {
   if (h && (owner === Faction.DADOU || owner === Faction.EVEN) && slotFaction(h.slot) !== owner) S(g).heists.delete(bid);
 }
 
-export function hackAction(g: Game, slot: Slot, bid: number): void {
+export function hackAction(g: Game, slot: Slot, bid: number, reach = 2.6): boolean {
   const f = g.factions[slot];
   const boss = g.ents.get(f.bossId)!;
   const info = g.w.byId.get(bid);
   const st = S(g).sec.get(bid);
-  if (!info || !st || !info.terminal || !boss.alive) return;
-  if (Math.hypot(boss.x - info.terminal.x, boss.z - info.terminal.z) > 2.6 || Math.abs(boss.y - (info.terminal.y ?? 0)) > 1.6) return;
-  if (g.bstate.get(bid)!.owner === f.faction) return g.notify(slot, 'C’est votre propre sécurité : elle protège déjà vos intérêts.', 'info');
-  if (g.time < st.hackedUntil) return g.notify(slot, 'La sécurité est déjà coupée.', 'info', 'hack-done', 3);
-  if (f.hack) return;
-  const dur = f.upgrades.has('hackers') ? HACK_TIME_PRO : HACK_TIME;
-  f.hack = { b: bid, start: g.time, done: g.time + dur };
-  g.notify(slot, `Piratage du terminal ${deNom(BUILDINGS[bid].name)}… restez à côté (${dur} s).`, 'info');
+  if (!info || !st || !info.terminal || !boss.alive) return false;
+  const far = reach > 2.6;
+  if (Math.hypot(boss.x - info.terminal.x, boss.z - info.terminal.z) > reach || Math.abs(boss.y - (info.terminal.y ?? 0)) > (far ? 12 : 1.6)) return false;
+  if (g.bstate.get(bid)!.owner === f.faction) {
+    g.notify(slot, 'C’est votre propre sécurité : elle protège déjà vos intérêts.', 'info');
+    return false;
+  }
+  if (g.time < st.hackedUntil) {
+    g.notify(slot, 'La sécurité est déjà coupée.', 'info', 'hack-done', 3);
+    return false;
+  }
+  if (f.hack) return false;
+  // bras tactique : piratage accéléré
+  const dur = Math.round(((f.upgrades.has('hackers') ? HACK_TIME_PRO : HACK_TIME) / param(f.cyber, 'outils', 'hack', 1)) * 10) / 10;
+  f.hack = { b: bid, start: g.time, done: g.time + dur, reach };
+  g.notify(slot, far ? `Piratage à distance du terminal ${deNom(BUILDINGS[bid].name)}… gardez-le en vue (${dur} s).` : `Piratage du terminal ${deNom(BUILDINGS[bid].name)}… restez à côté (${dur} s).`, 'info');
+  return true;
+}
+
+/** Piratage lancé par le bras tactique (à distance si l'implant le permet). */
+export function remoteHack(g: Game, slot: Slot, bid: number, reach: number): boolean {
+  return hackAction(g, slot, bid, reach);
+}
+
+/** Impulsion électromagnétique : caméras et tourelles d'un bâtiment coupées jusqu'à `until`. */
+export function empBuilding(g: Game, bid: number, until: number): boolean {
+  const st = S(g).sec.get(bid);
+  if (!st) return false;
+  st.hackedUntil = Math.max(st.hackedUntil, until);
+  for (const id of st.turrets) {
+    const t = g.ents.get(id);
+    if (t && t.ai) t.ai.target = -1;
+  }
+  return true;
 }
 
 /** Coupe la sécurité d'un bâtiment (piratage réussi). */
@@ -226,7 +253,11 @@ export function updateSecurity(g: Game, dt: number): void {
     const boss = g.ents.get(f.bossId)!;
     const info = g.building(f.hack.b);
     const t = info.terminal!;
-    if (!boss.alive || Math.hypot(boss.x - t.x, boss.z - t.z) > 3.2 || Math.abs(boss.y - (t.y ?? 0)) > 1.6) {
+    const reach = f.hack.reach ?? 2.6;
+    const remote = reach > 2.6;
+    const tooFar = Math.hypot(boss.x - t.x, boss.z - t.z) > reach + 0.6 || Math.abs(boss.y - (t.y ?? 0)) > (remote ? 12 : 1.6);
+    const lost = remote && g.tick % 10 === 0 && !g.w.city.world.lineOfSight(boss.x, boss.y + 1.5, boss.z, t.x, (t.y ?? 0) + 1.1, t.z) && Math.hypot(boss.x - t.x, boss.z - t.z) > 3;
+    if (!boss.alive || tooFar || lost) {
       f.hack = null;
       g.notify(slot, 'Piratage interrompu.', 'bad');
       continue;
@@ -279,7 +310,18 @@ export function updateSecurity(g: Game, dt: number): void {
         const f = g.factions[slot];
         if (owner === f.faction) continue;
         const boss = g.ents.get(f.bossId)!;
-        if (!boss.alive || !g.inBuildingArea(info, boss.x, boss.y, boss.z)) continue;
+        if (!boss.alive || !g.inBuildingArea(info, boss.x, boss.y, boss.z)) {
+          f.cyber.camSeen.delete(bid);
+          continue;
+        }
+        // camouflage optique : invisible aux caméras ; semelles silencieuses : repéré plus tard
+        if (g.time < f.cyber.camoUntil) continue;
+        const need = param(f.cyber, 'silence', 'cam', 1) - 1;
+        if (need > 0) {
+          const seen = (f.cyber.camSeen.get(bid) ?? 0) + 1;
+          f.cyber.camSeen.set(bid, seen);
+          if (seen <= Math.round(need * 2)) continue;
+        }
         const name = BUILDINGS[bid].name;
         const os = factionSlot(owner);
         if (os) g.notify(os, `Caméras ${deNom(name)} : ${BOSS_NAME[slot]} est entré chez vous !`, 'alert', `cam-${bid}`, 45);

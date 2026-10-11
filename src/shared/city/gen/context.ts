@@ -72,6 +72,20 @@ export interface ElevatorStop {
   label: string;
 }
 
+/** Objectif d'une opération de prise de contrôle (voir shared/conquest.ts) : où se tenir pour le mener. */
+export interface OpAnchor {
+  /** Clé de l'objectif (« server », « vault », « office »…). */
+  key: string;
+  x: number;
+  /** Altitude du sol (m). */
+  y: number;
+  z: number;
+  /** Orientation vers l'objet manipulé (console, coffre…), si connue. */
+  yaw?: number;
+  /** Étage (index dans floors), −1 pour le toit. */
+  floor?: number;
+}
+
 export interface BuildingInfo {
   id: number;
   def: BuildingDef;
@@ -111,6 +125,35 @@ export interface BuildingInfo {
   plaque?: { x: number; y: number; z: number; yaw: number };
   /** Hauteur totale (m) pour la carte. */
   height: number;
+  /** Objectifs des opérations de prise de contrôle (bâtiments capturables). */
+  ops?: OpAnchor[];
+  /** Logements : emplacements des équipements du QG (« holomap », « surveil »…, « elite1 »…), voir server/game/hq.ts. */
+  hqAnchors?: Record<string, HqAnchor>;
+  /** Clinique cybernétique (fauteuil d'installation des implants), voir gen/clinics.ts. */
+  clinic?: ClinicInfo;
+}
+
+/** Emplacement d'un équipement du QG : point au sol, orientation de l'avant du modèle. */
+export interface HqAnchor {
+  x: number;
+  /** Altitude du sol (m). */
+  y: number;
+  z: number;
+  yaw: number;
+  /** Largeur utile (m) : porte (sécurité), table (carte holographique). */
+  s?: number;
+  /** Hauteur (m) au-dessus du sol : plateau de la table (carte holographique). */
+  h?: number;
+}
+
+/** Clinique cybernétique installée dans un bâtiment. */
+export interface ClinicInfo {
+  name: string;
+  /** Centre du fauteuil au sol (m) et orientation (avant du modèle, côté patient). */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
 }
 
 /** Écran géant (contenu dessiné par le client : publicités, propagande des parrains). */

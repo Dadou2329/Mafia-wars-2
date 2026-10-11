@@ -971,13 +971,13 @@ export function forearm(style: SleeveStyle, b: Build): VoxelModel {
  * - grip : refermée sur une poignée d'axe Z centrée en GRIP_POINT (armes) ;
  * - flat : main ouverte (gestes, volant).
  */
-export function hand(pose: HandPose, b: Build, wear: HandWear): VoxelModel {
+export function hand(pose: HandPose, b: Build, wear: HandWear, mech?: MechHand): VoxelModel {
   const s = new Sculpt(-5.5, 3.5, -14, 2, -5.5, 6.5);
   const k = b === 'f' ? 0.9 : 1;
-  const glove = wear === 'glove' || wear === 'tac';
-  const C: Col = glove ? SLOT.DRESS : SLOT.SKIN;
-  const D: Col = glove ? XS.DRESS_D : XS.SKIN_D;
-  const L: Col = glove ? SLOT.DRESS : XS.SKIN_L;
+  const glove = !mech && (wear === 'glove' || wear === 'tac');
+  const C: Col = mech ? mech.c : glove ? SLOT.DRESS : SLOT.SKIN;
+  const D: Col = mech ? mech.d : glove ? XS.DRESS_D : XS.SKIN_D;
+  const L: Col = mech ? mech.l : glove ? SLOT.DRESS : XS.SKIN_L;
   const palmBot = -6.4 * k;
   const g = GRIP[b];
   s.add((x, y, z) => {
@@ -1036,8 +1036,17 @@ export function hand(pose: HandPose, b: Build, wear: HandWear): VoxelModel {
       return c;
     });
   }
-  if (wear === 'tac') s.paintSurf((x, y, z, c, nx) => (c === C && nx > 0 && y < -2 && y > palmBot ? XS.DRESS_D : c));
+  if (wear === 'tac' && !mech) s.paintSurf((x, y, z, c, nx) => (c === C && nx > 0 && y < -2 && y > palmBot ? XS.DRESS_D : c));
+  if (mech?.deco) mech.deco(s, { pose, k, palmBot, grip: g });
   return s.m;
+}
+
+/** Main mécanique (implants de bras) : couleurs de la coque et décor propre à l'implant. */
+export interface MechHand {
+  c: Col;
+  d: Col;
+  l: Col;
+  deco?: (s: Sculpt, info: { pose: HandPose; k: number; palmBot: number; grip: [number, number, number] }) => void;
 }
 
 /** Centre de la poignée tenue par la main gauche (x, y en voxels, rayon) : axe selon Z. */

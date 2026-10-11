@@ -94,6 +94,19 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'crypto', name: 'Liaison cryptée', desc: 'Donnez vos ordres depuis la carte (touche M) et le téléphone, où que vous soyez.', price: 600, category: 'hq' },
   { id: 'armory', name: 'Armurerie', desc: 'Achetez des armes et des munitions dans votre QG.', price: 350, category: 'hq' },
   { id: 'drones', name: 'Drones de reconnaissance', desc: 'Envoyez un drone sur un quartier : les ennemis y apparaissent sur vos cartes.', price: 1500, category: 'hq', tier: 3 },
+  // équipements du quartier général : effets dans server/game/hq.ts, visibles dans le bureau (client/game/hqVisuals.ts)
+  { id: 'holomap', name: 'Carte holographique avancée', desc: 'La carte stratégique affiche les garnisons exactes et les opérations du rival près de votre territoire.', price: 1200, category: 'hq' },
+  { id: 'surveil', name: 'Surveillance tactique', desc: 'Les ennemis qui rôdent près de votre QG et de vos bâtiments clés apparaissent sur vos cartes, avec une alerte.', price: 900, category: 'hq' },
+  { id: 'autorecruit', name: 'Terminal de recrutement automatique', desc: 'Quand la réserve du QG passe sous 4 hommes, le terminal engage une recrue (80 $) toutes les 15 s, tant qu’il vous reste 500 $.', price: 800, category: 'hq' },
+  { id: 'security', name: 'Sécurité renforcée', desc: 'Tourelles et caméras au QG, porte blindée : prendre votre QG demande moitié plus de temps.', price: 1800, category: 'hq', tier: 2 },
+  { id: 'comms', name: 'Communications avancées', desc: 'Vos lieutenants signalent la position exacte de leurs assaillants, et vos ordres partent de partout, plus vite.', price: 1400, category: 'hq', requires: 'crypto', tier: 2 },
+  { id: 'cyberstation', name: 'Station cybernétique', desc: 'Achetez, installez et améliorez vos implants au QG, et changez de configuration sans passer par une clinique.', price: 2000, category: 'hq', tier: 2 },
+  { id: 'armory2', name: 'Armurerie avancée', desc: 'Armes −25 %, munitions à moitié prix et gratuites au QG, deux grenades de plus en poche.', price: 1500, category: 'hq', requires: 'armory', tier: 2 },
+  { id: 'transport', name: 'Module de transport personnel', desc: 'Taxi volant gratuit vers le QG, même recherché par la police ; véhicules livrés deux fois plus vite.', price: 1400, category: 'hq', tier: 2 },
+  { id: 'trophies', name: 'Salle des trophées', desc: 'Bâtiments clés et quartiers conquis s’exposent au QG ; prestige : +15 $/min par quartier tenu.', price: 1800, category: 'hq', tier: 2 },
+  { id: 'elite', name: 'Gardes d’élite', desc: 'Quatre gardes en armure lourde (240 PV) protègent votre bureau et l’entrée du QG.', price: 2600, category: 'hq', tier: 3 },
+  { id: 'dronecmd', name: 'Module de commande de drones', desc: 'Drones rechargés deux fois plus vite, survol prolongé de 30 s, et un drone de patrouille repère les intrus autour du QG.', price: 2400, category: 'hq', requires: 'drones', tier: 3 },
+  { id: 'opscenter', name: 'Centre d’opérations stratégiques', desc: 'Vos lieutenants prennent les bâtiments 35 % plus vite ; leurs opérations s’affichent en direct au bureau et sur la carte.', price: 3200, category: 'hq', tier: 3 },
 ];
 
 export const UPGRADE_BY_ID: Record<string, UpgradeDef> = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));

@@ -19,7 +19,7 @@ import { formatMoney, formatTime } from '../../shared/util';
 import type { App } from '../app';
 import type { WorldData } from '../world/worldLoader';
 import { audio } from '../audio/AudioEngine';
-import type { LoopName, SfxName } from '../audio/types';
+import { SFX_NAMES, type LoopName, type SfxName } from '../audio/types';
 import { CharacterRenderer, type CharView } from '../characters/characterRenderer';
 import { Atmosphere } from '../render/atmosphere';
 import { Rain } from '../render/rain';
@@ -64,6 +64,10 @@ import { WeaponSystem, surfaceKind } from './weapons';
 import { VehicleRenderer } from './vehicleRenderer';
 import { Phone } from './phone';
 import { Drive } from './driving';
+import { createClientModules, type ClientModule, type Interaction } from './modules';
+import { CyberClient } from './cyberClient';
+import { CyberFx } from './cyberFx';
+import { CyberOverlay } from './cyberOverlay';
 import { deNom as deNomFr, leNom } from '../../shared/french';
 
 export interface GameInit {
@@ -158,8 +162,18 @@ export class GameClient {
   private stepAcc = new Map<number, number>();
   private over: GameInit['over'] = null;
   private victory: { setVotes(v: (Slot | null)[]): void; el: HTMLElement } | null = null;
-  private interact: { key: string; text: string; sub: string; run: () => void } | null = null;
+  private interact: Interaction | null = null;
+  /** Systèmes greffés (implants, conquête, QG…), voir modules.ts. */
+  modules: ClientModule[] = [];
+  /** Implants du parrain local : touches, armes de bras, capacités, effets passifs. */
+  readonly cyber: CyberClient;
+  /** Effets visuels et sons des capacités cybernétiques (tous les personnages). */
+  readonly cyberFx: CyberFx;
+  /** Surimpressions cybernétiques (marques, menaces, visée du grappin, voiles). */
+  readonly cyberOverlay: CyberOverlay;
   private deadSince = -1;
+  /** Fente de la lame en cours : le coup part au contact de la cible. */
+  private lunge: { id: number; until: number } | null = null;
   readonly startedAt = performance.now();
 
   constructor(app: App, world: WorldData, init: GameInit) {
@@ -221,6 +235,9 @@ export class GameClient {
     this.chars.maxDistance = q.charDist;
     this.scene.add(this.chars.group);
     this.scene.add(this.effects.group);
+    this.cyberFx = new CyberFx(world.world, this.effects);
+    this.cyberFx.selfId = this.selfId;
+    this.scene.add(this.cyberFx.group);
     this.scene.add(this.marker.group);
     this.scene.add(this.lootMarker.group);
     this.effects.setEmitters(world.smokes);
@@ -236,6 +253,7 @@ export class GameClient {
     this.viewmodel.setLook(this.you, settings.custom[this.you]);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
     this.post.setEnabled(settings.bloom && settings.quality !== 'basse');
+    this.cyberFx.warm(this.renderer, this.camera, this.scene);
     this.chars.warm([
       { kind: CharKind.GANGSTER, faction: 1, look: 1 },
       { kind: CharKind.GANGSTER, faction: 2, look: 2 },
@@ -259,14 +277,19 @@ export class GameClient {
       audio.play('reload', { pos: this.player.pos });
     };
     this.player.onStep = (m) => {
-      audio.play(stepSfx(m), { pos: { x: this.player.pos.x, y: this.player.pos.y, z: this.player.pos.z }, volume: this.player.sprint ? 1 : 0.7 });
+      const vol = (this.player.sprint ? 1 : 0.7) * this.player.mods.steps;
+      if (vol > 0.01) audio.play(stepSfx(m), { pos: { x: this.player.pos.x, y: this.player.pos.y, z: this.player.pos.z }, volume: vol });
     };
+    this.cyber = new CyberClient(this);
     this.map = new CityMap(world);
     this.hud = new Hud(this.you);
     this.overlay = h('div', { class: `layer game-overlay mw-${this.you}` });
     app.root.appendChild(this.overlay);
     this.showCurtain();
     this.overlay.appendChild(this.hud.el);
+    this.cyberOverlay = new CyberOverlay(this.overlay);
+    this.cyber.fxApi = this.cyberFx;
+    this.cyber.overlay = this.cyberOverlay;
     this.strategic = new StrategicMap(this);
     this.overlay.appendChild(this.strategic.el);
     this.wheel = new CommandWheel(this);
@@ -298,6 +321,7 @@ export class GameClient {
       deathAt: -10,
     };
     for (const i of init.infos) this.store.addInfo(i);
+    this.modules = createClientModules(this);
     this.applyPub(init.pub, true);
     this.applyPriv(init.priv);
     // ---------------------------------------------------------------- réseau
@@ -326,7 +350,7 @@ export class GameClient {
     input.lockEnabled = true;
     input.onEscape = () => this.onEscape();
     input.onUnlock = () => {
-      if (!this.modal && !this.strategic.open && !this.phone.open && !this.chatting && !this.wheel.open && !this.over) this.openPause();
+      if (!this.modal && !this.strategic.open && !this.phone.open && !this.chatting && !this.wheel.open && !this.over && !this.modules.some((m) => m.blocking?.())) this.openPause();
     };
     input.onKey = (code, e) => this.onKey(code, e);
     this.hud.chatInput.addEventListener('keydown', (e) => {
@@ -378,6 +402,8 @@ export class GameClient {
     this.hud.setEvent(null);
     this.fogBoost = 1;
     this.strategic.close();
+    for (const m of this.modules) m.reset?.();
+    this.cyber.reset();
     this.settings = init.settings;
     this.applyPub(init.pub, true);
     this.applyPriv(init.priv);
@@ -401,6 +427,8 @@ export class GameClient {
 
   private onEvent(e: GameEvent): void {
     const now = performance.now() / 1000;
+    this.cyber.onEvent(e);
+    for (const m of this.modules) m.onEvent?.(e);
     switch (e.t) {
       case 'spawn': {
         const ent = this.store.addInfo(e.e);
@@ -662,6 +690,7 @@ export class GameClient {
       this.lootMarker.show(best.x, Number.isFinite(y) ? y : 0, best.z);
     } else this.lootMarker.hide();
     this.strategic.dirty = true;
+    for (const m of this.modules) m.onPub?.(p, initial);
   }
 
   private applyPriv(p: PrivateState): void {
@@ -675,6 +704,8 @@ export class GameClient {
     this.hud.setPriv(p, this.pub);
     this.strategic.onPriv(p);
     this.tips.onPriv(p);
+    this.cyber.onPriv(p);
+    for (const m of this.modules) m.onPriv?.(p);
   }
 
   // ======================================================================= entrées
@@ -707,11 +738,13 @@ export class GameClient {
       window.addEventListener('keyup', up);
       return true;
     }
+    if (!this.strategic.open && !this.phone.open) for (const m of this.modules) if (m.onKey?.(code)) return true;
     void e;
   }
 
   private onEscape(): void {
     if (this.chatting) return this.closeChat();
+    for (const m of this.modules) if (m.onEscape?.()) return;
     if (this.phone.open) return this.phone.close();
     if (this.wheel.open) return this.wheel.cancel();
     if (this.strategic.open) return this.strategic.close();
@@ -865,12 +898,13 @@ export class GameClient {
     const input = this.app.input;
     const me = this.store.ents.get(this.selfId);
     // ------------------------------------------------- contrôle du joueur
-    const uiBlocked = this.strategic.open || this.phone.open || !!this.modal || this.chatting || !!this.over;
+    const uiBlocked = this.strategic.open || this.phone.open || !!this.modal || this.chatting || !!this.over || this.modules.some((m) => m.blocking?.());
     this.player.frozen = uiBlocked || !this.placed || !!this.serverPause;
     this.wheel.update(dt, input);
     if (this.wheel.open) this.player.frozen = true;
     this.player.weapon = this.weapons.current;
     this.player.update(dt, input);
+    this.cyber.update(dt, now, input, uiBlocked || this.wheel.open || !this.placed);
     // au volant : on ne tire qu'en visant (par la vitre), au pistolet ou au pistolet-mitrailleur
     const canFight = !this.player.drive || (this.player.aiming && (this.weapons.current === Weapon.PISTOL || this.weapons.current === Weapon.SMG));
     if (!uiBlocked && !this.wheel.open && !this.player.dead && this.placed && canFight) this.handleCombat(now, input);
@@ -902,6 +936,9 @@ export class GameClient {
     mv.aiming = this.player.aiming || now - mv.shotAt < 0.6;
     mv.weapon = this.weapons.current;
     mv.hidden = this.player.firstPerson && !this.player.dead;
+    mv.cyber = this.cyber.look;
+    mv.fx = this.cyber.fx;
+    mv.ab = this.cyber.myAb;
     const drive = this.player.drive;
     if (drive) {
       // au volant : caché dans l'habitacle, ou en selle sur la moto
@@ -981,6 +1018,7 @@ export class GameClient {
         const b = this.world.buildings[hz.b];
         if (b && Math.hypot(b.center.x - lp.x, b.center.z - lp.z) < 90) src.push({ key: `alarme${hz.b}`, loop: 'alarm', x: b.center.x, y: b.floorY + 4, z: b.center.z, pitch: 1, volume: 0.7 });
       }
+      this.cyberFx.loopSources(src);
       this.engines.update(src, lp.x, lp.y, lp.z);
     }
     if (this.placed) list.push(mv);
@@ -998,6 +1036,12 @@ export class GameClient {
     for (const c of civViews) list.push(c);
     this.traffic.update(dt, now, this.player.pos, list, drive && drive.def.cls !== 'vtol' ? { x: drive.pos.x, z: drive.pos.z, yaw: drive.yaw, hl: drive.def.size[2] / 2, hw: drive.def.size[0] / 2 } : null);
     this.chars.update(list, this.camera, now, dt);
+    this.cyber.updateRemoteCables();
+    // effets cybernétiques persistants (bouclier, brûlure, traînées…) et ponctuels
+    this.cyberFx.updateEntities(list, now);
+    this.cyberFx.update(dt, this.camera, now);
+    this.cyberOverlay.update(dt, this.camera, window.innerWidth, window.innerHeight);
+    for (const m of this.modules) m.update?.(dt, now);
     // ------------------------------------------------- monde
     const camPos = this.camera.position;
     this.lightStream.update(camPos.x, camPos.z);
@@ -1053,9 +1097,13 @@ export class GameClient {
     // ------------------------------------------------- vue subjective : arme
     this.viewmodel.update(dt, this.player, this.weapons, now);
     // ------------------------------------------------- rendu
-    if (this.post.enabled) this.post.render(dt);
-    else this.renderer.render(this.scene, this.camera);
-    if (this.player.firstPerson && !this.player.dead) this.viewmodel.render(this.renderer, this.camera);
+    // bras en vue subjective : dessinés avant l'étalonnage (visions thermique et nocturne)
+    const fp = this.player.firstPerson && !this.player.dead;
+    if (this.post.needsRender) this.post.render(dt, fp ? () => this.viewmodel.render(this.renderer, this.camera) : undefined);
+    else {
+      this.renderer.render(this.scene, this.camera);
+      if (fp) this.viewmodel.render(this.renderer, this.camera);
+    }
     // ------------------------------------------------- son
     const fwd = new THREE.Vector3();
     this.camera.getWorldDirection(fwd);
@@ -1093,17 +1141,43 @@ export class GameClient {
     const w = this.weapons;
     for (let i = 1; i <= 5; i++) {
       if (input.hit(`weapon${i}` as 'weapon1')) {
-        if (w.selectSlot(i)) audio.play('weapon_switch', { volume: 0.6 });
+        if (w.selectSlot(i)) {
+          audio.play('weapon_switch', { volume: 0.6 });
+          this.cyber.onWeaponSelected();
+        }
       }
     }
     if (input.hit('weaponNext')) {
       w.next(1);
       audio.play('weapon_switch', { volume: 0.6 });
+      this.cyber.onWeaponSelected();
     }
     if (input.hit('reload')) w.startReload(now);
-    const def = WEAPONS[w.current];
-    // tir automatique (pistolet-mitrailleur) : bouton maintenu
-    const trigger = def.ranged && def.auto ? input.is('fire') : input.hit('fire');
+    const def = w.def(w.current);
+    // lame d'avant-bras : clic droit = fente sur l'ennemi visé, le coup part au contact
+    if (w.current === Weapon.ARM_BLADE && input.hit('aim')) {
+      const tg = this.cyber.bladeLunge();
+      if (tg) this.lunge = { id: tg.info.id, until: now + 0.7 };
+    }
+    let trigger = def.ranged && def.auto ? input.is('fire') : input.hit('fire');
+    if (this.lunge) {
+      const tg = this.store.ents.get(this.lunge.id);
+      if (!tg || !tg.alive || now > this.lunge.until) this.lunge = null;
+      else if (Math.hypot(tg.x - this.player.pos.x, tg.z - this.player.pos.z) < def.range + 0.4) {
+        this.lunge = null;
+        trigger = w.canFire(now);
+      }
+    }
+    // poing hydraulique : clic maintenu = charge, relâché = coup (chargé)
+    if (w.current === Weapon.ARM_FIST && this.cyber.param('poing', 'charge') > 0) {
+      if (input.hit('fire') && w.canFire(now)) {
+        this.cyber.fistPress();
+        return;
+      }
+      if (!this.cyber.fistCharging || input.is('fire')) return;
+      this.cyber.fistRelease();
+      trigger = true;
+    }
     if (!trigger) return;
     if (def.ranged) {
       if ((w.mag.get(w.current) ?? 0) <= 0) {
@@ -1112,9 +1186,15 @@ export class GameClient {
         w.startReload(now);
         return;
       }
-      const { o, d } = this.player.aimRay();
-      const moving = Math.hypot(this.player.vel.x, this.player.vel.z);
-      const spreadMul = (this.player.aiming ? 0.45 : 1.15) * (1 + moving * 0.12) * (this.player.crouch ? 0.8 : 1) * (this.player.onGround ? 1 : 2.2);
+      const { o, d: aim } = this.player.aimRay();
+      // assistance de visée : la balle s'aimante légèrement vers l'ennemi proche du réticule
+      const d = this.cyber.aimAssist(o, aim, def.range);
+      const pl = this.player;
+      const moving = Math.min(9, pl.hspeed());
+      // en mouvement : glissade (précise avec les patins renforcés), course murale, grappin, saut
+      const air = pl.onGround || pl.mode === 'slide' ? 1 : pl.mode === 'wallrun' ? 1.4 : pl.mode === 'grapple' ? 1.7 : 2.2;
+      const slide = pl.mode === 'slide' ? (pl.mods.slide.aim > 0 ? 0.7 : 1.5) : 1;
+      const spreadMul = (pl.aiming ? 0.45 : 1.15) * (1 + moving * 0.12) * (pl.crouch && pl.mode !== 'slide' ? 0.8 : 1) * air * slide;
       const res = w.fire(now, o, d, this.store, this.selfId, spreadMul, this.player.drive?.id ?? -1);
       if (!res) return;
       this.myView.shotAt = now;
@@ -1124,8 +1204,9 @@ export class GameClient {
       this.effects.muzzleFlash(muzzle, d, big, this.camera);
       audio.play(shotSfx(w.current), { pos: this.player.pos });
       const smg = w.current === Weapon.SMG;
-      this.player.recoil += big ? 3 : smg ? 0.7 : 1.6;
-      this.player.pitch += big ? 0.035 : smg ? 0.006 : 0.018;
+      const rk = this.cyber.recoilMul;
+      this.player.recoil += (big ? 3 : smg ? 0.7 : 1.6) * rk;
+      this.player.pitch += (big ? 0.035 : smg ? 0.006 : 0.018) * rk;
       this.player.shake += big ? 1.2 : smg ? 0.2 : 0.5;
       this.viewmodel.kick(big ? 1.4 : smg ? 0.5 : 1);
       const hits: number[][] = [];
@@ -1176,7 +1257,9 @@ export class GameClient {
         }
       }
       this.myView.meleeAt = now;
-      audio.play('swing', { volume: 0.8 });
+      // armes de bras : leur propre son (lame, poing, fouet)
+      const armSnd = w.current === Weapon.ARM_BLADE ? 'blade_slash' : w.current === Weapon.ARM_FIST ? 'fist_heavy' : w.current === Weapon.ARM_WHIP ? 'whip_crack' : null;
+      audio.play(armSnd && SFX_NAMES.includes(armSnd as SfxName) ? (armSnd as SfxName) : 'swing', { volume: 0.8 });
       this.viewmodel.swing();
       this.app.net.melee(w.current, target ? target.info.id : -1);
     }
@@ -1206,7 +1289,7 @@ export class GameClient {
     const hud = this.hud;
     hud.setHealth(me ? me.hp : 1);
     const w = this.weapons;
-    hud.setWeapon(w.current, w.mag.get(w.current) ?? 0, w.reserve(w.current), w.reloading(now), w.owned);
+    hud.setWeapon(w.current, w.mag.get(w.current) ?? 0, w.reserveShown(w.current), w.reloading(now), w.owned);
     hud.setGrenades(this.priv.grenades ?? 0, actionKey(settings.bindings, 'grenade'));
     // district
     const d = districtAt(p.x, p.z);
@@ -1337,7 +1420,7 @@ export class GameClient {
     return -1;
   }
 
-  private findInteraction(bid: number): { key: string; text: string; sub: string; run: () => void } | null {
+  private findInteraction(bid: number): Interaction | null {
     if (this.player.dead) return null;
     const p = this.player.pos;
     const key = actionKey(settings.bindings, 'interact');
@@ -1369,6 +1452,10 @@ export class GameClient {
         sub: def.seats > 1 ? `${def.seats - 1} place${def.seats > 2 ? 's' : ''} pour votre escorte` : 'Une seule place',
         run: () => this.app.net.act({ a: 'vehicle', op: 'enter', id: ve.info.id }),
       };
+    }
+    for (const m of this.modules) {
+      const it = m.interaction?.(bid);
+      if (it) return it;
     }
     const hq = this.world.buildings[this.pub.hq[this.you]];
     const near = (pt: { x: number; z: number; y?: number } | undefined, r: number) => !!pt && Math.hypot(pt.x - p.x, pt.z - p.z) < r && Math.abs(p.y - (pt.y ?? hq.floorY)) < 1.6;
@@ -1473,6 +1560,9 @@ export class GameClient {
   }
 
   dispose(): void {
+    for (const m of this.modules) m.dispose?.();
+    this.cyberFx.dispose();
+    this.cyberOverlay.dispose();
     this.glass.restore();
     this.engines.stopAll();
     cancelAnimationFrame(this.raf);
@@ -1504,6 +1594,9 @@ function shotSfx(w: Weapon): SfxName {
       return 'railgun';
     case Weapon.SMG:
       return 'smg';
+    case Weapon.ARM_PISTOL:
+      // pistolet d'avant-bras : son propre claquement (repli : pistolet)
+      return SFX_NAMES.includes('arm_pistol' as SfxName) ? ('arm_pistol' as SfxName) : 'pistol';
     default:
       return 'pistol';
   }

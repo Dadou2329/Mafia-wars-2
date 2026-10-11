@@ -12,6 +12,7 @@ const GROUPS: { group: ActionDef['group']; col: number }[] = [
   { group: 'Combat', col: 1 },
   { group: 'Commandement', col: 0 },
   { group: 'Interface', col: 1 },
+  { group: 'Implants', col: 1 },
 ];
 const SLOTS = 2;
 const DEFAULTS = defaultBindings();

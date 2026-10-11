@@ -6,7 +6,9 @@
 // modèle. Repère : +Y en haut, +Z vers l'avant, +X vers la gauche du personnage.
 
 import { VoxelModel } from '../models/voxelModel';
+import type { ArmImplant, CyHandStyle } from './cyber';
 import * as B from './partsBody';
+import * as C from './partsCyber';
 import * as G from './partsGear';
 import * as H from './partsHead';
 import { RES, type Build } from './rig';
@@ -68,6 +70,25 @@ export function buildPart(key: string): VoxelModel {
       return G.weaponModel(a[1] as G.WeaponKind);
     case 'turret':
       return a[1] === 'base' ? G.turretBase() : a[1] === 'yoke' ? G.turretYoke() : G.turretGun();
+    // implants cybernétiques (partsCyber.ts)
+    case 'cyfarm':
+      // cyfarm:implant:gamme:revers:morphologie:côté
+      return mir(C.cyForearm(a[1] as ArmImplant, Number(a[2]), a[3] as 'b' | 's', a[4] as Build, R));
+    case 'cyhand':
+      // cyhand:style:pose:morphologie:côté
+      return mir(C.cyHand(a[1] as CyHandStyle, a[2] as B.HandPose, a[3] as Build, R));
+    case 'cymov':
+      // cymov:implant:pièce:morphologie:côté (cymov:fouet:seg : segment de filament)
+      return a[2] === 'seg' ? C.cyMoving('fouet', 'seg', 'm', false) : mir(C.cyMoving(a[1] as ArmImplant, a[2], a[3] as Build, R));
+    case 'cyleg':
+      // cyleg:os:morphologie:liste:côté (pied : côté S, symétrique)
+      return mir(C.cyLeg(a[1], a[2] as Build, a[3], R));
+    case 'cytorso':
+      // cytorso:style du torse:morphologie:liste
+      return C.cyTorso(a[1] as B.TorsoStyle, a[2] as Build, a[3]);
+    case 'cyhead':
+      // cyhead:morphologie:liste:drapeaux
+      return C.cyHead(a[1] as Build, a[2], a[3]);
     default:
       throw new Error('membre inconnu ' + key);
   }

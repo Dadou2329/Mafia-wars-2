@@ -32,6 +32,7 @@ import { GenContext, type BuildingInfo } from './context';
 import { generateBuilding } from './buildings';
 import { repairConnectivity } from './connect';
 import { placeSecurity } from './security';
+import { placeClinics } from './clinics';
 import { buildBoundaries, buildBridges, buildSubway, stairRect } from './infra';
 import { Frame } from './frame';
 import { FACADE_DEFAULT, cladFace, curtainBlock, hollowBlock, ledRing, piers, windowRow, type Facade, type Wall } from './facade';
@@ -164,6 +165,7 @@ export function generateCity(seed = CITY_SEED): City {
     repairConnectivity(ctx, info, from);
     if (def.security) placeSecurity(ctx, info);
   }
+  placeClinics(ctx);
   for (const f of FILLERS) buildFiller(ctx, f, rng.fork(hash32(f.rect[0] * 131 + f.rect[1])));
 
   // ------------------------------------------------------------------ mobilier urbain

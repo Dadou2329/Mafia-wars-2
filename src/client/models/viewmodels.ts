@@ -573,8 +573,30 @@ export function clubModel(): VoxelModel {
  */
 export const HAND_RES = 1 / 128;
 
-/** Poses de la main : poignée de pistolet, poignet de crosse, appui sous la longuesse, poing, manche. */
-export type HandPose = 'pistol' | 'stock' | 'support' | 'fist' | 'blade';
+/**
+ * Poses de la main : poignée de pistolet, poignet de crosse, appui sous la longuesse, poing, manche ;
+ * mains libres (bras mécaniques, gestes, escalade) dans le repère du poignet — origine au poignet,
+ * doigts vers −Z, dos de la main vers +Y, pouce vers −X (main droite) : main ouverte, main qui
+ * agrippe (rebord, paroi), main détendue, poing fermé (wfist).
+ */
+export type HandPose = 'pistol' | 'stock' | 'support' | 'fist' | 'blade' | 'open' | 'grab' | 'relax' | 'wfist';
+
+/** Main mécanique (implant de bras) : style du décor, couleurs lumineuses (déjà codées glow). */
+export interface MechHandFP {
+  style: 'std' | 'palm' | 'mag' | 'tesla' | 'whip' | 'fist' | 'tool';
+  /** Liseré (canal du bras) et organe actif (canal actif du bras). */
+  accent: number;
+  act: number;
+}
+
+// alliage des mains et avant-bras mécaniques (vue subjective)
+const M_AL = 0x8a929d;
+const M_HI = 0xbcc4cf;
+const M_MID = 0x4d545e;
+const M_DK = 0x24272d;
+const M_RUB = 0x1b1c20;
+const M_COP = 0xc07a42;
+const M_CHR = 0xd2dae4;
 
 /** Tenue des bras (couleurs sRGB issues de la tenue du parrain). */
 export interface ArmLook {
@@ -729,6 +751,43 @@ function poseDef(pose: HandPose): HandPoseDef {
         t: scale(add(add(scale(b.x, c[0]), scale(b.y, c[1])), scale(b.z, c[2])), -1),
       };
     }
+    case 'open':
+    case 'grab':
+    case 'relax':
+    case 'wfist': {
+      // repère du poignet : doigts vers −Z, paume vers −Y, pouce vers −X (main droite)
+      const curl: [number, number, number] =
+        pose === 'open' ? [deg(6), deg(5), deg(4)] : pose === 'grab' ? [deg(42), deg(58), deg(34)] : pose === 'relax' ? [deg(20), deg(32), deg(20)] : [deg(88), deg(112), deg(74)];
+      const thumb: P3[] =
+        pose === 'open'
+          ? [
+              [3.1, 1.9, 0.5],
+              [5.0, 4.4, 1.1],
+              [6.1, 6.5, 1.4],
+              [6.8, 8.4, 1.5],
+            ]
+          : pose === 'wfist'
+            ? [
+                [3.1, 1.9, 0.5],
+                [3.9, 5.4, 2.8],
+                [2.4, 7.6, 4.4],
+                [0.2, 8.1, 4.7],
+              ]
+            : [
+                [3.1, 1.9, 0.5],
+                [4.4, 4.7, 1.9],
+                [4.4, 7.0, 2.8],
+                [3.8, 8.8, 3.1],
+              ];
+      return {
+        curl: [0, 1, 2, 3].map((i) => [curl[0] + (pose === 'open' ? (i - 1.5) * 0.0 : 0), curl[1], curl[2]] as [number, number, number]),
+        thumb,
+        ax: [-1, 0, 0],
+        ay: [0, 0, -1],
+        az: [0, -1, 0],
+        t: [0, -0.1, -2.4],
+      };
+    }
     case 'fist':
     default: {
       // poing fermé : jointures vers −Z, dos de la main vers +Y, pouce replié devant
@@ -799,9 +858,10 @@ function handPalette(look: ArmLook): HandPalette {
  * Main droite voxelisée (1/128 m) dans le repère de la prise ; renvoie le modèle et le poignet
  * (m). rings : bagues d'or (annulaire, auriculaire, chevalière).
  */
-function buildHand(pose: HandPose, look: ArmLook): { m: VoxelModel; wrist: Vec3 } {
+function buildHand(pose: HandPose, look: ArmLook, mech?: MechHandFP): { m: VoxelModel; wrist: Vec3 } {
   const P = poseDef(pose);
   const pal = handPalette(look);
+  const heavy = mech?.style === 'fist';
   const chains = FINGERS.map((f, i) => fingerChain(f, P.curl[i]));
   // A → prise : g = t + x·ax + y·ay + z·az ; inverse par produits scalaires (base orthonormée)
   const toA = (g: P3): P3 => {
@@ -828,7 +888,7 @@ function buildHand(pose: HandPose, look: ArmLook): { m: VoxelModel; wrist: Vec3 
   const nz = Math.ceil((hi[2] - lo[2]) / vox);
   const m = new VoxelModel(nx, ny, nz, HAND_RES);
   m.setOrigin(-lo[0] / vox, -lo[1] / vox, -lo[2] / vox);
-  const ringsOn = look.accent !== undefined && !look.glove && look.boss === 'dadou';
+  const ringsOn = look.accent !== undefined && !look.glove && look.boss === 'dadou' && !mech;
   for (let j = 0; j < ny; j++)
     for (let k = 0; k < nz; k++)
       for (let i = 0; i < nx; i++) {
@@ -856,8 +916,12 @@ function buildHand(pose: HandPose, look: ArmLook): { m: VoxelModel; wrist: Vec3 
             const fd = FINGERS[f];
             for (let s = 0; s < 3; s++) {
               const [d, t] = segT(a, ch[s], ch[s + 1]);
-              const rr = fd.rad[s] * (1 - 0.08 * t);
+              const rr = fd.rad[s] * (1 - 0.08 * t) * (heavy ? 1.18 : 1);
               if (d <= rr) {
+                if (mech) {
+                  c = mechFinger(mech, f, s, t, a, ch);
+                  break;
+                }
                 c = pal.skin;
                 // ongle (dos de la dernière phalange), plis des articulations, bagues
                 if (s === 2 && t > 0.45) {
@@ -880,15 +944,17 @@ function buildHand(pose: HandPose, look: ArmLook): { m: VoxelModel; wrist: Vec3 
           const th = P.thumb;
           for (let s = 0; s < th.length - 1 && c < 0; s++) {
             const [d, t] = segT(a, th[s], th[s + 1]);
-            const rr = (s === 0 ? 1.35 : s === 1 ? 1.12 : 1.02) * (1 - 0.06 * t);
-            if (d <= rr) c = s === 2 && t > 0.6 && !look.glove ? pal.light : pal.skin;
+            const rr = (s === 0 ? 1.35 : s === 1 ? 1.12 : 1.02) * (1 - 0.06 * t) * (heavy ? 1.15 : 1);
+            if (d <= rr) c = mech ? (t < 0.14 && s > 0 ? M_DK : s === 1 ? M_HI : M_MID) : s === 2 && t > 0.6 && !look.glove ? pal.light : pal.skin;
           }
         }
+        if (mech && c >= 0) c = mechBody(mech, c, a, pal);
+        if (mech && c < 0) c = mechExtra(mech, a);
         if (c >= 0) m.set(i, j, k, c);
       }
   // relief : jointures éclairées sur le dos de la main, dessous ombré ; chevalière ; coutures du gant
   m.forEach((x, y, z, c) => {
-    if (c !== pal.skin) return;
+    if (c !== pal.skin || mech) return;
     const g: P3 = [lo[0] + (x + 0.5) * vox, lo[1] + (y + 0.5) * vox, lo[2] + (z + 0.5) * vox];
     const a = toA(g);
     if (a[2] < -1.0 && a[1] > 8.2 && a[1] < 9.8) return look.glove ? pal.light : pal.light;
@@ -971,6 +1037,66 @@ function forearmModel(look: ArmLook): VoxelModel {
   return m;
 }
 
+/**
+ * Décor des phalanges mécaniques : segments d'alliage alternés, articulations sombres, pulpe
+ * caoutchoutée, électrodes (Tesla), pointes de sonde (bras tactique), index lumineux (fouet).
+ */
+function mechFinger(mech: MechHandFP, f: number, s: number, t: number, a: P3, ch: P3[]): number {
+  if (t < 0.14 && s > 0) return M_DK;
+  if (s === 2 && t > 0.55) {
+    if (mech.style === 'tesla') return mech.act;
+    if (mech.style === 'tool' && f < 2) return mech.act;
+    if (mech.style === 'whip' && f === 0) return mech.act;
+    // pulpe (côté paume) en caoutchouc
+    const dir = norm(sub(ch[3], ch[2]));
+    const off = sub(a, add(ch[2], scale(sub(ch[3], ch[2]), t)));
+    if (dot(off, cross([1, 0, 0], dir)) > 0.3) return M_RUB;
+  }
+  if (mech.style === 'tesla' && s === 0 && t > 0.4 && t < 0.6) return M_COP;
+  if (mech.style === 'fist' && s === 0 && t < 0.45) return M_HI;
+  return s === 1 ? M_HI : M_AL;
+}
+
+/** Paume et dos de la main mécaniques (repère anatomique A, cm). */
+function mechBody(mech: MechHandFP, c: number, a: P3, pal: HandPalette): number {
+  if (c !== pal.skin && c !== pal.palm && c !== pal.dark && c !== pal.light) return c;
+  // bague du poignet
+  if (a[1] < 0.6) return Math.abs(a[1] + 0.6) < 0.35 ? mech.accent : M_DK;
+  // paume
+  if (a[2] > 0.85) {
+    const r = Math.hypot(a[0] - 0.2, a[1] - 4.6);
+    if (mech.style === 'palm') return r < 1.7 ? mech.act : r < 2.4 ? M_HI : M_DK;
+    if (mech.style === 'mag') return r < 2.8 ? (Math.hypot(a[0] - 1.1, a[1] - 4.6) < 0.6 || Math.hypot(a[0] + 0.7, a[1] - 4.6) < 0.6 ? mech.act : M_CHR) : M_DK;
+    return Math.abs(a[1] - 6.4) < 0.3 ? M_MID : M_DK;
+  }
+  // dos de la main : plaques, joint central, liseré lumineux
+  if (a[2] < -0.9) {
+    if (Math.abs(a[0] - 0.9) < 0.35 && a[1] > 1.6 && a[1] < 7.6) return mech.accent;
+    if (Math.abs(a[1] - 4.6) < 0.3) return M_DK;
+    if (mech.style === 'fist') return a[1] > 7.6 ? M_HI : M_MID;
+    return a[1] > 8 ? M_HI : M_AL;
+  }
+  // tranches
+  return M_MID;
+}
+
+/** Pièces ajoutées à la main mécanique : dévidoir du fouet, gantelet du poing, antenne du bras tactique. */
+function mechExtra(mech: MechHandFP, a: P3): number {
+  if (mech.style === 'whip') {
+    // dévidoir sur le dos de la main (axe X)
+    const r = Math.hypot(a[1] - 4.8, a[2] + 2.3);
+    if (Math.abs(a[0] - 0.4) < 2.3 && r < 1.9) return r < 0.8 ? mech.act : r > 1.4 ? M_HI : M_DK;
+  }
+  if (mech.style === 'fist') {
+    // plaque de jointures du gantelet
+    if (a[1] > 8.4 && a[1] < 10.8 && a[2] < -0.6 && a[2] > -2.6 && Math.abs(a[0]) < 3.9) return Math.abs(a[1] - 9.6) < 0.35 ? mech.act : M_HI;
+  }
+  if (mech.style === 'tool') {
+    if (Math.hypot(a[0] + 2, a[2] + 1.9) < 0.35 && a[1] > 1 && a[1] < 6.5) return a[1] > 6 ? mech.act : M_DK;
+  }
+  return -1;
+}
+
 /** Construit la main (pose donnée) et l'avant-bras d'un côté. */
 export function armModels(side: 'R' | 'L', pose: HandPose, look: ArmLook): ArmModels {
   const h = buildHand(pose, look);
@@ -989,6 +1115,32 @@ export function armModels(side: 'R' | 'L', pose: HandPose, look: ArmLook): ArmMo
   }
   if (side === 'L') fore = mirrorModelX(fore);
   return { hand, forearm: fore, wrist };
+}
+
+/**
+ * Main mécanique (bras cybernétique) d'un côté dans une pose : même squelette que la main de
+ * chair, décor de l'implant. Les couleurs lumineuses `mech` sont propres au côté.
+ */
+export function mechHandModel(side: 'R' | 'L', pose: HandPose, look: ArmLook, mech: MechHandFP): { hand: VoxelModel; wrist: Vec3 } {
+  const h = buildHand(pose, look, mech);
+  let hand = h.m;
+  let wrist = h.wrist;
+  const drawnLeft = pose === 'support';
+  if (drawnLeft) {
+    hand = mirrorModelX(hand);
+    wrist = mirrorV(wrist);
+  }
+  if ((side === 'L') !== drawnLeft) {
+    hand = mirrorModelX(hand);
+    wrist = mirrorV(wrist);
+  }
+  return { hand, wrist };
+}
+
+/** Avant-bras de chair (manche du parrain) d'un côté, seul. */
+export function sleeveForearmModel(side: 'R' | 'L', look: ArmLook): VoxelModel {
+  const f = forearmModel(look);
+  return side === 'L' ? mirrorModelX(f) : f;
 }
 
 /**

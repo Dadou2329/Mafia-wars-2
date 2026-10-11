@@ -14,7 +14,7 @@
     "start": "node dist/server/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "logo": "node scripts/build-logo.mjs",
-    "test": "tsx tests/engine.ts && tsx tests/run-all.ts",
+    "test": "tsx tests/engine.ts && tsx tests/run-all.ts && tsx tests/movement.ts && tsx tests/abilities.ts",
     "build:exe": "node scripts/build-exe.mjs"
   },
   "engines": {

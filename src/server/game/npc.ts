@@ -7,6 +7,7 @@ import { angleDiff, clamp } from '../../shared/util';
 import { PATH_STRIDE } from '../../shared/nav';
 import type { Game } from './Game';
 import type { Ent, Vec2 } from './types';
+import { concealed, npcDamageMul, unheard } from './abilities';
 
 const PERCEPTION = 28;
 
@@ -16,6 +17,13 @@ export function updateNpc(g: Game, e: Ent, dt: number): void {
   if (e.role === 'barman') {
     e.anim = Anim.IDLE;
     // le barman regarde la salle
+    return;
+  }
+  // étourdi (poing hydraulique, répulseur, décharge) ou tourelle grillée : plus rien ne bouge
+  if (e.stunUntil !== undefined && e.stunUntil > t) {
+    e.anim = Anim.IDLE;
+    e.flags &= ~FLAG.AIM;
+    e.vx = e.vz = 0;
     return;
   }
   // tourelle : immobile, elle pivote et tire
@@ -133,13 +141,15 @@ function pickTarget(g: Game, e: Ent): number {
   const range = e.weapon === Weapon.RIFLE ? 40 : PERCEPTION;
   // on garde la cible actuelle si elle reste valable
   const cur = ai.target >= 0 ? g.ents.get(ai.target) : undefined;
-  if (cur && cur.alive && g.hostile(e, cur) && Math.hypot(cur.x - e.x, cur.z - e.z) < range * 1.2) {
+  if (cur && cur.alive && g.hostile(e, cur) && Math.hypot(cur.x - e.x, cur.z - e.z) < range * 1.2 && !concealed(g, cur, e)) {
     if (g.time - ai.lastSeen < 4 || g.los(e, cur)) return cur.id;
   }
   const cands: [Ent, number][] = [];
   g.near(e.x, e.z, range, (o, d2) => {
     if (o === e || !o.alive) return;
     if (!g.hostile(e, o)) return;
+    // camouflage optique, pas feutrés dans le dos (semelles silencieuses)
+    if (o.role === 'boss' && (concealed(g, o, e) || unheard(g, o, e, Math.sqrt(d2)))) return;
     // priorité légère aux ennemis qui nous menacent et aux parrains
     let score = d2;
     if (o.ai && o.ai.target === e.id) score *= 0.6;
@@ -184,7 +194,7 @@ function tryFire(g: Game, e: Ent, target: Ent, d: number): void {
   let firstHit = -1;
   for (let p = 0; p < w.pellets; p++) {
     if (g.rng.chance(acc)) {
-      let dmg = w.damage * (0.85 + g.rng.next() * 0.3);
+      let dmg = w.damage * (0.85 + g.rng.next() * 0.3) * npcDamageMul(g, e, target);
       if (e.weapon === Weapon.SHOTGUN) dmg *= clamp(1.25 - d / 18, 0.25, 1);
       if (firstHit < 0) firstHit = target.id;
       g.damage(target, dmg, e, g.rng.chance(0.08));
@@ -211,7 +221,7 @@ function tryMelee(g: Game, e: Ent, target: Ent): void {
   const w = WEAPONS[e.weapon];
   e.nextFireAt = t + w.cooldown * (1.5 + g.rng.next() * 0.6);
   g.emitAll({ t: 'melee', id: e.id, w: e.weapon, target: target.id });
-  if (g.rng.chance(0.7)) g.damage(target, w.damage * (0.85 + g.rng.next() * 0.3), e);
+  if (g.rng.chance(0.7)) g.damage(target, w.damage * (0.85 + g.rng.next() * 0.3) * npcDamageMul(g, e, target), e);
 }
 
 /** Objectif de déplacement hors combat selon le mode. */

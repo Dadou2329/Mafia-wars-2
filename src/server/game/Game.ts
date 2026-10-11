@@ -70,6 +70,30 @@ import { convoyHostile, convoyReadyIn, convoys, loots, neutralConvoy, sendConvoy
 import { aNom, cap, deNom, leNom, pluriel } from '../../shared/french';
 import { firstGlass, glassInSphere, voxelKey } from '../../shared/glass';
 import { GRENADE_DAMAGE, GRENADE_FUSE, GRENADE_MAX, GRENADE_PRICE, GRENADE_RADIUS, GRENADE_START, stepGrenade, throwVelocity, type GrenadeBody } from '../../shared/grenade';
+import { cyberAction, cyberPrivate, debugCyber, fxOf, lookOf, makeCyber, param } from './cyber';
+import { createModules, type GameModule } from './modules';
+import { updateConquest } from './conquest';
+import {
+  abilityAction,
+  armMelee,
+  armPistolHit,
+  armPistolReload,
+  armPistolShot,
+  bossFxExtra,
+  bossInput,
+  bossWeaponDef,
+  concealed,
+  cyberDefense,
+  damageKindOf,
+  headMul,
+  moveAllowance,
+  resetCyberTransient,
+  revealOnAttack,
+  secondWind,
+  updateCyber,
+  type DamageKind,
+} from './abilities';
+import { GROUND_VY, VOXEL } from '../../shared/voxel';
 
 export const SLOTS: Slot[] = ['dadou', 'even'];
 export const otherSlot = (s: Slot): Slot => (s === 'dadou' ? 'even' : 'dadou');
@@ -127,10 +151,15 @@ export class Game {
   rain = 0;
   private rainTarget = 0;
   private rainNextAt = 0;
+  /** Systèmes greffés (conquête, QG…), voir modules.ts. */
+  modules: GameModule[] = [];
+  /** Altitude du haut du monde voxel (m) : toits des tours. */
+  readonly worldTop: number;
 
   constructor(w: SharedWorld, settings: MatchSettings) {
     this.w = w;
     this.settings = settings;
+    this.worldTop = (w.city.world.sy - GROUND_VY) * VOXEL;
     // la partie commence à la tombée de la nuit : les néons s'allument
     this.dayTime = settings.daytime === 'night' ? 0.92 : settings.daytime === 'dusk' ? 0.77 : 0.79;
     // une bruine au début (rues mouillées qui reflètent les néons), sauf temps sec
@@ -144,6 +173,7 @@ export class Game {
       this.bstate.set(b.id, { id: b.id, owner: b.startOwner, progress: 0, capBy: 0, contested: false, thugs: new Set(), alertAt: -100, attackers: 0 });
     }
     this.recomputeDistricts(true);
+    this.modules = createModules(this);
     this.setupStart();
   }
 
@@ -187,6 +217,7 @@ export class Game {
       droneAt: 0,
       droneReveal: null,
       hack: null,
+      cyber: makeCyber(),
     };
   }
 
@@ -331,6 +362,7 @@ export class Game {
       criminalUntil: 0,
       ai: o.role === 'boss' || o.role === 'vehicle' ? null : this.makeAi(o.role, o.mode ?? 'idle'),
       removeAt: Infinity,
+      fx: 0,
     };
     this.ents.set(id, e);
     this.emitAll({ t: 'spawn', e: this.info(e) });
@@ -383,6 +415,7 @@ export class Game {
       maxHp: e.maxHp,
       squad: ai ? ai.squad : -1,
       custom: e.role === 'boss' && e.slot ? this.factions[e.slot].custom : undefined,
+      cyber: e.role === 'boss' && e.slot ? lookOf(this.factions[e.slot].cyber) : undefined,
     };
   }
 
@@ -543,6 +576,8 @@ export class Game {
   }
 
   los(a: Ent, b: Ent): boolean {
+    // camouflage optique : un parrain camouflé n'est pas vu au-delà de 3 m
+    if (b.role === 'boss' && concealed(this, b, a)) return false;
     return this.w.city.world.lineOfSight(a.x, a.y + 1.45, a.z, b.x, b.y + 1.3, b.z);
   }
 
@@ -660,9 +695,13 @@ export class Game {
 
   // ======================================================================= dégâts
 
-  damage(target: Ent, amount: number, attacker: Ent | null, head = false, hx?: number, hy?: number, hz?: number): void {
+  damage(target: Ent, amount: number, attacker: Ent | null, head = false, hx?: number, hy?: number, hz?: number, kind?: DamageKind): void {
     if (!target.alive || target.invulnerable || this.over) return;
-    const dmg = Math.round(amount * (head && target.role !== 'vehicle' ? 1.8 : 1));
+    // implants : tirs à la tête de l'analyseur, protections, bouclier, armure de commandement
+    const k = kind ?? damageKindOf(attacker);
+    const raw = amount * (head && target.role !== 'vehicle' ? headMul(this, attacker) : 1);
+    const dmg = Math.round(cyberDefense(this, target, raw, attacker, k, hx ?? attacker?.x, hz ?? attacker?.z));
+    if (dmg <= 0) return;
     target.hp -= dmg;
     target.lastDamageAt = this.time;
     target.lastAttacker = attacker ? attacker.id : -1;
@@ -678,6 +717,8 @@ export class Game {
         attacker.criminalUntil = this.time + 40;
       }
     }
+    // cœur de secours : le parrain se relève sous le seuil (même d'un coup mortel)
+    if (target.role === 'boss' && target.hp < target.maxHp * 0.35) secondWind(this, target);
     if (target.hp <= 0) this.kill(target, attacker);
   }
 
@@ -712,6 +753,7 @@ export class Game {
     if (attacker?.role === 'boss' && attacker.slot && target.role === 'police') this.addHeat(attacker.slot, 2);
     if (target.role === 'boss' && target.slot) {
       const f = this.factions[target.slot];
+      resetCyberTransient(this, target.slot);
       f.deaths++;
       f.respawnAt = this.time + RESPAWN_TIME;
       const other = otherSlot(target.slot);
@@ -811,21 +853,24 @@ export class Game {
       }
     }
     const dist = Math.hypot(x - e.x, z - e.z);
-    const maxD = 9.5 * dt + 1.2;
+    // allure tolérée : sprint, glissade, esquive, grappin… selon les implants installés
+    const maxD = moveAllowance(this, slot) * dt + 1.2;
     if (dist > maxD && this.time - f.tpAt > 1) {
       // déplacement impossible : on recale le joueur
       this.teleport(slot, e.x, e.y, e.z, e.yaw);
       return;
     }
     e.x = clamp(x, 0.5, WORLD_W - 0.5);
-    e.y = clamp(y, -9, INTERIOR_MAX_Y + 20);
+    e.y = clamp(y, -9, Math.max(INTERIOR_MAX_Y + 20, this.worldTop));
     e.z = clamp(z, 0.5, WORLD_D - 0.5);
     e.yaw = yaw;
     e.pitch = clamp(pitch, -1.5, 1.5);
-    e.vx = clamp(vx, -8, 8);
-    e.vz = clamp(vz, -8, 8);
+    e.vx = clamp(vx, -30, 30);
+    e.vz = clamp(vz, -30, 30);
     e.anim = anim === Anim.DEAD ? Anim.IDLE : (anim as Anim);
-    e.flags = flags & ~FLAG.WANTED;
+    // chutes, réceptions (dégâts de chute, atterrissage sismique)
+    bossInput(this, slot, e, flags, e.anim);
+    e.flags = flags & 0xff & ~FLAG.WANTED;
     if (f.weapons.has(weapon as Weapon)) e.weapon = weapon as Weapon;
     // tombé dans l'East River
     if (e.y < WATER_Y - 0.4 && e.y > WATER_Y - 4 && isWater(e.x, e.z)) {
@@ -897,7 +942,7 @@ export class Game {
     });
     for (const e of hits) {
       const d = Math.hypot(e.x - x, e.y + 0.9 - y, e.z - z);
-      this.damage(e, GRENADE_DAMAGE * Math.max(0.15, 1 - d / GRENADE_RADIUS), thrower, false, x, y, z);
+      this.damage(e, GRENADE_DAMAGE * Math.max(0.15, 1 - d / GRENADE_RADIUS), thrower, false, x, y, z, 'explosion');
     }
     // les vitres alentour volent en éclats ; tout le quartier l'a entendue
     this.shatter(x, y + 0.5, z, 3);
@@ -931,14 +976,21 @@ export class Game {
     const e = this.ents.get(f.bossId);
     if (!e || !e.alive || this.over) return;
     const w = data.w as Weapon;
-    const def = WEAPONS[w];
-    if (!def || !def.ranged || !f.weapons.has(w)) return;
+    if (!WEAPONS[w] || !f.weapons.has(w)) return;
+    // armes de bras : caractéristiques de l'implant ; réflexes : cadence accrue
+    const def = bossWeaponDef(this, slot, w);
+    if (!def.ranged) return;
     if (this.time < e.nextFireAt - 0.08) return;
+    if (w === Weapon.ARM_PISTOL) {
+      if (!armPistolShot(this, slot)) return;
+    } else {
+      const ammo = f.ammo.get(w) ?? 0;
+      if (ammo <= 0) return;
+      f.ammo.set(w, ammo - 1);
+    }
     e.nextFireAt = this.time + def.cooldown * 0.9;
-    const ammo = f.ammo.get(w) ?? 0;
-    if (ammo <= 0) return;
-    f.ammo.set(w, ammo - 1);
     e.weapon = w;
+    revealOnAttack(this, slot);
     const [ox, oy, oz] = data.o;
     const [dx, dy, dz] = data.d;
     if (![ox, oy, oz, dx, dy, dz].every(Number.isFinite)) return;
@@ -969,7 +1021,8 @@ export class Game {
       if (dist > def.range + 1) continue;
       if (!this.w.city.world.lineOfSight(ox, oy, oz, hx, hy, hz)) continue;
       const falloff = w === Weapon.SHOTGUN ? clamp(1.25 - dist / 18, 0.25, 1) : 1;
-      this.damage(t, def.damage * falloff, e, !!head, hx, hy, hz);
+      this.damage(t, def.damage * falloff, e, !!head, hx, hy, hz, w === Weapon.SHOTGUN ? 'pellet' : 'bullet');
+      if (w === Weapon.ARM_PISTOL && t.alive) armPistolHit(this, slot, t, e);
       if (firstHit < 0) firstHit = id;
       hitCount++;
     }
@@ -990,8 +1043,11 @@ export class Game {
     if (!e || !e.alive || this.over) return;
     const def = WEAPONS[w];
     if (!def || def.ranged || !f.weapons.has(w)) return;
+    // lame, poing hydraulique, fouet : mécaniques propres (balayage, charge, projection)
+    if (armMelee(this, slot, w, targetId)) return;
     if (this.time < e.nextFireAt - 0.08) return;
     e.nextFireAt = this.time + def.cooldown * 0.9;
+    revealOnAttack(this, slot);
     this.emitAll({ t: 'melee', id: e.id, w, target: targetId });
     const t = this.ents.get(targetId);
     if (!t || !t.alive || (t.slot === slot && t.role !== 'boss')) return;
@@ -1008,6 +1064,8 @@ export class Game {
 
   playerReload(slot: Slot): void {
     const f = this.factions[slot];
+    const e = this.ents.get(f.bossId);
+    if (e && e.weapon === Weapon.ARM_PISTOL) armPistolReload(this, slot);
     this.emitAll({ t: 'reload', id: f.bossId });
   }
 
@@ -1019,6 +1077,7 @@ export class Game {
 
   action(slot: Slot, act: ClientAction): void {
     if (this.over && act.a !== 'rematch') return;
+    for (const m of this.modules) if (m.action?.(slot, act)) return;
     const f = this.factions[slot];
     switch (act.a) {
       case 'recruit': {
@@ -1109,7 +1168,7 @@ export class Game {
         f.money -= AMMO_PRICE;
         for (const w of f.weapons) {
           const def = WEAPONS[w];
-          if (def.ranged) f.ammo.set(w, Math.min(def.magazine * 8, (f.ammo.get(w) ?? 0) + def.magazine * 4));
+          if (def.ranged && w !== Weapon.ARM_PISTOL) f.ammo.set(w, Math.min(def.magazine * 8, (f.ammo.get(w) ?? 0) + def.magazine * 4));
         }
         this.notify(slot, 'Munitions rechargées.', 'money');
         break;
@@ -1175,6 +1234,12 @@ export class Game {
       case 'convoy':
         sendConvoy(this, slot);
         break;
+      case 'cyber':
+        cyberAction(this, slot, act.op, act.id, act.slot, act.n);
+        break;
+      case 'ab':
+        abilityAction(this, slot, act);
+        break;
       case 'debugTp': {
         // réservé aux tests automatisés (rendu logiciel trop lent pour marcher jusqu'au but)
         if (process.env.MW_DEBUG !== '1') return;
@@ -1185,6 +1250,18 @@ export class Game {
           this.rain = this.rainTarget = clamp(act.rain, 0, 1);
           this.rainNextAt = this.time + 900;
         }
+        break;
+      }
+      case 'debugCyber': {
+        // réservé aux tests automatisés : implant installé sans passer par une clinique
+        if (process.env.MW_DEBUG !== '1') return;
+        debugCyber(this, slot, act.id, act.lv, act.slot);
+        break;
+      }
+      case 'debugMoney': {
+        // réservé aux tests automatisés : argent de poche (implants, améliorations)
+        if (process.env.MW_DEBUG !== '1') return;
+        f.money += Math.max(0, Math.min(1e6, act.n));
         break;
       }
       case 'debugEnd': {
@@ -1228,6 +1305,7 @@ export class Game {
     f.hqId = bid;
     this.setOwner(bid, f.faction);
     const hq = this.hq(slot);
+    for (const m of this.modules) m.onMoveHq?.(slot, bid);
     // le rabatteur prend un taxi volant : il attend déjà au nouveau QG
     for (const e of this.ents.values()) {
       if (e.slot !== slot || !e.alive) continue;
@@ -1338,7 +1416,7 @@ export class Game {
     if (id === 'armory') {
       for (const w of f.weapons) {
         const def = WEAPONS[w];
-        if (def.ranged) f.ammo.set(w, def.magazine * 8);
+        if (def.ranged && w !== Weapon.ARM_PISTOL) f.ammo.set(w, def.magazine * 8);
       }
     }
   }
@@ -1347,13 +1425,14 @@ export class Game {
     const f = this.factions[slot];
     const boss = this.ents.get(f.bossId)!;
     if (!boss.alive) return;
-    // hommes concernés : l'escorte + les hommes libres à proximité
+    // hommes concernés : l'escorte + les hommes libres à proximité (commandement neuronal : plus loin)
+    const voice = param(f.cyber, 'commandement', 'orders', 1);
     const nearby: Ent[] = [];
     for (const e of this.ents.values()) {
       if (!e.alive || e.slot !== slot || e.role !== 'gangster') continue;
       const m = e.ai!.mode;
       const d = Math.hypot(e.x - boss.x, e.z - boss.z);
-      if (m === 'escort' || (m === 'pool' && d < 40) || (m === 'hold' && d < 60)) nearby.push(e);
+      if (m === 'escort' || (m === 'pool' && d < 40 * voice) || (m === 'hold' && d < 60 * voice)) nearby.push(e);
     }
     if (nearby.length === 0) {
       this.notify(slot, 'Aucun homme à portée de voix. Recrutez au QG ou rapprochez-vous de vos hommes.', 'info', 'quick-none', 3);
@@ -1457,6 +1536,7 @@ export class Game {
     const def = BUILDINGS[bid];
     this.emitAll({ t: 'capture', b: bid, owner, prev });
     securityOnCapture(this, bid, owner);
+    for (const m of this.modules) m.onOwner?.(bid, owner, prev);
     const prevSlot = factionSlot(prev);
     const newSlot = factionSlot(owner);
     if (newSlot) this.factions[newSlot].captured++;
@@ -1522,62 +1602,12 @@ export class Game {
     return n;
   }
 
+  /**
+   * Prise de contrôle des bâtiments (4 fois par seconde) : plus de capture par simple présence,
+   * des opérations par objectifs menées sur place par le parrain et ses lieutenants (conquest.ts).
+   */
   private updateCapture(dt: number): void {
-    for (const def of BUILDINGS) {
-      if (!def.capturable || this.isReserved(def.id)) continue;
-      const st = this.bstate.get(def.id)!;
-      const info = this.building(def.id);
-      const hqOf = this.hqOwnerOf(def.id);
-      let c1 = 0;
-      let c2 = 0;
-      let cn = 0;
-      const cx = (info.footprint[0] + info.footprint[2]) / 2;
-      const cz = (info.footprint[1] + info.footprint[3]) / 2;
-      const r = Math.hypot(info.footprint[2] - info.footprint[0], info.footprint[3] - info.footprint[1]) / 2 + 1;
-      this.near(cx, cz, r, (e) => {
-        if (!e.alive || e.role === 'barman' || e.role === 'police' || e.role === 'vehicle' || e.role === 'turret' || e.flags & FLAG.HIDDEN) return;
-        if (!this.insideBuilding(info, e.x, e.y, e.z)) return;
-        if (e.faction === Faction.DADOU) c1++;
-        else if (e.faction === Faction.EVEN) c2++;
-        else if (e.role === 'thug' && e.ai!.home === def.id) cn++;
-      });
-      const counts: Record<number, number> = { [Faction.NEUTRAL]: cn, [Faction.DADOU]: c1, [Faction.EVEN]: c2 };
-      const owner = st.owner;
-      const defenders = counts[owner] ?? 0;
-      const attackers = [Faction.DADOU, Faction.EVEN].filter((f) => f !== owner && counts[f] > 0);
-      st.attackers = attackers.reduce((s, f) => s + counts[f], 0);
-      const time = hqOf ? CAPTURE_TIME.hq : def.isKey ? CAPTURE_TIME.key : CAPTURE_TIME.normal;
-      st.contested = false;
-      if (attackers.length === 1 && defenders === 0) {
-        const F = attackers[0];
-        const fs = factionSlot(F)!;
-        if (hqOf && this.territories(fs) < HQ_CAPTURE_MIN_DISTRICTS) {
-          st.contested = true;
-          this.notify(fs, `Le QG ${DE_BOSS[hqOf]} est imprenable : contrôlez au moins ${HQ_CAPTURE_MIN_DISTRICTS} quartiers sur ${DISTRICTS.length} (vous en avez ${this.territories(fs)}).`, 'info', 'hq-locked', 15);
-          continue;
-        }
-        if (st.capBy !== F) {
-          st.capBy = F;
-          st.progress = 0;
-        }
-        const n = counts[F];
-        st.progress += (dt / time) * Math.min(3, 1 + 0.3 * (n - 1));
-        // alerte du propriétaire
-        const os = factionSlot(owner);
-        if (os && this.time - st.alertAt > 25) {
-          st.alertAt = this.time;
-          this.notify(os, `ALERTE — ${BOSS_NAME[fs]} attaque ${leNom(def.name)} !`, 'alert');
-          if (hqOf === os) this.notify(os, `ATTENTION ! ${BOSS_NAME[fs]} est dans votre quartier général !`, 'alert');
-          else if (def.isKey) this.notify(os, `${MAFIA_NAME[os]} risque de perdre un bâtiment stratégique ${aNom(DISTRICT_BY_ID[def.district].name)} !`, 'alert', `key-${def.id}`, 60);
-        }
-        if (st.progress >= 1) this.setOwner(def.id, F, fs);
-      } else if (attackers.length > 0) {
-        st.contested = true;
-      } else if (st.progress > 0) {
-        st.progress = Math.max(0, st.progress - dt / (time * 2));
-        if (st.progress === 0) st.capBy = 0;
-      }
-    }
+    updateConquest(this, dt);
   }
 
   // ======================================================================= boucle
@@ -1593,7 +1623,9 @@ export class Game {
     this.updateFactions(dt);
     for (const sq of this.squads.values()) updateSquad(this, sq, dt);
     for (const e of this.ents.values()) if (e.ai && e.alive) updateNpc(this, e, dt);
+    updateCyber(this, dt);
     if (this.tick % 5 === 0) this.updateCapture(dt * 5);
+    for (const m of this.modules) m.step?.(dt);
     updatePolice(this, dt);
     updateVehicles(this);
     updateSecurity(this, dt);
@@ -1697,6 +1729,7 @@ export class Game {
       f.vehicle = -1;
     }
     boss.flags &= ~(FLAG.VEHICLE | FLAG.HIDDEN);
+    resetCyberTransient(this, slot);
     const sp = hq.deskSeat ?? hq.spawn[0] ?? hq.center;
     boss.alive = true;
     boss.hp = boss.maxHp;
@@ -1980,7 +2013,8 @@ export class Game {
       lastSent.set(e.id, this.tick);
       let flags = e.flags;
       if (e.role === 'boss' && e.slot && this.factions[e.slot].heat >= 1) flags |= FLAG.WANTED;
-      out.push({ id: e.id, x: e.x, y: e.y, z: e.z, yaw: e.yaw, pitch: e.pitch, vx: e.vx, vz: e.vz, anim: e.anim, flags, weapon: e.weapon, hp: e.maxHp > 0 ? Math.max(0, e.hp) / e.maxHp : 0 });
+      const fx = e.role === 'boss' && e.slot ? e.fx | fxOf(this, this.factions[e.slot].cyber) | bossFxExtra(this, e.slot, e) : e.fx;
+      out.push({ id: e.id, x: e.x, y: e.y, z: e.z, yaw: e.yaw, pitch: e.pitch, vx: e.vx, vz: e.vz, anim: e.anim, flags, weapon: e.weapon, hp: e.maxHp > 0 ? Math.max(0, e.hp) / e.maxHp : 0, fx });
     }
     return out;
   }
@@ -1998,7 +2032,7 @@ export class Game {
     }
     const rides: [number, number][] = [];
     for (const e of this.ents.values()) if (e.role === 'vehicle' && e.alive && e.veh && e.veh.driver >= 0) rides.push([e.id, e.veh.driver]);
-    return {
+    const out: PublicState = {
       rides,
       hacked: hackedList(this),
       convoys: convoys(this).map((c) => {
@@ -2027,6 +2061,8 @@ export class Game {
       tier: { dadou: this.factions.dadou.tier, even: this.factions.even.tier },
       rain: Math.round(this.rain * 100) / 100,
     };
+    for (const m of this.modules) m.pub?.(out);
+    return out;
   }
 
   privateState(slot: Slot): PrivateState {
@@ -2042,7 +2078,7 @@ export class Game {
       if (e.ai!.mode === 'escort') escort++;
     }
     const lts: LieutenantStatus[] = f.lieutenants.map((id) => squadStatus(this, this.squads.get(id)!));
-    return {
+    const out: PrivateState = {
       money: Math.floor(f.money),
       income: f.income,
       men,
@@ -2073,7 +2109,10 @@ export class Game {
       hack: f.hack ? { b: f.hack.b, p: Math.min(1, (this.time - f.hack.start) / Math.max(0.1, f.hack.done - f.hack.start)) } : null,
       convoyIn: convoyReadyIn(this, slot),
       spotted: f.spotted,
+      cyber: cyberPrivate(this, slot),
     };
+    for (const m of this.modules) m.priv?.(slot, out);
+    return out;
   }
 
   takeOutbox(): Outbox {

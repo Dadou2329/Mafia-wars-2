@@ -1,7 +1,7 @@
 // Lieutenants et escouades : exécution autonome des ordres dans la ville.
 
 import { Anim } from '../../shared/characters';
-import { BOSS_NAME, ORDER_LABEL, type OrderType } from '../../shared/constants';
+import { BOSS_NAME, DE_BOSS, HQ_CAPTURE_MIN_DISTRICTS, ORDER_LABEL, type OrderType } from '../../shared/constants';
 import { BUILDINGS, DISTRICT_BY_ID, Faction, SUBWAY_STATIONS, SUBWAY_Y, buildingsInDistrict, type DistrictId, type SubwayStation } from '../../shared/city/plan';
 import type { LieutenantStatus, Slot } from '../../shared/protocol';
 import { formatTime } from '../../shared/util';
@@ -10,6 +10,8 @@ import type { Ent, Squad, Vec2 } from './types';
 import { aNom, cap, deNom as deNomB, leNom, pluriel } from '../../shared/french';
 import { heistAction, heistOf, isHacked, securityOf, squadHack } from './security';
 import { convoyOf } from './convoys';
+import { aPlace, opOverall, opRadius } from '../../shared/conquest';
+import { anchorRing, attackGoal, defendGoal, defendersLeft, opOf, type Op } from './conquest';
 
 export function createSquad(g: Game, lt: Ent, slot: Slot): Squad {
   const sq: Squad = {
@@ -84,6 +86,8 @@ function setState(g: Game, sq: Squad, s: Squad['state']): void {
   }
   lt.ai!.follow = -1;
   lt.ai!.run = false;
+  stance(lt, false);
+  opMem.delete(sq);
   if (s === 'assault' || s === 'hold') assignPosts(g, sq, s === 'assault');
 }
 
@@ -504,9 +508,6 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
     case 'assault': {
       const b = BUILDINGS[sq.goalBuilding];
       const st = g.bstate.get(b.id)!;
-      sq.status = `Assaut : ${b.name}`;
-      const cur = st.capBy === mine ? st.progress : 0;
-      sq.progress = sq.order!.type === 'attack_building' ? cur : (sq.done + cur) / Math.max(1, sq.queueTotal);
       if (st.owner === mine) {
         sq.queue.shift();
         sq.done++;
@@ -515,10 +516,10 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
         } else {
           finish(g, sq);
         }
-      } else if (g.tick % 40 === sq.id % 40) {
-        // relance les hommes inactifs vers l'intérieur
-        assignPosts(g, sq, true);
+        break;
       }
+      // prise de contrôle : on vide le bâtiment, puis le lieutenant mène chaque étape sur place
+      assaultOp(g, sq, lt, ms);
       // l'équipe du lieutenant pirate la sécurité (tourelles) : vite avec des hackers, lentement sinon
       const sec = securityOf(g, b.id);
       if (sec && sec.level >= 2 && !isHacked(g, b.id) && g.time - sq.stateSince > (g.factions[sq.slot].upgrades.has('hackers') ? 8 : 22)) {
@@ -532,6 +533,8 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
         updateHeist(g, sq, lt);
         break;
       }
+      // un bâtiment défendu est visé par une opération : on court à l'objectif
+      if (defendOps(g, sq, lt, ms)) break;
       sq.status = o
         ? o.type === 'hold'
           ? 'Tient la position'
@@ -623,6 +626,161 @@ export function updateSquad(g: Game, sq: Squad, dt: number): void {
     case 'down':
       break;
   }
+}
+
+// ---------------------------------------------------------------------------- prise de contrôle
+
+/** Mémoire de l'escouade pendant une opération (objectif couvert, défense en cours). */
+const opMem = new WeakMap<Squad, { sig: string; def: boolean }>();
+
+function memOf(sq: Squad): { sig: string; def: boolean } {
+  let m = opMem.get(sq);
+  if (!m) opMem.set(sq, (m = { sig: '', def: false }));
+  return m;
+}
+
+/** Au travail sur un objectif, le lieutenant ne s'en éloigne plus pour poursuivre un ennemi. */
+function stance(lt: Ent, working: boolean): void {
+  const ai = lt.ai!;
+  if (working) {
+    ai.mode = 'guard';
+    ai.leash = 3;
+  } else if (ai.mode === 'guard') {
+    ai.mode = 'squad';
+    ai.leash = 30;
+  }
+}
+
+/** Les hommes couvrent l'objectif : quatre autour du point, les autres tiennent le bâtiment. */
+function coverPosts(g: Game, sq: Squad, ms: Ent[], pt: Vec2 & { y: number }): void {
+  assignPosts(g, sq, true);
+  const ring = anchorRing(g, pt, 4);
+  if (!ring.length) return;
+  const byDist = [...ms].sort((a, b) => Math.hypot(a.x - pt.x, a.z - pt.z) + Math.abs(a.y - pt.y) * 3 - Math.hypot(b.x - pt.x, b.z - pt.z) - Math.abs(b.y - pt.y) * 3);
+  byDist.slice(0, ring.length).forEach((m, i) => {
+    m.ai!.post = ring[i];
+    m.ai!.follow = -1;
+    m.ai!.run = true;
+  });
+}
+
+const pct = (v: number) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)} %`;
+
+/** Objet emporté par l'opération (l'acte de propriété…). */
+function itemOfOp(op: Op | null): string {
+  return op?.plan.steps.find((x) => x.item)?.item ?? 'le document';
+}
+
+/** Assaut d'un bâtiment : nettoyage, puis chaque étape de l'opération, menée par le lieutenant. */
+function assaultOp(g: Game, sq: Squad, lt: Ent, ms: Ent[]): void {
+  const def = BUILDINGS[sq.goalBuilding];
+  const mine = slotFaction(sq.slot);
+  const mem = memOf(sq);
+  const goal = attackGoal(g, def.id, sq.slot, lt);
+  const op = goal?.op && goal.op.slot === sq.slot ? goal.op : null;
+  const overall = op ? opOverall({ step: op.step, n: op.plan.steps.length, p: op.prog }) : 0;
+  sq.progress = sq.order!.type === 'attack_building' ? overall : (sq.done + overall) / Math.max(1, sq.queueTotal);
+  if (!goal || goal.mode === 'locked') {
+    sq.status = goal ? `QG imprenable : il faut ${HQ_CAPTURE_MIN_DISTRICTS} quartiers (vous en avez ${g.territories(sq.slot)})` : `Assaut : ${def.name}`;
+    stance(lt, false);
+    if (g.tick % 40 === sq.id % 40) assignPosts(g, sq, true);
+    return;
+  }
+  const pt = goal.pt;
+  const d = Math.hypot(lt.x - pt.x, lt.z - pt.z) + Math.abs(lt.y - pt.y) * 2;
+  // d'abord, on vide le bâtiment : le lieutenant dirige l'assaut depuis l'entrée
+  const left = defendersLeft(g, def.id, mine);
+  if (left > 0 && !op && d > 6 && g.time - sq.stateSince < 25) {
+    sq.status = `Assaut : ${def.name} — ${left} défenseur${left > 1 ? 's' : ''}`;
+    stance(lt, false);
+    if (g.tick % 40 === sq.id % 40) assignPosts(g, sq, true);
+    return;
+  }
+  // ensuite, l'objectif : le lieutenant y va, quatre hommes le couvrent
+  const step = goal.step!;
+  const sig = `${def.id}:${goal.idx}:${goal.mode}:${Math.round(pt.x * 2)},${Math.round(pt.z * 2)},${Math.round(pt.y)}`;
+  if (mem.sig !== sig || g.tick % 80 === sq.id % 80) {
+    mem.sig = sig;
+    coverPosts(g, sq, ms, pt);
+  }
+  lt.ai!.post = pt;
+  lt.ai!.follow = -1;
+  lt.ai!.run = d > 5;
+  const near = d < opRadius(step.kind) + 0.5;
+  stance(lt, near && (goal.mode === 'work' || goal.mode === 'carry'));
+  const stage = goal.n > 1 ? ` (étape ${goal.idx + 1}/${goal.n})` : '';
+  switch (goal.mode) {
+    case 'contest':
+      sq.status = `Conteste l’opération ${DE_BOSS[goal.op!.slot]}`;
+      break;
+    case 'pickup':
+      sq.status = `Récupère ${itemOfOp(op)}`;
+      break;
+    case 'carry':
+      sq.status = `Apporte ${itemOfOp(op)} ${aPlace(step.place)}`;
+      break;
+    case 'escort':
+      sq.status = `Couvre le porteur de ${itemOfOp(op)}`;
+      break;
+    default:
+      if (!near || !op || !(op.by & 2)) sq.status = `Se dirige vers ${step.place}${stage}`;
+      else if (op.contested) sq.status = `${step.doing} — CONTESTÉ !${stage}`;
+      else if (op.gang > 0 && op.step === op.plan.steps.length - 1 && op.prog >= 0.95) sq.status = `${step.doing} — il reste ${op.gang} voyou${op.gang > 1 ? 's' : ''}`;
+      else sq.status = `${step.doing} — ${pct(op.prog)}${stage}`;
+  }
+}
+
+/** Défense : un bâtiment tenu par l'escouade est visé par une opération ennemie. */
+function defendOps(g: Game, sq: Squad, lt: Ent, ms: Ent[]): boolean {
+  const mine = slotFaction(sq.slot);
+  const mem = memOf(sq);
+  const o = sq.order;
+  let bid = -1;
+  if (o && sq.goalBuilding >= 0 && g.bstate.get(sq.goalBuilding)!.owner === mine && opOf(g, sq.goalBuilding)) bid = sq.goalBuilding;
+  else if (o && o.type === 'defend_district') {
+    let bd = Infinity;
+    for (const b of buildingsInDistrict(String(o.target) as DistrictId)) {
+      if (g.bstate.get(b.id)!.owner !== mine || !opOf(g, b.id)) continue;
+      const c = g.building(b.id).center;
+      const dd = Math.hypot(c.x - lt.x, c.z - lt.z);
+      if (dd < bd) {
+        bd = dd;
+        bid = b.id;
+      }
+    }
+  }
+  const goal = bid >= 0 ? defendGoal(g, bid, sq.slot) : null;
+  if (!goal) {
+    if (mem.def) {
+      // menace écartée : retour aux postes
+      mem.def = false;
+      mem.sig = '';
+      stance(lt, false);
+      assignPosts(g, sq, false);
+    }
+    return false;
+  }
+  mem.def = true;
+  const op = goal.op;
+  const cur = op.plan.steps[op.step];
+  const pt = goal.pt;
+  const d = Math.hypot(lt.x - pt.x, lt.z - pt.z) + Math.abs(lt.y - pt.y) * 2;
+  // les hommes contestent l'objectif en cours ; le lieutenant reprend l'étape volée s'il le peut
+  const sig = `d${bid}:${op.step}:${goal.mode}:${Math.round(cur.anchor.x)},${Math.round(cur.anchor.z)}`;
+  if (mem.sig !== sig || g.tick % 80 === sq.id % 80) {
+    mem.sig = sig;
+    const c = op.drop ? { x: op.drop.x, y: op.drop.y, z: op.drop.z } : { x: cur.anchor.x, y: cur.anchor.y, z: cur.anchor.z };
+    coverPosts(g, sq, ms, c);
+  }
+  lt.ai!.post = pt;
+  lt.ai!.follow = -1;
+  lt.ai!.run = d > 4;
+  stance(lt, goal.mode === 'undo' && d < opRadius(goal.step.kind) + 0.5);
+  sq.progress = 1 - opOverall({ step: op.step, n: op.plan.steps.length, p: op.prog });
+  if (goal.mode === 'undo') sq.status = op.undoBy & 2 ? `Reprend ${goal.step.place} — ${pct(op.undo)}` : `Va reprendre ${goal.step.place}`;
+  else if (goal.mode === 'recover') sq.status = `Reprend ${itemOfOp(op)}`;
+  else sq.status = `Défend ${goal.step.place} contre ${BOSS_NAME[op.slot]}`;
+  return true;
 }
 
 /** Ordre de braquage : le lieutenant pirate le terminal si besoin, puis vide le coffre. */

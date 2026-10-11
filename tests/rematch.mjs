@@ -50,6 +50,10 @@ A.s.emit('room:ready', { ready: true });
 B.s.emit('room:ready', { ready: true });
 check('la partie démarre quand les deux sont prêts', await wait(() => A.inits.length === 1 && B.inits.length === 1));
 check('Dadou et Even attribués', A.inits[0]?.you === 'dadou' && B.inits[0]?.you === 'even');
+// implants : installés chez Even (outil de test), visibles de Dadou, conservés à la reconnexion
+B.s.emit('act', { a: 'debugCyber', id: 'grappin', lv: 2, slot: 'brasG' });
+B.s.emit('act', { a: 'debugCyber', id: 'derme', lv: 1, slot: 'peau' });
+check('l’adversaire voit les implants installés (événement « cyber »)', await wait(() => A.evs.some((e) => e.t === 'cyber' && e.cyber.includes('brasG=grappin:2') && e.cyber.includes('peau=derme:1'))));
 // reconnexion : B coupe sa connexion et revient avec le même jeton
 B.s.disconnect();
 check('pause annoncée quand un joueur se déconnecte', await wait(() => !!A.pause && A.pause.waitingFor?.length > 0, 8000), JSON.stringify(A.pause));
@@ -57,6 +61,8 @@ await sleep(500);
 const B2 = client('Bob', B.token);
 await B2.ready;
 check('reconnexion : la partie reprend avec le même parrain', await wait(() => B2.inits.length === 1 && B2.inits[0].you === 'even'));
+check('reconnexion : implants intacts (état privé)', B2.inits[0]?.priv?.cyber?.equip?.brasG === 'grappin' && B2.inits[0]?.priv?.cyber?.owned?.grappin === 2);
+check('reconnexion : apparence des implants transmise', (B2.inits[0]?.infos ?? []).some((i) => (i.cyber ?? []).includes('brasG=grappin:2')));
 check('fin de la pause au retour du joueur', await wait(() => A.pause === null, 8000));
 // fin de partie (outil de test) puis revanche
 A.s.emit('act', { a: 'debugEnd' });

@@ -5,6 +5,7 @@ import { BUILDINGS, Faction } from '../../shared/city/plan';
 import type { GameEvent, PrivateState, PublicState, Slot } from '../../shared/protocol';
 import { MAP_FONT_TITLE, MAP_SCALE, type CityMap } from './cityMap';
 import type { EntityStore } from './entities';
+import { drawHqMinimap } from './hqVisuals';
 
 /** Taille des pictogrammes dessinés dans le repère de la carte de base (réglés pour 6 px/m). */
 const K = MAP_SCALE / 6;
@@ -75,6 +76,8 @@ export function drawMinimap(
       c.stroke();
     }
   }
+  // cliniques cybernétiques
+  drawHqMinimap(c, s, map.buildings, pub, me);
   // unités visibles
   const myFaction = me === 'dadou' ? Faction.DADOU : Faction.EVEN;
   for (const e of store.alive()) {

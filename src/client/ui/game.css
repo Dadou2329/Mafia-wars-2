@@ -929,3 +929,8 @@
   color: var(--text-dim);
   font-size: 16px;
 }
+
+/* équipements du QG (hqVisuals.ts) : logement trop modeste pour l'instant */
+.sm-upg.mw-hq-locked {
+  opacity: 0.62;
+}

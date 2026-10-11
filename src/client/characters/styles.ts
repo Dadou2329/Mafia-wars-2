@@ -307,7 +307,8 @@ export function appearanceFor(kind: CharKind, faction: number, look: number, gan
       return { style: { ...EVEN_STYLE, hat: bossHat(custom?.hat, 'top') }, outfit: o, neon: NEON.CYAN };
     }
     case CharKind.GANGSTER:
-      return gangster(r, faction === 2, skin, hair);
+      // gang = 1 : garde d'élite du QG (armure, casque)
+      return gangster(r, faction === 2, skin, hair, gang === 1);
     case CharKind.LIEUTENANT:
       return lieutenant(r, faction === 2, skin, hair);
     case CharKind.THUG:
@@ -341,7 +342,8 @@ function hairUnder(hat: HatStyle, hair: HairStyle): HairStyle {
 
 // ------------------------------------------------------------------ hommes des parrains
 
-function gangster(r: Rng, even: boolean, skin: number, hair: number): Appearance {
+function gangster(r: Rng, even: boolean, skin: number, hair: number, elite = false): Appearance {
+  if (elite) return eliteGuard(r, even, skin, hair);
   const fem = r.chance(0.18);
   const b: Build = fem ? 'f' : 'm';
   const torso = fem
@@ -433,6 +435,63 @@ function gangster(r: Rng, even: boolean, skin: number, hair: number): Appearance
     o.lip = r.pick(LIPSTICK);
     o.makeup = even ? 0x3a4a6a : 0x4a2a2e;
   }
+  return { style, outfit: o, neon: even ? NEON.CYAN : NEON.RED };
+}
+
+/**
+ * Garde d'élite du QG (GANGSTER, gang = 1) : armure lourde aux couleurs du parrain, casque à
+ * visière, genouillères, gants tactiques ; plus grand et plus massif que les hommes de main.
+ */
+function eliteGuard(r: Rng, even: boolean, skin: number, hair: number): Appearance {
+  const o = even
+    ? outfit({
+        skin,
+        hair,
+        coat: r.pick([0x1a2440, 0x1d2f52]),
+        coat2: 0x2a4a8a,
+        vest: r.pick([0x3a4458, 0x2e3648, 0x34405a]),
+        shirt: 0x1a1e26,
+        tie: 0xc9d1dc,
+        pants: 0x1e2230,
+        shoes: 0x0e0e10,
+        hat: r.pick([0x2a3448, 0x232c3e]),
+        hatband: 0x111622,
+        accent: 0xc9d1dc,
+        armband: 0x0c1426,
+        dress: 0x15181f,
+        eyes: r.pick(EYES),
+      })
+    : outfit({
+        skin,
+        hair,
+        coat: r.pick([0x161418, 0x1e1a1c]),
+        coat2: 0x8e1b22,
+        vest: r.pick([0x3a2a2c, 0x2e2426, 0x40282a]),
+        shirt: 0x161418,
+        tie: 0xd4a640,
+        pants: 0x18161a,
+        shoes: 0x0e0d0d,
+        hat: r.pick([0x2a2224, 0x221c1e]),
+        hatband: 0x8e1b22,
+        accent: 0xd4a640,
+        armband: 0x2a0a0d,
+        dress: 0x161416,
+        eyes: r.pick(EYES),
+      });
+  o.metal = MB.accent | MB.vest | MB.hat;
+  const style = base('m', 'armor', {
+    armband: true,
+    head: headFor(r, 'm', ['none', 'stubble', 'full', 'goatee']),
+    hair: 'buzz',
+    hat: 'helmet',
+    face: 'none',
+    legs: 'armor',
+    feet: 'kneepad',
+    hands: 'tac',
+    scale: r.range(1.03, 1.06),
+    idle: r.pick<IdleKind>(['belt', 'behind', 'crossed']),
+    oneHand: false,
+  });
   return { style, outfit: o, neon: even ? NEON.CYAN : NEON.RED };
 }
 
