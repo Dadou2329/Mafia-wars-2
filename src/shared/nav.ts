@@ -563,9 +563,10 @@ export class NavGrid {
 
   /**
    * Chemin de (sx, sy, sz) à (tx, ty, tz). Renvoie une liste de points [x, z, y, portail, …]
-   * lissée, ou null. `maxNodes` borne le coût de la recherche.
+   * lissée, ou null. `maxNodes` borne le coût de la recherche. `dense` : sans lissage (un point
+   * par case de la grille), pour se dégager d'un passage où l'on reste coincé.
    */
-  findPath(sx: number, sz: number, sy: number, tx: number, tz: number, ty: number, maxNodes = 40000): NavPath | null {
+  findPath(sx: number, sz: number, sy: number, tx: number, tz: number, ty: number, maxNodes = 40000, dense = false): NavPath | null {
     this.ensureBuffers();
     const g = this.g!;
     const parent = this.parent!;
@@ -687,7 +688,17 @@ export class NavGrid {
         const [ax, az] = this.nodeCenter(nodes[anchor]);
         const ay = this.nodeY(nodes[anchor]);
         let next = anchor + 1;
-        for (let j = Math.min(s - 1, anchor + 40); j > anchor + 1; j--) {
+        // pas de raccourci à travers un changement de hauteur (escaliers, marches, trémies) : la
+        // ligne droite y couperait le coin de la volée et buterait sur son bord
+        let lim = Math.min(s - 1, anchor + 40);
+        if (dense) lim = anchor + 1;
+        else
+          for (let j = anchor + 1; j <= lim; j++)
+            if (Math.abs(this.nodeY(nodes[j]) - ay) > 0.3) {
+              lim = Math.max(anchor + 1, j - 1);
+              break;
+            }
+        for (let j = lim; j > anchor + 1; j--) {
           const [bx, bz] = this.nodeCenter(nodes[j]);
           if (this.lineWalkable(ax, az, bx, bz, 1, ay, this.nodeY(nodes[j]))) {
             next = j;

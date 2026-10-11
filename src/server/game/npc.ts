@@ -304,9 +304,15 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
           ai.pathI = 0;
         } else if (g.pathBudget > 0) {
           const t0 = performance.now();
-          const p = nav.findPath(e.x, e.z, e.y, goal.x, goal.z, gy, 25000);
+          const dense = g.time < ai.denseUntil;
+          let p = nav.findPath(e.x, e.z, e.y, goal.x, goal.z, gy, 25000, dense);
+          // rien trouvé de mieux qu'ici (cul-de-sac : la cible est derrière un mur, le bon passage
+          // est loin) : une recherche bien plus large, si le budget de l'image le permet
+          if (!p && g.pathBudget > 3) p = nav.findPath(e.x, e.z, e.y, goal.x, goal.z, gy, 300000, dense);
           g.pathBudget -= performance.now() - t0 + 0.05;
-          ai.path = p ?? [goal.x, goal.z, gy, -1];
+          // pas de chemin : on est déjà au plus près de la cible (derrière un comptoir, dans une
+          // autre pièce close…) ; on attend sur place plutôt que de foncer dans le mur
+          ai.path = p ?? [e.x, e.z, e.y, -1];
           ai.pathI = 0;
         }
         ai.pathGoalX = goal.x;
@@ -418,6 +424,13 @@ export function moveTo(g: Game, e: Ent, goal: Vec2 | null, run: boolean, dt: num
   const wanted = Math.hypot(wantX, wantZ);
   if (wanted > 0.5 && moved < wanted * dt * 0.25) ai.stuck += dt;
   else ai.stuck = Math.max(0, ai.stuck - dt * 2);
+  // coincé (coin d'escalier, bord de marche, voisin) : on repart en suivant la grille case par
+  // case, sans raccourci, pendant quelques secondes
+  if (ai.stuck > 1 && g.time >= ai.denseUntil) {
+    ai.denseUntil = g.time + 8;
+    ai.path = null;
+    ai.repathAt = 0;
+  }
   if (ai.stuck > 3) {
     ai.path = null;
     ai.stuck = 0;

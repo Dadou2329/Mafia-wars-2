@@ -6,6 +6,7 @@ import type { ClientAction, PrivateState, PublicState, Slot } from '../../shared
 import type { Game } from './Game';
 import { createHq } from './hq';
 import { conquestModule } from './conquest';
+import { createElevators } from './elevator';
 
 export interface GameModule {
   /** À chaque pas de simulation (20 Hz), après les PNJ. */
@@ -25,7 +26,7 @@ export interface GameModule {
  * Fabriques des modules, dans l'ordre d'appel : chaque système ajoute ici sa fabrique
  * (import en tête de fichier, une ligne dans la liste).
  */
-const FACTORIES: ((g: Game) => GameModule)[] = [createHq, conquestModule];
+const FACTORIES: ((g: Game) => GameModule)[] = [createHq, conquestModule, createElevators];
 
 export function createModules(g: Game): GameModule[] {
   return FACTORIES.map((make) => make(g));

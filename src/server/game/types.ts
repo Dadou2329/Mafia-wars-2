@@ -54,6 +54,8 @@ export interface AiState {
   ride: { until: number; x: number; y: number; z: number } | null;
   repathAt: number;
   stuck: number;
+  /** Jusqu'à quand suivre la grille case par case (après un blocage). */
+  denseUntil: number;
   lastX: number;
   lastZ: number;
   run: boolean;

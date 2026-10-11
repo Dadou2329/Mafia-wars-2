@@ -387,6 +387,7 @@ export class Game {
       ride: null,
       repathAt: 0,
       stuck: 0,
+      denseUntil: 0,
       lastX: 0,
       lastZ: 0,
       run: false,

@@ -7,6 +7,7 @@ import { createCyberUi } from './cyberUi';
 import { createAbilityHud } from './abilityHud';
 import { createConquestClient } from './conquestClient';
 import { createHqVisuals } from './hqVisuals';
+import { createElevatorClient } from './elevatorClient';
 
 /** Interaction contextuelle proposée au joueur (touche d'interaction). */
 export interface Interaction {
@@ -47,6 +48,7 @@ const FACTORIES: ((gc: GameClient) => ClientModule)[] = [
   createAbilityHud,
   createConquestClient,
   createHqVisuals,
+  createElevatorClient,
 ];
 
 export function createClientModules(gc: GameClient): ClientModule[] {

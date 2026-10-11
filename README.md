@@ -164,6 +164,8 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
   lourdes) et **dégâts de chute**. La caméra vit avec le mouvement : champ de vision selon la
   vitesse, roulis en course murale, creux à la réception. **V** bascule entre la vue subjective
   (bras, armes et implants visibles) et la vue à la 3e personne à tout moment.
+- **Ascenseurs** : dans les tours, penthouses et sièges de société, **E** devant une porte
+  d’ascenseur puis le numéro de l’étage (hall, étages, toit).
 - **Implants cybernétiques** (47 implants, 13 emplacements : bras gauche et droit, trois
   modules de jambes, deux de torse, colonne vertébrale, deux d’yeux, peau, deux de système
   neuronal) : ils s’achètent, s’installent et s’améliorent dans une **clinique cybernétique**
@@ -330,6 +332,9 @@ node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playw
 node tests/rematch.mjs # réseau : salon, reconnexion (implants compris), pause, fin, revanche
 node tests/join-lan.mjs # deux serveurs (deux exécutables) : rejoindre l’hôte avec code + adresse
 node tests/tunnel.mjs   # lien Internet (faux cloudflared) : annoncé, copié, collé
+npx tsx tests/nav-stress.ts  # PNJ : 60 trajets à travers la ville (CROWD=10 : escouades)
+npx tsx tests/elevator.ts    # ascenseurs des parrains (serveur)
+node tests/elevator-ui.mjs   # ascenseur dans le vrai client (invite, choix de l’étage)
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
 node tests/tour.mjs    # visite photographique de la ville (heures, pluie, tirs)
 node tests/audio/smoke.mjs  # moteur audio

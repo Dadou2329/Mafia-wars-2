@@ -68,7 +68,7 @@ export interface ElevatorStop {
   x: number;
   z: number;
   y: number;
-  yaw: number; // vers la porte
+  yaw: number; // dos à la porte (face à l'étage)
   label: string;
 }
 

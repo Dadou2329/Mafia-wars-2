@@ -330,6 +330,8 @@ export type ClientAction =
    */
   | { a: 'op'; b: number; k: string; ok?: boolean }
   | { a: 'interact'; what: string }
+  /** Ascenseur : immeuble, index de l'arrêt (étage) demandé. */
+  | { a: 'elevator'; b: number; to: number }
   | { a: 'rematch' }
   /** Outil de test : téléportation (serveur lancé avec MW_DEBUG=1 uniquement). */
   | { a: 'debugTp'; x: number; z: number; y?: number; yaw?: number; dayTime?: number; rain?: number }
