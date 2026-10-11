@@ -469,6 +469,8 @@ export class CyberClient {
     this.overlay?.setVision?.(mode);
     const chars = this.gc.chars as unknown as { setVision?: (m: VisionMode) => void };
     chars.setVision?.(mode);
+    // bras en vue subjective : couleurs de chaleur en vision thermique
+    (this.gc.viewmodel as unknown as { setVision?: (m: VisionMode) => void }).setVision?.(mode);
   }
 
   get visionMode(): VisionMode {

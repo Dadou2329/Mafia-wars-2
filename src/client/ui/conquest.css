@@ -23,7 +23,8 @@
   color: var(--text);
   pointer-events: none;
 }
-.mw-op-panel.hidden {
+.mw-op-panel.hidden,
+.mw-op-panel.behind {
   display: none;
 }
 /* écrans étroits : entre le panneau de la mafia (gauche) et la mini-carte (droite) */

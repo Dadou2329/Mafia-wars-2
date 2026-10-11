@@ -593,6 +593,8 @@ export class ConquestClient implements ClientModule {
       }
     }
     this.renderPanel(bid);
+    // le piratage (modal) affiche lui-même l'étape : le panneau s'efface derrière
+    this.panel.classList.toggle('behind', this.hack.open);
     this.placeMarkers(bid);
   }
 
