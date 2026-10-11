@@ -262,9 +262,11 @@ console.log('\nBras : répulseur, arc électrique, micro-roquettes');
   const fwd = { x: Math.sin(bossD.yaw), z: Math.cos(bossD.yaw) };
   const a = dummy(bossD.x + fwd.x * 3, bossD.z + fwd.z * 3);
   const b = dummy(bossD.x - fwd.x * 3, bossD.z - fwd.z * 3);
+  // PV relevés juste avant : pendant la mise en place, un homme de Dadou a pu tirer sur les cibles
+  const bHp = b.hp;
   const ev = events(() => g.action('dadou', { a: 'ab', id: 'repulseur', d: [fwd.x, 0, fwd.z] }));
   check('répulseur : la cible devant est touchée et projetée', a.hp < a.maxHp && !!a.knock, `PV ${a.hp}`);
-  check('répulseur : rien derrière', b.hp === b.maxHp);
+  check('répulseur : rien derrière', b.hp === bHp && !ev.all.some((e) => e.t === 'ab' && e.ab === 'repulseur' && e.targets?.includes(b.id)), `PV ${bHp} → ${b.hp}`);
   check('répulseur : effet diffusé', ev.all.some((e) => e.t === 'ab' && e.ab === 'repulseur' && e.targets?.includes(a.id)));
   steps(10);
   give('dadou', 'choc', 2, 'brasG');

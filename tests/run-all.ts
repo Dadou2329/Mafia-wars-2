@@ -549,10 +549,14 @@ for (let i = 0; i < 400 && !ev; i++) {
   g.step();
   drain();
   if (g.activeEvent?.kind === 'contraband') ev = g.activeEvent;
-  else if (g.activeEvent) {
-    g.activeEvent.until = g.time;
-    g.step();
-    drain();
+  else {
+    if (g.activeEvent) {
+      g.activeEvent.until = g.time;
+      g.step();
+      drain();
+    }
+    // y compris quand aucun événement n'a pu commencer (un convoi est déjà sur la route) : le
+    // jeu repousse alors le suivant de quelques minutes
     (g as unknown as { eventAt: number }).eventAt = 0;
   }
 }
