@@ -4,6 +4,10 @@
 // avec les achats, améliorations, installations et retraits. Hors station : consultation
 // seulement. L'état affiché vient toujours du serveur (état privé, 2 Hz) : les actions donnent
 // un retour immédiat (« en cours… ») que confirme l'état suivant.
+// Ouvert, l'écran garde le clavier (Échap / I ferment, flèches pour naviguer) ; il se ferme si le
+// parrain, immobile pendant ce temps, est blessé. L'aperçu 3D (characters/preview.ts) vit le
+// temps de l'ouverture (contexte WebGL rendu à la fermeture) ; en qualité « basse » ou en cas
+// d'échec, une silhouette holographique le remplace.
 // Le module tient aussi l'itinéraire vers une clinique (balise lumineuse et repère sur la
 // mini-carte), demandé depuis cet écran ou depuis le téléphone.
 
@@ -1378,14 +1382,14 @@ export class CyberUi implements ClientModule {
       if (at !== this.selSlot) {
         const busy = pend?.op === 'equip' && pend.id === def.id;
         const why = busy ? null : pend ? busyWhy : !station ? offWhy : null;
-        row.appendChild(this.button(two(at ? 'Déplacer ici' : 'Installer', SLOT_BY_ID[this.selSlot].label, 'equip'), `ghost cy-install${busy ? ' pending' : ''}`, () => this.equip(def, this.selSlot), why));
+        row.appendChild(this.button(two(at ? 'Déplacer ici' : 'Installer', slotTag(this.selSlot), 'equip'), `ghost cy-install${busy ? ' pending' : ''}`, () => this.equip(def, this.selSlot), why));
         if (occupant) notes.push(h('div', { class: 'cy-note warn' }, `Remplace : ${IMPLANT_BY_ID[occupant].name} (niv. ${c.owned[occupant] ?? 1}), qui retourne dans votre réserve.`));
         if (at) notes.push(h('div', { class: 'cy-note' }, `Quitte l’emplacement : ${SLOT_BY_ID[at].label}.`));
       }
       if (at) {
         const busy = pend?.op === 'unequip' && pend.slot === at;
         const why = busy ? null : pend ? busyWhy : !station ? offWhy : null;
-        row.appendChild(this.button(two('Retirer', SLOT_BY_ID[at].label, 'unequip'), `ghost cy-remove${busy ? ' pending' : ''}`, () => this.unequip(at), why));
+        row.appendChild(this.button(two('Retirer', slotTag(at), 'unequip'), `ghost cy-remove${busy ? ' pending' : ''}`, () => this.unequip(at), why));
       }
     }
     box.appendChild(row);

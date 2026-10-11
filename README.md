@@ -129,6 +129,42 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
   matraque électrique et poings ; **grenades** (touche G, en vente à l’armurerie du QG) dont le
   souffle blesse vos ennemis et brise les vitres. On se bat dans la rue, à l’intérieur, dans
   les étages, sur les toits et dans le métro.
+- **Déplacements** : accélération et freinage francs, sprint, accroupi (appui bref : bascule ;
+  appui long : maintenu), **glissade** (C en sprintant ; on peut tirer et sauter en sortie),
+  saut avec temps de grâce (relâcher tôt = saut plus court), **escalade des rebords** (sauter
+  contre un rebord pour s’y hisser), réceptions amorties (caméra, ralentissement des chutes
+  lourdes) et **dégâts de chute**. La caméra vit avec le mouvement : champ de vision selon la
+  vitesse, roulis en course murale, creux à la réception. **V** bascule entre la vue subjective
+  (bras, armes et implants visibles) et la vue à la 3e personne à tout moment.
+- **Implants cybernétiques** (47 implants, 13 emplacements : bras gauche et droit, trois
+  modules de jambes, deux de torse, colonne vertébrale, deux d’yeux, peau, deux de système
+  neuronal) : ils s’achètent, s’installent et s’améliorent dans une **clinique cybernétique**
+  (sept en ville, réparties à égalité) ou à la **station cybernétique du QG** (amélioration).
+  Chaque niveau porte le nom de sa gamme : Standard, Avancé, Militaire, Prototype, Légendaire.
+  L’écran **CYBERNÉTIQUE** (touche **I**) montre votre parrain en 3D, l’emplacement choisi mis en
+  valeur, les implants de chaque catégorie, leurs effets niveau par niveau, la comparaison avec
+  l’implant installé, la commande, le prix et vos fonds ; trois configurations enregistrables
+  (Combat, Mobilité, Infiltration), à appliquer dans une clinique ou au QG. Quelques exemples :
+  - **Bras** (touche F à gauche, X à droite) : **grappin** (le câble vous hisse jusqu’aux toits,
+    balancement et élan conservé, enchaînements en l’air aux meilleurs niveaux), **pistolet
+    d’avant-bras** (le blindage s’ouvre, le canon sort ; munitions recyclées), **lame**, **poing
+    hydraulique** (coups chargés qui projettent), **fouet monofilament**, **bouclier
+    d’énergie** (maintenir la touche), **répulseur**, **bras électrique Tesla** (l’arc saute
+    d’ennemi en ennemi et grille caméras et tourelles), **micro-roquettes**, **bras tactique**
+    (piratage accéléré ou à distance), **grip magnétique** (rebords plus hauts, escalade).
+  - **Jambes** : pistons de saut, double saut, bond chargé (accroupi puis saut), sprint
+    cybernétique, **esquive** (touche Z), glissade améliorée, amortisseurs (atterrissage
+    sismique), **course murale**, saut mural, semelles silencieuses.
+  - **Torse, colonne, yeux, peau, système neuronal** : blindage, cœur de secours, surcharge
+    défensive, nanobots ; colonne gyroscopique (plané), réflexes moteurs, treuil spinal ;
+    **vision thermique** et **nocturne** (touche N), marqueur de cibles, scanner ; derme renforcé,
+    **camouflage optique** ; assistance de visée, **accélérateur de réflexes** (effets
+    personnels : cadence, vitesse, protection — le monde ne ralentit pas), conscience tactique,
+    **drone de combat**, commandement neuronal. Les capacités se déclenchent avec T, Y, H, J, U.
+  Les implants installés se voient sur le personnage, en 3e personne comme en vue subjective, et
+  l’adversaire les voit aussi. Le serveur valide tout (recharges, portées, vitesses) ; aucune
+  combinaison ne rend invincible. Pas d’entretien, de rejet ni de dépendance. Le catalogue
+  complet, niveau par niveau, est dans [docs/IMPLANTS.md](docs/IMPLANTS.md).
 - **Prendre le contrôle d’un bâtiment** : plus de capture par simple présence. Chaque bâtiment a
   son opération, menée sur place, dont la difficulté suit son importance : un objectif court pour
   une boutique (prendre le comptoir), deux ou trois étapes pour un bâtiment clé, l’assaut le plus
@@ -149,6 +185,16 @@ Toutes les touches sont modifiables dans **Paramètres → Commandes** (détecti
 - **Recrutement** : auprès du rabatteur du QG (« Recruter 1 / 5 / 10 »), lieutenants
   supplémentaires, améliorations (pistolets, pistolets-mitrailleurs, fusils à rail, gilets en
   graphène, implants de visée, hackers, liaison cryptée, armurerie, drones…).
+- **Améliorations du QG** (carte stratégique) : carte holographique avancée, surveillance
+  tactique, terminal de recrutement automatique, sécurité renforcée, communications avancées,
+  station cybernétique, armurerie avancée, module de transport personnel, salle des trophées,
+  gardes d’élite, module de commande de drones, centre d’opérations stratégiques. Chacune agit
+  vraiment (alertes et révélations, recrutement, tourelles, installation d’implants au QG, prix
+  de l’armurerie, taxi gratuit, revenus de prestige, gardes blindés, drone de patrouille,
+  opérations plus rapides…) et **change le bureau en 3D** : table holographique, mur d’écrans,
+  fauteuil chirurgical, râtelier d’armes, piste d’atterrissage, vitrine de trophées qui se
+  remplit… Elles suivent le parrain quand il déménage ; le rival les découvre s’il s’introduit
+  dans le QG.
 - **Économie** : chaque bâtiment rapporte un revenu par minute, plus un bonus par quartier.
   Le tableau de bord affiche Argent, Revenus, Hommes et Territoires.
 - **L’ascension** : on ne décore rien, le jeu meuble tout. Chaque parrain gravit cinq paliers en
@@ -205,13 +251,24 @@ src/
     glass.ts           verre destructible
     protocol.ts        messages réseau, instantanés binaires
     constants.ts       règles : économie, paliers, véhicules, améliorations, ordres
+    implants.ts        catalogue des 47 implants (emplacements, gammes, paramètres de jeu)
+    moveMods.ts        déplacements selon les implants (client et validation du serveur)
+    conquest.ts        opérations de prise de contrôle par type de bâtiment
   server/
     main.ts room.ts    serveur HTTP + Socket.IO, salons, reconnexion, revanche
     game/              simulation : IA, escouades, police, véhicules, sécurité, convois, victoire
+      cyber.ts         implants : achat, amélioration, installation, configurations
+      abilities.ts     capacités, armes de bras, protections, chutes, allure tolérée
+      conquest.ts      opérations sur les bâtiments (étapes, lieutenants, défense)
+      hq.ts            améliorations du QG, cliniques cybernétiques
+      modules.ts       systèmes greffés à la simulation
   client/
     ui/screens/        menu, salon, paramètres, commandes, aide, chargement, pause, victoire
-    game/              joueur, conduite, armes, HUD, téléphone, cartes, roue des ordres,
-                       écrans géants, circulation, passants, portes, enseignes, verre
+    game/              joueur (déplacements), conduite, armes, HUD, téléphone, cartes, roue des
+                       ordres, écrans géants, circulation, passants, portes, enseignes, verre ;
+                       implants du joueur (cyberClient), effets et surimpressions (cyberFx,
+                       cyberOverlay), écran CYBERNÉTIQUE (cyberUi), HUD des capacités,
+                       conquête (conquestClient), bureau du QG (hqVisuals)
     render/            maillage voxel, éclairage en tuiles, ciel, pluie, horizon, hologrammes, eau
     world/             chargement : workers de génération, de maillage et d’éclairage
     characters/        personnages voxel fins (squelette, sculpture, visages, tenues), animation
@@ -226,14 +283,22 @@ tests/                 tests automatiques
 
 ```bash
 npm run typecheck      # vérification TypeScript stricte
-npm test               # 148 contrôles sans navigateur : moteur (compression des voxels,
-                       # maillage, navigation et éclairage en tuiles comparés aux versions de
-                       # référence), génération, navigation, simulation (ordres → combats →
-                       # captures), ascension, véhicules, sécurité, braquages, drones, convois,
-                       # verre, NYPD, grenades, événements, victoire, textes
+npm test               # sans navigateur : moteur (compression des voxels, maillage,
+                       # navigation et éclairage en tuiles comparés aux versions de référence),
+                       # génération, simulation (ordres → combats → opérations), ascension,
+                       # véhicules, sécurité, braquages, drones, convois, verre, NYPD, grenades,
+                       # événements, victoire, textes ; déplacements (glissade, rebords, double
+                       # saut, esquive, course murale, escalade, bond, grappin jusqu'au toit,
+                       # enchaînements) et capacités côté serveur (achats, installation,
+                       # grappin, esquive, protections, bouclier, cœur de secours, répulseur, arc
+                       # électrique, roquettes, camouflage, chutes, armes de bras, drone)
+npx tsx tests/conquest.ts    # prise de contrôle : étapes, lieutenants, défense, piratage, QG
+npx tsx tests/hq.ts          # améliorations du QG et cliniques
+node tests/cyber-moves.mjs   # implants en partie (grappin, esquive, glissade, armes, visions)
+node tests/cyber-ui.mjs      # écran CYBERNÉTIQUE : achat, amélioration, installation
 npx tsx tests/plan-check.ts  # cohérence et symétrie du plan de la ville
 node tests/e2e.mjs     # parcours de bout en bout dans un vrai navigateur (Playwright)
-node tests/rematch.mjs # réseau : salon, reconnexion, pause, fin de partie, revanche
+node tests/rematch.mjs # réseau : salon, reconnexion (implants compris), pause, fin, revanche
 node tests/drive.mjs   # conduite et téléphone dans le vrai client
 node tests/tour.mjs    # visite photographique de la ville (heures, pluie, tirs)
 node tests/audio/smoke.mjs  # moteur audio
@@ -249,13 +314,34 @@ Ce qui fonctionne : salon en ligne à deux joueurs (choix exclusif des parrains,
 revanche), New York 2085 générée et visitable (intérieurs meublés, immeubles à plusieurs étages,
 toits, métro), 1re et 3e personne, combats (pistolet, pistolet-mitrailleur, fusil à pompe, fusil à
 rail, lame thermique, matraque électrique, poings), grenades, IA des gangsters, gangs locaux, policiers,
-tourelles et lieutenants, ordres exécutés physiquement, captures, territoires, économie,
-améliorations, ascension sur cinq paliers avec déménagement du QG, véhicules terrestres et
-aéronef, téléphone, piratage, braquages, convois, drones, police, événements, météo, verre
-destructible, journal, victoire et revanche, paramètres graphiques, sonores et touches
-modifiables.
+tourelles et lieutenants, ordres exécutés physiquement, prise de contrôle des bâtiments par
+opérations, territoires, économie, améliorations, ascension sur cinq paliers avec déménagement
+du QG, véhicules terrestres et aéronef, téléphone, piratage, braquages, convois, drones, police,
+événements, météo, verre destructible, journal, victoire et revanche, paramètres graphiques,
+sonores et touches modifiables ; depuis la mise à jour cybernétique : 47 implants visibles et
+fonctionnels, déplacements avancés, écran CYBERNÉTIQUE, cliniques, douze améliorations du QG
+visibles dans le bureau.
 
 Limites actuelles, en toute transparence :
+
+- **Implants et nouveaux déplacements vérifiés surtout sans navigateur.** Les déplacements,
+  les capacités, les opérations et le QG ont leurs tests automatiques ; dans le vrai client,
+  le grappin, l’esquive, la glissade, le pistolet d’avant-bras, le camouflage et les visions
+  ont été vérifiés en rendu logiciel, à très faible cadence (quelques images par seconde) :
+  la sensation de jeu (accélérations, caméra, rythme des enchaînements) n’a pas pu être jugée à
+  60 images par seconde sur une vraie carte graphique. Les sons n’ont pas été écoutés (contrôlés
+  par mesure). Le mini-jeu de piratage n’a pas été joué à la main.
+- Les implants sont réservés aux deux parrains : les PNJ n’en portent pas (les gardes d’élite
+  sont blindés, sans implants). Le drone de combat peut être abattu par l’autre joueur ; les PNJ
+  l’ignorent.
+- Les « portes à badge » du bras tactique et les « portes renforcées » du poing hydraulique
+  agissent sur les étapes des opérations (chambres fortes, portes, barricades) : la ville n’a
+  pas d’autres portes verrouillées.
+- Le camouflage optique et le bouclier sont des effets lumineux (pas de véritable réfraction) ;
+  le filament du fouet est une traînée, pas une corde simulée. Sous les longs manteaux, les
+  implants des cuisses sont cachés (ceux des tibias et des pieds restent visibles).
+- Les meubles ajoutés au bureau par les améliorations ne bloquent que le joueur (les PNJ et les
+  balles les traversent) ; la moto volante de la piste d’atterrissage est décorative.
 
 - **Carte graphique indispensable.** Sur une machine sans accélération matérielle (rendu
   logiciel), le jeu tombe à environ une image par seconde. Tout le développement automatisé a été

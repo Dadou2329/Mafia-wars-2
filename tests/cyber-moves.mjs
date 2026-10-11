@@ -156,10 +156,12 @@ check('grappin : accroché puis hissé', grappling === 'grapple' && y1 > y0 + 5,
 await sleep(1500);
 const tp1 = await A.evaluate(() => window.__app.game.priv.tp);
 check('le serveur accepte le trajet (aucun recalage)', tp1 === tp0, `tp ${tp0} → ${tp1}`);
+// dernier instantané du serveur pour mon parrain (la vue locale n'est pas interpolée)
+await sleep(1500);
 const seen = await A.evaluate(() => {
   const g = window.__app.game;
   const e = g.store.ents.get(g.selfId);
-  return e ? e.y : null;
+  return e && e.buf.length ? e.buf[e.buf.length - 1].s.y : null;
 });
 check('position confirmée par le serveur', seen !== null && Math.abs(seen - y1) < 1.5, `serveur ${seen?.toFixed(1)} / client ${y1.toFixed(1)}`);
 await shot('03-after-grapple.png');
@@ -207,13 +209,22 @@ await A.keyboard.press('KeyX');
 await sleep(500);
 
 console.log('=== Camouflage et vision');
+await A.evaluate(() => {
+  window.__abs = [];
+  window.__app.net.on('ev', (evs) => {
+    for (const e of evs) if (e.t === 'ab') window.__abs.push(e.ab);
+  });
+});
 await A.keyboard.press('KeyY');
-// bits visibles de mon parrain dans le dernier instantané du serveur
-await waitGame(() => {
+// la touche n'est lue qu'à l'image suivante (rendu logiciel : plusieurs secondes)
+await A.waitForFunction(() => window.__abs.includes('camouflage'), null, { timeout: 120000, polling: 100 }).catch(() => undefined);
+// bits visibles de mon parrain dans le dernier instantané du serveur (temps réel : le
+// serveur avance à vitesse normale, le client en rendu logiciel bien plus lentement)
+await A.waitForFunction(() => {
   const g = window.__app.game;
   const e = g.store.ents.get(g.selfId);
   return !!e && e.buf.length > 0 && (e.buf[e.buf.length - 1].s.fx & 4) !== 0;
-}, null, 2);
+}, null, { timeout: 4000, polling: 100 }).catch(() => undefined);
 const camo = await A.evaluate(() => {
   const g = window.__app.game;
   const e = g.store.ents.get(g.selfId);
@@ -221,7 +232,7 @@ const camo = await A.evaluate(() => {
 });
 check('camouflage confirmé par le serveur (bit visible)', camo !== 0);
 await A.keyboard.press('KeyN');
-await sleep(800);
+await A.waitForFunction(() => window.__app.game.cyber.visionMode !== 'normal', null, { timeout: 120000, polling: 100 }).catch(() => undefined);
 const vision = await A.evaluate(() => window.__app.game.cyber.visionMode);
 check('N : vision thermique', vision === 'thermal', vision);
 await shot('06-thermal.png');
