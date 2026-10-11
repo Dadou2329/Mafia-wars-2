@@ -205,7 +205,7 @@ tests/                 tests automatiques
 
 ```bash
 npm run typecheck      # vérification TypeScript stricte
-npm test               # 147 contrôles sans navigateur : moteur (compression des voxels,
+npm test               # 148 contrôles sans navigateur : moteur (compression des voxels,
                        # maillage, navigation et éclairage en tuiles comparés aux versions de
                        # référence), génération, navigation, simulation (ordres → combats →
                        # captures), ascension, véhicules, sécurité, braquages, drones, convois,

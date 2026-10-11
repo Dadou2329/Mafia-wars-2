@@ -169,10 +169,12 @@ reflectedLight.indirectDiffuse += diffuseColor.rgb * ambientLight(gL, wn, vWPos)
 totalEmissiveRadiance += gEm;
 vec3 vdir = normalize(cameraPosition - vWPos);
 float fres = pow(1.0 - max(dot(vdir, wn), 0.0), 3.0);
+// (lu hors de la branche : pas d'échantillonnage à dérivées implicites dans un « if »)
+vec3 lampO = lampColorAt(vWPos);
 if (gSpec > 0.0) {
   // reflet : ciel (zénith sur les toits et capots, rue et façades sur les flancs) et lampes
   vec3 R = reflect(-vdir, wn);
-  vec3 env = skyReflect(R, 0.05) * gL.x * 1.1 + lampColorAt(vWPos) * gL.y * 0.8;
+  vec3 env = skyReflect(R, 0.05) * gL.x * 1.1 + lampO * gL.y * 0.8;
   reflectedLight.indirectDiffuse += gSpec * (0.2 + fres) * env * 0.45;
 #if NUM_DIR_LIGHTS > 0
   // éclat du soleil ou de la lune (verre, chrome, carrosseries)

@@ -55,7 +55,10 @@ if (moto) {
     return d ? { x: d.pos.x, z: d.pos.z, speed: d.speed } : null;
   });
   console.log('après accélération :', JSON.stringify(st));
-  await sleep(2500);
+  // on ne descend qu'à l'arrêt ou presque (le serveur refuse au-dessus de 5 m/s) : à une image par
+  // seconde en rendu logiciel, la moto met plus longtemps à ralentir
+  await A.waitForFunction(() => Math.abs(window.__app.game.player.drive?.speed ?? 0) < 2.5, null, { timeout: 30000 }).catch(() => {});
+  await sleep(1000);
   await A.keyboard.press('KeyE');
   await sleep(1500);
   console.log('à pied :', await A.evaluate(() => !window.__app.game.player.drive));

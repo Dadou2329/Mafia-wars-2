@@ -1135,20 +1135,29 @@ function streetFurniture(ctx: GenContext, g: GroundAt, rng: Rng): void {
     add(x, z);
     n++;
   }
-  // ---------------------------------------------- arbres d'alignement (sauf Midtown et Wall Street)
-  for (let i = 0; i < Math.round(160 * AREA_K); i++) {
-    const x = rng.range(4, WORLD_W - 6);
-    const z = rng.range(8, WORLD_D - 8);
-    const d = districtAt(x, z).id;
-    if (d === 'midtown' || d === 'wallstreet') continue;
-    if (g(x, z) !== GM.SIDEWALK || !free(x, z, 2.2) || !far(x, z, 6)) continue;
-    if (!curbNear(x, z, 1.2)) continue;
-    const w = ctx.world;
-    const vx = Math.floor(x * INV_VOXEL);
-    const vz = Math.floor(z * INV_VOXEL);
-    w.fill(vx - 2, GROUND_VY, vz - 2, vx + 2, GROUND_VY + 1, vz + 2, M.TREE_GRATE);
-    tree(w, vx, GROUND_VY + 1, vz, rng, 0.75, d === 'chinatown' && rng.chance(0.4));
-    add(x, z);
+  // ---------------------------------------------- arbres d'alignement le long des trottoirs, à 1,25 m de la
+  // bordure, en quinconce d'un côté à l'autre (sauf Midtown et Wall Street, tout en béton)
+  for (const r of ROADS) {
+    if (r.name.startsWith('Pont')) continue;
+    const [x0, z0, x1, z1] = r.rect;
+    const along = r.axis === 'z';
+    const len = along ? z1 - z0 : x1 - x0;
+    for (const side of [0, 1]) {
+      for (let s = side === 0 ? 11 : 18.5; s < len - 6; s += 15) {
+        const x = along ? (side === 0 ? x0 - 1.25 : x1 + 1.25) : x0 + s;
+        const z = along ? z0 + s : side === 0 ? z0 - 1.25 : z1 + 1.25;
+        const d = districtAt(x, z).id;
+        if (d === 'midtown' || d === 'wallstreet') continue;
+        if (g(x, z) !== GM.SIDEWALK || !free(x, z, 1.1) || !far(x, z, 4.5)) continue;
+        if (!rng.chance(0.8)) continue;
+        const w = ctx.world;
+        const vx = Math.floor(x * INV_VOXEL);
+        const vz = Math.floor(z * INV_VOXEL);
+        w.fill(vx - 2, GROUND_VY, vz - 2, vx + 2, GROUND_VY + 1, vz + 2, M.TREE_GRATE);
+        tree(w, vx, GROUND_VY + 1, vz, rng, 0.75, d === 'chinatown' && rng.chance(0.4));
+        add(x, z);
+      }
+    }
   }
   // ---------------------------------------------- néons de rue (Chinatown, Times Square, Downtown, Brooklyn)
   const neon = new Set<DistrictId>(['chinatown', 'midtown', 'les', 'village', 'williamsburg', 'bushwick']);

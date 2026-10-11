@@ -60,11 +60,12 @@ vec2 sampleLightVol(vec3 p) {
   vec2 e = min(q.xz - uLightWin.xy, uLightWin.zw - q.xz);
   float f = clamp(min(e.x, e.y) * 0.25, 0.0, 1.0);
   vec2 L = vec2(1.0, 0.0);
-  if (f < 1.0) L = texture(uLightCoarse, clamp(q / uLightCoarseSize, vec3(0.0005), vec3(0.9995))).rg;
+  // textureLod (volumes sans mipmaps) : pas de dérivées dans les branches (ANGLE / Direct3D)
+  if (f < 1.0) L = textureLod(uLightCoarse, clamp(q / uLightCoarseSize, vec3(0.0005), vec3(0.9995)), 0.0).rg;
   if (f > 0.0) {
     vec3 uvw = q / uLightSize;
     uvw.y = clamp(uvw.y, 0.0005, 0.9995);
-    L = mix(L, texture(uLightTex, uvw).rg, f);
+    L = mix(L, textureLod(uLightTex, uvw, 0.0).rg, f);
   }
   return L;
 }
@@ -96,12 +97,36 @@ vec3 applyHeightFog(vec3 col, vec3 wpos) {
  * de façades d'en face (brk = hauteur de cette ligne dans le reflet, en sinus d'élévation).
  */
 export const REFLECT_GLSL = /* glsl */ `
+// Teinte brute des lampes (couleur × force, sans normalisation), lue sans dérivées (textureLod) :
+// utilisable dans les branches et les boucles sans que Direct3D aplatisse le code.
+vec3 lampTintLod(vec3 p) {
+  return textureLod(uTintTex, clamp((p - uTintOrigin) / uTintSize, vec3(0.0005), vec3(0.9995)), 0.0).rgb;
+}
 vec3 skyReflect(vec3 R, float brk) {
   vec3 hor = uFogColor * 1.12 + uSkyAmb * 0.1;
   vec3 zen = uSkyAmb * 1.3;
   vec3 sky = mix(hor, zen, smoothstep(0.02, 0.8, R.y));
   vec3 city = mix(vec3(dot(uFogColor, vec3(0.3, 0.5, 0.2))), uFogColor, 0.4) * 0.4 + uSkyAmb * 0.16;
   return mix(city, sky, smoothstep(brk - 0.03, brk + 0.09, R.y));
+}
+// Fenêtres éclairées des immeubles alentour vues dans un reflet (flaques, vitrages ; à pondérer
+// par uNight) : façades virtuelles à 16 m sur l'axe dominant du rayon, travées de 2,25 × 3,5 m,
+// toits de 9 à 45 m. ang = taille angulaire d'un pixel, d0 = distance caméra-surface : au loin,
+// les fenêtres se fondent en une lueur moyenne (pas de scintillement).
+vec3 cityLights(vec3 p, vec3 R, float ang, float d0) {
+  bool ax = abs(R.x) > abs(R.z);
+  float t = 16.0 / max(ax ? abs(R.x) : abs(R.z), 0.08);
+  vec3 q = p + R * t;
+  float u = ax ? q.z : q.x + 517.0;
+  vec2 g = vec2(u / 2.25, q.y / 3.5);
+  vec2 id = floor(g);
+  vec2 f = abs(fract(g) - vec2(0.5, 0.55));
+  float e = ang * (d0 + t) / 2.25 + 0.02;
+  float win = smoothstep(e, -e, f.x - 0.3) * smoothstep(e * 1.5, -e * 1.5, f.y - 0.27);
+  float w = mix(win * step(0.62, h12(id + 0.37)), 0.12, smoothstep(0.12, 0.45, e));
+  vec3 wc = mix(vec3(1.0, 0.7, 0.4), vec3(0.75, 0.86, 1.0), step(0.7, h12(id + 9.1)));
+  float top = 9.0 + 36.0 * h12(vec2(floor(u / 13.5), 7.0));
+  return wc * w * step(0.6, q.y) * step(q.y, top);
 }
 `;
 
@@ -290,13 +315,13 @@ vec3 patStone(vec2 uv, vec3 c1, vec3 c2, float sc, float pw, inout float spec) {
   float r = h12(id);
   float dl = lodf(cs.y, pw);
   float cloud = vnoise(uv * 1.6 + r * 7.0);
-  vec3 col = c1 * (1.0 + (r - 0.5) * (sc == 7.0 ? 0.03 : 0.08) * dl);
+  vec3 col = c1 * (1.0 + (r - 0.5) * (sc == 7.0 ? 0.03 : sc == 0.0 ? 0.12 : 0.08) * mix(0.5, 1.0, dl));
   if (sc == 0.0) {
     col *= 0.93 + 0.12 * cloud + 0.04 * vnoise(uv * 7.0);
     col *= 1.0 - step(0.93, h12(floor(uv / 0.014))) * 0.12 * lodf(0.02, pw);
   } else if (sc == 2.0 || sc == 3.0) {
     col *= pepper(uv, 0.011, 0.42, 0.3, pw) * (0.95 + 0.08 * cloud);
-    if (sc == 2.0) col *= 0.94 + 0.1 * vnoise(uv * 6.0);
+    if (sc == 2.0) col *= 0.94 + 0.1 * cloud;
   } else if (sc == 4.0) {
     col *= 0.88 + 0.22 * cloud;
     col += step(0.975, h12(floor(uv / 0.007))) * 0.1 * lodf(0.012, pw);
@@ -348,7 +373,7 @@ vec3 patPlaster(vec2 uv, vec3 c1, float sc, float pw, float wy, bool wall) {
     col *= 1.0 - 0.1 * leak - 0.05 * ring;
     col = mix(col, col * vec3(0.94, 0.88, 0.76), ring * 0.5);
   } else if (sc == 2.0 && wall) {
-    col *= 0.95 + 0.07 * vnoise(uv * 3.0 + 4.0);
+    col *= 0.96 + 0.06 * m;
     float fy = fract(wy / 0.5);
     col *= 1.0 - 0.28 * jl(min(fy, 1.0 - fy) * 0.5, 0.006, pw) * step(wy, 4.2);
   }
@@ -515,7 +540,7 @@ vec3 patAsphalt(vec2 uv, vec3 c1, vec3 c2, float sc, float pw, inout float spec)
   vec3 col = mix(c2, c1, 0.55 + 0.4 * (big - 0.5) + 0.3 * (mid - 0.5));
   float ag = h12(floor(uv / 0.017));
   float al = lodf(0.025, pw);
-  col *= 1.0 + (step(0.83, ag) * 0.38 - step(ag, 0.12) * 0.22) * al + 0.035 * (1.0 - al);
+  col *= 1.0 + (step(0.83, ag) * 0.3 - step(ag, 0.12) * 0.18) * al + 0.03 * (1.0 - al);
   vec2 pc = floor(uv / 7.0);
   if (h12(pc + 9.1) > 0.68) {
     vec2 o = (pc + 0.08 + 0.35 * vec2(h12(pc + 1.3), h12(pc + 2.7))) * 7.0;
@@ -569,9 +594,9 @@ vec3 patRoof(vec2 uv, vec3 c1, vec3 c2, float pw) {
   float fe = fract(uv.y / 6.0 + h12(vec2(lane, 2.0)));
   vec3 col = c1 * (0.96 + 0.06 * vnoise(uv * 0.45) + 0.05 * (h12(vec2(lane, 0.0)) - 0.5));
   col *= 1.0 + (vnoise(uv * 9.0) - 0.5) * 0.04 * lodf(0.08, pw);
-  float pn = vnoise(uv * 0.28 + 13.0);
-  col = mix(col, c2, smoothstep(0.6, 0.7, pn) * 0.45);
-  col = mix(col, c2 * 0.85, jl(abs(pn - 0.6) * 3.0, 0.006, pw) * 0.5);
+  float pn = vnoise(uv * 0.4 + 13.0);
+  col = mix(col, c2, smoothstep(0.64, 0.72, pn) * 0.28);
+  col = mix(col, c2 * 0.85, jl(abs(pn - 0.64) * 3.0, 0.006, pw) * 0.35);
   vec2 fq = vec2(s - 0.06, fract(uv.y / 0.3) * 0.3 - 0.15);
   col = mix(col, c1 * 0.75, (1.0 - smoothstep(0.012, 0.018, length(fq))) * lodf(0.04, pw) * 0.6);
   col = mix(col, c1 * 1.06, jl(abs(s - 0.06), 0.06, pw) * 0.6);
@@ -799,18 +824,21 @@ vec3 patMarble(vec2 uv, vec3 c1, vec3 c2, float sc, float pw, inout float spec) 
 // Caillebotis : barres porteuses (3 cm), entretoises (10 cm) ; sc 1 grille d'arbre en fonte.
 vec3 patGrate(vec2 uv, vec3 c1, vec3 c2, float sc, float pw) {
   if (sc == 1.0) {
-    vec2 cc = (floor(uv / 1.2) + 0.5) * 1.2;
-    vec2 d = uv - cc;
-    float r = length(d);
-    float a = atan(d.y, d.x);
-    float rings = jl(abs(fract(r / 0.08) - 0.5) * 0.08, 0.012, pw);
-    float spokes = jl(abs(fract(a * 3.8197) - 0.5) * r * 0.26, 0.008, pw);
-    float m = max(rings, spokes) * step(0.18, r) + step(r, 0.18) * 0.0;
-    vec2 f = fract(uv / 1.2);
-    float frame = jl(min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)) * 1.2, 0.03, pw);
-    m = max(m, frame);
-    m = mix(0.45, m, lodf(0.06, pw));
-    return mix(c2, c1 * (0.9 + 0.2 * vnoise(uv * 3.0)), m);
+    // modules de 25 cm calés sur les voxels, donc sur le bord de la fosse où qu'elle soit :
+    // rosace de fentes (anneau à quatre ponts, rayons diagonaux, œil central), nervures usées
+    vec2 fm = fract(uv * 4.0);
+    vec2 p = (fm - 0.5) * 0.25;
+    float r = length(p);
+    vec2 pd = abs(vec2(p.x + p.y, p.x - p.y)) * 0.7071;
+    float ring = max(abs(r - 0.07) - 0.014, 0.011 - min(abs(p.x), abs(p.y)));
+    float diag = max(min(pd.x, pd.y) - 0.008, abs(r - 0.12) - 0.022);
+    float d = min(min(ring, diag), r - 0.024);
+    float l = lodf(0.05, pw);
+    float m = mix(0.77, smoothstep(-0.5 * pw, 0.5 * pw, d), l);
+    vec2 e = min(fm, 1.0 - fm) * 0.25;
+    float rib = jl(min(e.x, e.y), 0.004, pw) * l;
+    vec3 iron = c1 * (0.88 + 0.2 * vnoise(uv * 3.0)) * (1.0 + 0.2 * rib);
+    return mix(c2 * (0.3 + 0.25 * vnoise(uv * 11.0)), iron, m);
   }
   float fx = fract(uv.x / 0.03);
   float fy = fract(uv.y / 0.1);
@@ -881,11 +909,12 @@ vec3 patBooks(vec2 uv, vec3 c1) {
   return mix(b, c1 * 0.25, step(h, fy));
 }
 // Écran LED : 0 = vidéo, 1 = publicités, 2 = bandeau défilant (grille de pixels effacée au loin).
+// Un contenu par panneau (publicités de 6 × 4 m, vidéos de 12 × 8 m), différent d'un îlot à l'autre.
 vec3 ledScreen(vec2 uv, float sc, vec3 seed, float pw) {
   float t = uTime;
   vec2 px = floor(uv * 20.0) / 20.0;
   vec3 col;
-  float id = h13(floor(seed / 6.0));
+  vec3 blk = floor(seed / 96.0) * 7.13;
   if (sc == 2.0) {
     float x = px.x * 4.0 + t * 3.0;
     float ch = floor(x);
@@ -894,21 +923,25 @@ vec3 ledScreen(vec2 uv, float sc, vec3 seed, float pw) {
     vec3 hue = mix(vec3(1.0, 0.75, 0.15), vec3(1.0, 0.2, 0.25), step(0.5, h12(vec2(floor(x / 12.0), 3.0))));
     col = hue * on;
   } else if (sc == 1.0) {
+    float id = h13(vec3(floor(uv / vec2(6.0, 4.0)), 0.5) + blk);
     float slot = floor(t / 6.0 + id * 9.0);
     float r = h12(vec2(slot, id));
     vec3 a = 0.5 + 0.5 * cos(6.2832 * (r + vec3(0.0, 0.33, 0.67)));
     vec3 b = 0.5 + 0.5 * cos(6.2832 * (r + 0.4 + vec3(0.0, 0.33, 0.67)));
     vec2 q = fract(uv / vec2(6.0, 4.0));
+    q.x = mix(q.x, 1.0 - q.x, step(0.5, fract(r * 7.0)));
     float band = step(0.62, q.y) * step(q.y, 0.8);
-    float circle = 1.0 - smoothstep(0.18, 0.2, length((q - vec2(0.3, 0.38)) * vec2(1.5, 1.0)));
+    float rad = 0.13 + 0.08 * fract(r * 13.0);
+    float circle = 1.0 - smoothstep(rad - 0.02, rad, length((q - vec2(0.3, 0.38)) * vec2(1.5, 1.0)));
     float bars = step(0.5, fract(q.x * 14.0 + t * 0.6)) * step(q.y, 0.25);
     col = mix(a * 0.55, b, band);
     col = mix(col, vec3(1.0), circle * 0.85);
     col = mix(col, b * 1.2, bars * 0.6);
   } else {
+    float id = h13(vec3(floor(uv / vec2(12.0, 8.0)), 2.5) + blk);
     vec2 q = px * 0.35 + vec2(t * 0.07, -t * 0.05) + id * 5.0;
-    float n1 = fbm(q * 1.7);
-    float n2 = fbm(q * 2.3 + 4.0 + t * 0.1);
+    float n1 = vnoise(q * 1.7) * 0.65 + vnoise(q * 3.5 + 9.0) * 0.35;
+    float n2 = vnoise(q * 2.3 + 4.0 + t * 0.1) * 0.65 + vnoise(q * 4.7 + 2.0) * 0.35;
     col = 0.5 + 0.5 * cos(6.2832 * (n1 * 1.4 + n2 * 0.6 + vec3(0.0, 0.25, 0.55) + t * 0.03));
     col *= 0.55 + 0.6 * n2;
   }
@@ -925,6 +958,7 @@ uniform sampler2D uMatTex;
 float gGlint; // éclat du soleil ou de la lune (0..1)
 float gMetal; // reflets teintés par la couleur (métaux polis)
 float gWetR;  // eau en surface : reflets de la chaussée mouillée (0..1)
+float gPw;    // taille d'un pixel (m) à cet endroit
 vec3 srgb2lin(vec3 c) { return pow(c, vec3(2.2)); }
 // Vitrage : pièce éclairée derrière une fenêtre (parallaxe), rideaux et stores. Les étages des
 // immeubles n'ont pas tous la même hauteur : au-dessus du rez-de-chaussée, les choix par fenêtre
@@ -999,10 +1033,9 @@ vec3 windowRoom(vec3 wpos, vec3 n, vec3 V, vec2 uv, vec3 lc, float sc, float pw)
   }
   return room;
 }
-// Branches : VX_IF(c) est une boucle de 0 ou 1 tour. Sur GPU c'est un « if » ordinaire ; les rendus
-// logiciels (SwiftShader : captures automatiques) n'exécutent ainsi que le motif du voxel au lieu de
-// tous les motifs. Jamais d'échantillonnage de texture dans un VX_IF (compilateur HLSL de Direct3D).
-#define VX_IF(c) for (int vx_k = 0; vx_k < int(c); vx_k++)
+// Branches : aucun échantillonnage de texture à dérivées implicites (texture()) dans un « if » :
+// ANGLE/Direct3D aplatirait la branche (exécutée pour chaque pixel). Les lectures nécessaires sont
+// faites avant (teinte des lampes, volume de lumière) ou sans dérivées (textureLod).
 vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emissive, out float spec) {
   vec4 t0 = texelFetch(uMatTex, ivec2(mat, 0), 0);
   vec4 t1 = texelFetch(uMatTex, ivec2(mat, 1), 0);
@@ -1012,6 +1045,11 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
   vec3 c2 = t1.rgb;
   int pat = int(t0.a * 255.0 + 0.5);
   float sc = floor(t1.a * 255.0 + 0.5);
+  // anciens motifs (Londres) redirigés vers leurs équivalents de 2085
+  if (pat == 2) { pat = 46; sc = 1.0; }
+  else if (pat == 22) { pat = 5; sc = 3.0; }
+  else if (pat == 4 || pat == 15) pat = 48;
+  else if (pat == 28) pat = 12;
   int emode = int(t2.a * 255.0 + 0.5);
   spec = t3.r;
   float grime = t3.g;
@@ -1022,6 +1060,7 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
   vec3 vox = floor(wpos * 4.0 - n * 0.5);
   // taille d'un pixel (m) : anticrénelage des joints, effacement des détails au loin
   float pw = max(length(dFdx(wpos)), length(dFdy(wpos)));
+  gPw = pw;
   // abscisse orientée vers la droite de qui regarde la façade (textes, graffitis)
   float uRight = uv.x * (an.x > 0.5 ? -sign(n.x) : sign(n.z));
   vec3 col = c1;
@@ -1029,10 +1068,12 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
   gMetal = 0.0;
   gWetR = 0.0;
   gGlint = spec;
+  // vitrage : lumière derrière la vitre (côté rue ou côté pièce ?), lue dans une branche minimale
+  vec2 Lback = vec2(0.0);
+  if (pat == 12) Lback = sampleLightVol(wpos - n * 0.8);
   if (pat == 12) {
     // vitrage moderne : reflets du ciel et des façades d'en face, pièce éclairée la nuit
     vec3 V = normalize(cameraPosition - wpos);
-    vec2 Lback = sampleLightVol(wpos - n * 0.8);
     bool outside = (L.x > 0.35 && L.x > Lback.x + 0.04) || wpos.y > uLightOrigin.y + uLightSize.y - 0.6;
     gGlint = 0.85;
     spec = 0.0;
@@ -1047,42 +1088,43 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     float fr = pow(1.0 - max(dot(V, n), 0.0), 5.0);
     float brk = 0.03 + 0.2 * h12(vec2(floor(uv.x / 2.25), 0.37)) + 0.06 * vnoise(vec2(uv.x * 0.5, wpos.y * 0.3));
     vec3 refl = skyReflect(R, brk) * (0.3 + 0.7 * L.x) + lampC * L.y * 0.25;
+    // la nuit, les fenêtres éclairées d'en face se reflètent dans la vitre
+    float dC = length(cameraPosition - wpos);
+    refl += cityLights(wpos, R, pw / max(dC, 0.5), dC) * uNight * 0.55;
     emissive = refl * ((sc == 1.0 ? 0.07 : 0.1) + 0.9 * fr);
     col = c1 * 0.55;
-    VX_IF(emode == 2) emissive += windowRoom(wpos, n, V, uv, srgb2lin(t2.rgb), sc, pw) * (0.1 + 1.2 * uNight) * (1.0 - 0.6 * fr);
+    if (emode == 2) emissive += windowRoom(wpos, n, V, uv, srgb2lin(t2.rgb), sc, pw) * (0.1 + 1.2 * uNight) * (1.0 - 0.6 * fr);
     return srgb2lin(col);
   }
-  VX_IF(pat == 1) col = patBrick(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 2) col = patSidewalk(uv, c1, c2, 1.0, pw, wall, wpos.y, spec);
-  VX_IF(pat == 3) col = patPlank(wall ? uv : (mod(floor(vox.x / 64.0) + floor(vox.z / 64.0), 2.0) > 0.5 ? uv.yx : uv), c1, c2, sc, pw, spec);
-  VX_IF(pat == 4 || pat == 15 || pat == 48) col = patRoof(uv, c1, c2, pw);
-  VX_IF(pat == 5) col = patStone(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 6) {
+  if (pat == 1) col = patBrick(uv, c1, c2, sc, pw, spec);
+  if (pat == 3) col = patPlank(wall ? uv : (mod(floor(vox.x / 64.0) + floor(vox.z / 64.0), 2.0) > 0.5 ? uv.yx : uv), c1, c2, sc, pw, spec);
+  if (pat == 48) col = patRoof(uv, c1, c2, pw);
+  if (pat == 5) col = patStone(uv, c1, c2, sc, pw, spec);
+  if (pat == 6) {
     float s = fract(uv.x * 8.0);
     col = mix(mix(c1, c2, step(0.5, s)), c2 * 1.2, jl(abs(s - 0.5) * 0.125, 0.004, pw) * 0.5);
   }
-  VX_IF(pat == 7) col = patWallPanel(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 8) col = patCarpet(uv, c1, c2, sc, pw);
-  VX_IF(pat == 9) col = patChecker(uv, c1, c2, sc, pw);
-  VX_IF(pat == 10) col = patPlaster(uv, c1, sc, pw, wpos.y, wall);
-  VX_IF(pat == 11) {
+  if (pat == 7) col = patWallPanel(uv, c1, c2, sc, pw, spec);
+  if (pat == 8) col = patCarpet(uv, c1, c2, sc, pw);
+  if (pat == 9) col = patChecker(uv, c1, c2, sc, pw);
+  if (pat == 10) col = patPlaster(uv, c1, sc, pw, wpos.y, wall);
+  if (pat == 11) {
     col = patMetal(uv, c1, c2, sc, pw, spec);
     if (t3.r > 0.7) gMetal = 1.0;
   }
-  VX_IF(pat == 13) {
+  if (pat == 13) {
     float fn = vnoise(uv * 7.0 + vox.xz * 0.37) * 0.65 + vnoise(uv * 19.0) * 0.35;
     col = mix(c2, c1, smoothstep(0.25, 0.75, fn)) * (0.9 + 0.2 * h13(vox));
   }
-  VX_IF(pat == 14) col = patPanel(uv, c1, c2, pw);
-  VX_IF(pat == 16) col = patCorrugated(uv, c1, c2, pw, spec);
-  VX_IF(pat == 17) col = patPaint(uv, c1, pw);
-  VX_IF(pat == 18) col = patDirt(uv, c1, c2, sc, pw);
-  VX_IF(pat == 19) col = wall ? patBooks(uv, c1) : vec3(0.3, 0.2, 0.12);
-  VX_IF(pat == 20) col = patMarble(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 21) col = patParquet(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 22) col = patStone(uv, c1, c2, 3.0, pw, spec);
-  VX_IF(pat == 23) col = patGrass(uv, c1, c2, sc, pw);
-  VX_IF(pat == 24) {
+  if (pat == 14) col = patPanel(uv, c1, c2, pw);
+  if (pat == 16) col = patCorrugated(uv, c1, c2, pw, spec);
+  if (pat == 17) col = patPaint(uv, c1, pw);
+  if (pat == 18) col = patDirt(uv, c1, c2, sc, pw);
+  if (pat == 19) col = wall ? patBooks(uv, c1) : vec3(0.3, 0.2, 0.12);
+  if (pat == 20) col = patMarble(uv, c1, c2, sc, pw, spec);
+  if (pat == 21) col = patParquet(uv, c1, c2, sc, pw, spec);
+  if (pat == 23) col = patGrass(uv, c1, c2, sc, pw);
+  if (pat == 24) {
     float tt = uTime * 5.0;
     float nn = vnoise(uv * 7.0 + vec2(0.0, -tt)) * 0.7 + vnoise(uv * 15.0 + vec2(tt, -tt * 1.3)) * 0.3;
     col = mix(vec3(1.0, 0.32, 0.04), vec3(1.0, 0.85, 0.4), nn);
@@ -1090,28 +1132,19 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     gGlint = 0.0;
     return srgb2lin(col) * 0.4;
   }
-  VX_IF(pat == 25) col = c1 * (0.72 + 0.4 * vnoise(vec2(uv.x * 22.0, uv.y * 3.0)));
-  VX_IF(pat == 26) col = c1 * (0.92 + 0.1 * vnoise(uv * 9.0)) * (1.0 + (vnoise(uv * 200.0) - 0.5) * 0.08 * lodf(0.01, pw));
-  VX_IF(pat == 27) col = patPoster(wall ? vec2(uRight, uv.y) : uv, c1, c2, pw);
-  VX_IF(pat == 28) {
-    vec2 f = fract(uv * 6.0);
-    float r = h12(floor(uv * 6.0));
-    col = r < 0.25 ? vec3(0.62, 0.08, 0.12) : r < 0.5 ? vec3(0.08, 0.18, 0.62) : r < 0.75 ? vec3(0.75, 0.55, 0.08) : vec3(0.08, 0.45, 0.22);
-    float lead = 1.0 - step(0.08, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
-    col = mix(col, vec3(0.04), lead);
-    emissive = srgb2lin(col) * (1.0 - lead) * (0.35 + 1.4 * uNight);
-    return srgb2lin(col) * 0.5;
-  }
-  VX_IF(pat == 29) {
+  if (pat == 25) col = c1 * (0.72 + 0.4 * vnoise(vec2(uv.x * 22.0, uv.y * 3.0)));
+  if (pat == 26) col = c1 * (0.92 + 0.1 * vnoise(uv * 9.0)) * (1.0 + (vnoise(uv * 200.0) - 0.5) * 0.08 * lodf(0.01, pw));
+  if (pat == 27) col = patPoster(wall ? vec2(uRight, uv.y) : uv, c1, c2, pw);
+  if (pat == 29) {
     float s = fract((an.x > 0.5 ? wpos.z : wpos.x) * 2.0);
     float st = smoothstep(0.5 - pw * 2.0, 0.5 + pw * 2.0, s) * (1.0 - smoothstep(1.0 - pw * 2.0, 1.0, s));
     col = mix(c1, c2, st) * (0.95 + 0.06 * vnoise(uv * vec2(3.0, 1.0))) * (1.0 + (vnoise(uv * 160.0) - 0.5) * 0.06 * lodf(0.012, pw));
   }
-  VX_IF(pat == 30) col = patAsphalt(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 31) col = patConcrete(uv, c1, c2, sc, pw, wall, spec);
-  VX_IF(pat == 32) col = patTile(uv, c1, c2, sc, pw, spec);
-  VX_IF(pat == 33) col = patMetalPanel(uv, c1, c2, sc, pw, wall, spec);
-  VX_IF(pat == 34) {
+  if (pat == 30) col = patAsphalt(uv, c1, c2, sc, pw, spec);
+  if (pat == 31) col = patConcrete(uv, c1, c2, sc, pw, wall, spec);
+  if (pat == 32) col = patTile(uv, c1, c2, sc, pw, spec);
+  if (pat == 33) col = patMetalPanel(uv, c1, c2, sc, pw, wall, spec);
+  if (pat == 34) {
     // mur-rideau : meneaux, allèges émaillées, verre réfléchissant irisé, bureaux éclairés la nuit
     // (plancher des tours à y = 3,5 k, nez de dalle posé par le générateur sous chaque plancher)
     if (!wall) {
@@ -1133,6 +1166,8 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     float fr = pow(1.0 - ndv, 5.0);
     float brk = 0.04 + 0.16 * vnoise(vec2(cid.x * 0.37, cid.y * 0.7)) + 0.04 * vnoise(uv * 0.4);
     vec3 refl = skyReflect(R, brk) * (0.35 + 0.65 * L.x) + lampC * L.y * 0.3;
+    float dC = length(cameraPosition - wpos);
+    refl += cityLights(wpos, R, pw / max(dC, 0.5), dC) * uNight * 0.6;
     // couche irisée (verre « holographique ») : plus marquée en incidence rasante
     vec3 irid = 0.5 + 0.5 * cos(6.2832 * (fr * 1.6 + uv.x * 0.013 + wpos.y * 0.009 + vec3(0.0, 0.33, 0.67)));
     refl *= mix(vec3(1.0), irid * 1.5, (sc == 3.0 ? 0.5 : 0.2) * smoothstep(0.0, 0.6, 1.0 - ndv));
@@ -1140,7 +1175,7 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     refl *= mix(vec3(1.0), gl / max(max(gl.r, gl.g), max(gl.b, 1e-3)), 0.45);
     emissive = refl * (0.12 + 0.88 * fr) * (1.0 - frame) * (1.0 - spand * 0.6);
     float lit = step(0.42, h12(vec2(floor(cid.x / 3.0), cid.y) + floor(wpos.xz * 0.05) * 7.3));
-    VX_IF(emode == 2 && spand < 0.5 && lit > 0.5) {
+    if (emode == 2 && spand < 0.5 && lit > 0.5) {
       // bureau : rayon dans une boîte (plafond lumineux, sol et bureaux, cloisons du fond)
       vec3 Vin = -V;
       vec3 tX = an.x > 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
@@ -1177,7 +1212,7 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     gGlint = 0.9 * (1.0 - frame);
     return srgb2lin(col);
   }
-  VX_IF(pat == 35) {
+  if (pat == 35) {
     // néon : tube saturé, scintillement discret, rares clignotements
     float cluster = h13(floor(wpos * 1.5));
     float blink = step(0.996, h13(vec3(floor(uTime * 7.0), cluster * 91.0, 3.0)));
@@ -1186,15 +1221,15 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     gGlint = 0.0;
     return srgb2lin(c1) * 0.6;
   }
-  VX_IF(pat == 36) {
+  if (pat == 36) {
     vec3 sc3 = ledScreen(uv, sc, vox, pw);
     emissive = srgb2lin(sc3) * (1.1 + 1.3 * uNight);
     gGlint = 0.3;
     return srgb2lin(c1);
   }
-  VX_IF(pat == 37) col = patGrate(uv, c1, c2, sc, pw);
-  VX_IF(pat == 38) col = patRoadPaint(uv, c1, c2, pw, spec);
-  VX_IF(pat == 39) {
+  if (pat == 37) col = patGrate(uv, c1, c2, sc, pw);
+  if (pat == 38) col = patRoadPaint(uv, c1, c2, pw, spec);
+  if (pat == 39) {
     // bandeau LED : diffuseur au cœur plus lumineux, points visibles de près
     float ph = h13(floor(wpos * 0.5)) * 6.28;
     float pulse = emode == 6 ? 0.75 + 0.35 * sin(uTime * 1.6 + ph) : 1.0;
@@ -1207,11 +1242,11 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
     gGlint = 0.0;
     return srgb2lin(c1) * 0.7;
   }
-  VX_IF(pat == 40) col = patTerrazzo(uv, c1, c2, pw);
-  VX_IF(pat == 41) col = c1 * (0.88 + 0.2 * h12(floor(uv * 60.0)) * lodf(0.017, pw)) + c2 * 0.1 * step(0.94, h12(floor(uv * 40.0))) * lodf(0.025, pw);
-  VX_IF(pat == 42) col = patGraffiti(vec2(uRight, uv.y), c1, c2, wpos.y, pw, spec);
-  VX_IF(pat == 43) col = patSlats(wall ? uv : uv.yx, c1, c2, pw);
-  VX_IF(pat == 44) {
+  if (pat == 40) col = patTerrazzo(uv, c1, c2, pw);
+  if (pat == 41) col = c1 * (0.88 + 0.2 * h12(floor(uv * 60.0)) * lodf(0.017, pw)) + c2 * 0.1 * step(0.94, h12(floor(uv * 40.0))) * lodf(0.025, pw);
+  if (pat == 42) col = patGraffiti(vec2(uRight, uv.y), c1, c2, wpos.y, pw, spec);
+  if (pat == 43) col = patSlats(wall ? uv : uv.yx, c1, c2, pw);
+  if (pat == 44) {
     float edge;
     col = patHex(uv, c1, c2, pw, edge);
     if (emode == 6) {
@@ -1220,18 +1255,18 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
       emode = 0;
     }
   }
-  VX_IF(pat == 45) col = patSolar(uv, c1, c2, pw);
-  VX_IF(pat == 46) col = patSidewalk(uv, c1, c2, sc, pw, wall, wpos.y, spec);
+  if (pat == 45) col = patSolar(uv, c1, c2, pw);
+  if (pat == 46) col = patSidewalk(uv, c1, c2, sc, pw, wall, wpos.y, spec);
   // variation par voxel (discrète, effacée au loin)
   col *= 1.0 + (h13(vox) - 0.5) * noiseAmt * 0.38 * lodf(0.25, pw);
   // salissures extérieures : coulures de pluie, éclaboussures en pied de mur, voile de suie froid
-  VX_IF(grime > 0.0) {
+  if (grime > 0.0) {
     float exposure = clamp(L.x * 1.6, 0.0, 1.0);
     if (wall) {
       float st = smoothstep(0.5, 0.95, vnoise(vec2(uv.x * 2.6, wpos.y * 0.12 + 3.0))) * (0.55 + 0.45 * vnoise(vec2(uv.x * 9.0, wpos.y * 0.7)));
       float foot = 1.0 - smoothstep(0.05, 0.9, wpos.y);
       float veil = vnoise(uv * 0.21 + 5.0);
-      float g = (st * 0.55 + foot * 0.5 + (veil - 0.4) * 0.35) * grime * exposure;
+      float g = (st * 0.4 + foot * 0.45 + (veil - 0.4) * 0.3) * grime * exposure;
       col = mix(col, col * vec3(0.66, 0.68, 0.72), clamp(g, 0.0, 0.85));
     } else {
       col *= 1.0 - (vnoise(uv * 0.5 + 9.0) - 0.3) * grime * 0.22 * exposure;
@@ -1241,9 +1276,9 @@ vec3 voxelMaterial(int mat, vec3 wpos, vec3 n, vec2 L, vec3 lampC, out vec3 emis
   else if (emode == 6) emissive += srgb2lin(t2.rgb) * (0.9 + 0.4 * sin(uTime * 1.6 + h13(floor(wpos)) * 6.28));
   gGlint = spec;
   // pluie : surfaces mouillées (plus sombres, brillantes), flaques nettes
-  VX_IF(t3.a > 0.5 && uWet > 0.0 && n.y > 0.5 && L.x > 0.3) {
-    float pn = vnoise(uv * 0.32 + 31.0) * 0.65 + vnoise(uv * 1.1 + 5.0) * 0.35;
-    float puddle = smoothstep(0.56, 0.6, pn) * smoothstep(0.15, 0.6, uWet);
+  if (t3.a > 0.5 && uWet > 0.0 && n.y > 0.5 && L.x > 0.3) {
+    float pn = vnoise(uv * 0.55 + 31.0) * 0.65 + vnoise(uv * 1.7 + 5.0) * 0.35;
+    float puddle = smoothstep(0.64, 0.67, pn) * smoothstep(0.15, 0.6, uWet);
     float wet = uWet * smoothstep(0.3, 0.5, L.x);
     col *= mix(1.0, 0.6, wet) * (1.0 - 0.3 * puddle);
     spec = max(spec, 0.22 * wet + 0.72 * puddle);

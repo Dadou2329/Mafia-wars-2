@@ -327,7 +327,7 @@ export function specFor(def: BuildingDef, rng: Rng): TypeSpec {
           ['store', 'office'],
         ],
         groundClear: 18,
-        facade: { wall: M.CURTAIN_DARK, wallSide: M.METAL_PANEL_DARK, trim: M.CHROME, lit: 0.7, cool: true },
+        facade: { wall: M.CURTAIN_DARK, wallSide: M.CLAD_CERAMIC, trim: M.CHROME, lit: 0.7, cool: true },
         shop: { band: M.METAL_PANEL_DARK, frame: M.CHROME, glass: M.GLASS_CLEAR, neon: M.LED_WHITE },
         neon: M.LED_WHITE,
       };
@@ -427,6 +427,8 @@ export function generateBuilding(ctx: GenContext, def: BuildingDef): BuildingInf
   const extraH = def.height ? Math.max(0, Math.round(def.height * 4) - (floors[nFloors - 1].ceil + 2)) : 0;
   const extraStories = Math.floor(extraH / 14);
   const roofOnTop = extraStories === 0;
+  // un toit sur cinq est végétalisé (sédum), New York 2085 oblige
+  const roofMat = def.id % 5 === 2 ? M.ROOF_GREEN : M.ROOF_TAR;
   const sealedTop = floors[nFloors - 1].ceil + 2 + extraStories * 14;
   const wallTop = sealedTop;
   const box = buildBox(
@@ -437,14 +439,14 @@ export function generateBuilding(ctx: GenContext, def: BuildingDef): BuildingInf
       base: st.base,
       floorMat: floors.map(() => M.CONCRETE),
       ceilMat: M.CEILING,
-      roofMat: roofOnTop ? M.ROOF_TAR : M.CONCRETE,
+      roofMat: roofOnTop ? roofMat : M.CONCRETE,
     },
     floors,
     wallTop,
   );
   if (!roofOnTop) {
     // toit réel au sommet des étages fermés
-    f.fill(2, wallTop - 2, 2, f.W - 2, wallTop, f.D - 2, M.ROOF_TAR);
+    f.fill(2, wallTop - 2, 2, f.W - 2, wallTop, f.D - 2, roofMat);
   }
   const roofTop = roofOnTop ? box.roofTop : wallTop;
   const exp = exposure(ctx, f, def.id);

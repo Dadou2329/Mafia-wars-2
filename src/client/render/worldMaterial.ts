@@ -64,7 +64,7 @@ totalEmissiveRadiance += gEmissive;
 vec3 vdir = normalize(cameraPosition - vWPos);
 float fres = pow(1.0 - max(dot(vdir, wn), 0.0), 4.0);
 // reflets : ciel en dégradé (façades d'en face sous l'horizon) et lampes ; teintés pour les métaux
-VX_IF(gSpec > 0.004) {
+if (gSpec > 0.004) {
   vec3 R = reflect(-vdir, wn);
   float brk = mix(0.1, -0.02 + 0.05 * vnoise(vWPos.xz * 0.7 + vWPos.y * 0.3), gMetal);
   // (sur sol mouillé, les lampes ne se reflètent que le long du rayon réfléchi : voir plus bas)
@@ -78,28 +78,29 @@ VX_IF(gSpec > 0.004) {
 }
 // éclat du soleil (ou de la lune) sur le verre, le métal poli, les flaques
 #if NUM_DIR_LIGHTS > 0
-VX_IF(gGlint > 0.22) {
+if (gGlint > 0.22) {
   vec3 hv = normalize(directLight.direction + geometryViewDir);
   float sh = 16.0 + 400.0 * gGlint * gGlint;
   float g = pow(max(dot(geometryNormal, hv), 0.0), sh) * (sh + 8.0) * 0.0016 * gGlint * (1.0 + 3.0 * fres);
   reflectedLight.indirectDiffuse += directLight.color * g * skyVis;
 }
 #endif
-// chaussée mouillée : reflets flous des lampes et du ciel le long du rayon réfléchi, étirés en
-// traînées verticales vers la caméra
+// chaussée mouillée : flaques miroir du ciel (et, la nuit, des fenêtres éclairées alentour),
+// reflets colorés des lampes et des néons en traînées verticales (à l'écran) ; couleur lue le
+// long du rayon réfléchi, sans dérivées
 if (gWetR > 0.0) {
   vec3 R = reflect(-vdir, wn);
-  vec3 q1 = vWPos + R * 1.6;
-  vec3 q2 = vWPos + R * 4.5;
-  vec2 L1 = sampleLightVol(q1);
-  vec2 L2 = sampleLightVol(q2);
-  vec3 acc = lampColorAt(q1) * L1.y * L1.y * 0.8 + lampColorAt(q2) * L2.y * L2.y * 0.6;
-  acc += skyReflect(R, 0.12) * max(L1.x, L2.x) * 0.25;
-  vec2 dv = normalize(vdir.xz + vec2(1e-4, 0.0));
-  float across = dot(vWPos.xz, vec2(-dv.y, dv.x));
-  float along = dot(vWPos.xz, dv);
-  float streak = 0.55 + 0.7 * vnoise(vec2(across * 2.2, along * 0.3));
-  reflectedLight.indirectDiffuse += acc * streak * gWetR * (0.15 + 0.9 * fres);
+  vec3 tq = lampTintLod(vWPos + R * 2.0);
+  float tm = max(tq.r, max(tq.g, tq.b));
+  vec3 rc = tm > 0.004 ? tq / tm : uLampCol;
+  float dC = length(cameraPosition - vWPos);
+  float sx = vViewPosition.x / max(vViewPosition.z, 0.05);
+  float sn = vnoise(vec2(sx * 42.0, dC * 0.3));
+  float pud = smoothstep(0.6, 1.0, gWetR);
+  float streak = mix(0.3 + 1.3 * sn * sn, 0.65 + 0.35 * sn, pud);
+  vec3 acc = rc * uLampPower * gL.y * gL.y * 0.85 * streak + skyReflect(R, 0.12) * gL.x * 0.35;
+  acc += cityLights(vWPos, R, gPw / max(dC, 0.5), dC) * uNight * pud * 0.45;
+  reflectedLight.indirectDiffuse += acc * gWetR * (0.15 + 0.9 * fres);
 }`,
       )
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vWPos);');

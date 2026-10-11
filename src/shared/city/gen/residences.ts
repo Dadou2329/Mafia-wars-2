@@ -457,7 +457,9 @@ function buildTower(ctx: GenContext, def: BuildingDef): BuildingInfo {
     curtainBlock(f, x0, z0, x1, z1, lobby.ceil + 2, p1.floorTop - 3, corp ? M.CURTAIN_BLUE : M.CURTAIN_GOLD, M.LIMESTONE);
     for (const w of ['front', 'back', 'left', 'right'] as Wall[]) piers(f, w, st, lobby.ceil + 2, p1.floorTop - 3, M.LIMESTONE);
   } else {
-    curtainBlock(f, x0, z0, x1, z1, lobby.ceil + 2, p1.floorTop - 3, corp ? M.CURTAIN_BLUE : boss === 'even' ? M.CURTAIN_GREEN : M.CURTAIN_DARK, M.METAL_PANEL_DARK);
+    // tour d'Even : verre holographique (reflets cyan la nuit) et allèges en carbone
+    const holo = !corp && boss === 'even';
+    curtainBlock(f, x0, z0, x1, z1, lobby.ceil + 2, p1.floorTop - 3, corp ? M.CURTAIN_BLUE : holo ? M.GLASS_HOLO : M.CURTAIN_DARK, holo ? M.CARBON_PANEL : M.METAL_PANEL_DARK);
   }
   ledRing(f, 0, 0, W, D, lobby.ceil + 2, pal.led);
   ledRing(f, x0, z0, x1, z1, p1.floorTop - 2, pal.led);

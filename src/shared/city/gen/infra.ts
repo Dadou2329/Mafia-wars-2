@@ -377,9 +377,13 @@ export function buildSubway(ctx: GenContext): void {
       box(c0, floor - 1, c1, floor, a0, a1, M.GRAVEL);
       box(c0 + 4, floor, c0 + 5, floor + 1, a0, a1, M.STEEL);
       box(c1 - 5, floor, c1 - 4, floor + 1, a0, a1, M.STEEL);
-      // bords de quai jaunes
+      // bords de quai jaunes, doublés d'une bande podotactile (seulement sur le quai lui-même)
       box(c0 - 1, floor + 1, c0, floor + 2, a0, a1, M.LINE_YELLOW);
       box(c1, floor + 1, c1 + 1, floor + 2, a0, a1, M.LINE_YELLOW);
+      const tactile = (u0: number, u1: number) =>
+        t.axis === 'z' ? w.replace(u0, floor + 1, a0, u1, floor + 2, a1, M.TERRAZZO, M.TACTILE) : w.replace(a0, floor + 1, u0, a1, floor + 2, u1, M.TERRAZZO, M.TACTILE);
+      tactile(c0 - 3, c0 - 1);
+      tactile(c1 + 1, c1 + 3);
       // le tunnel débouche dans la station : on ouvre les murs à ses extrémités
       const sMin = t.axis === 'z' ? sz0 : sx0;
       const sMax = t.axis === 'z' ? sz1 : sx1;
