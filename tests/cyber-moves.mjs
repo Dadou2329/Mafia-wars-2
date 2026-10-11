@@ -150,10 +150,16 @@ await A.evaluate(() => {
     prev?.(e);
   };
 });
-// sous forte charge, une téléportation tardive (debugTp) remet le regard à l'horizontale : on
-// relève le regard juste avant F, et on recommence si le crochet est parti trop bas
+// sous forte charge, une téléportation tardive (debugTp) remet le regard à l'horizontale, et une
+// coupure réseau (reconnexion : le parrain est replacé là où le serveur le voit) annule le
+// grappin : on relève le regard juste avant F, et on recommence dans ces deux cas seulement
+await A.evaluate(() => {
+  window.__cuts = 0;
+  window.__app.net.on('disconnected', () => window.__cuts++);
+});
 let tp0 = 0;
 let y0 = 0;
+let y1 = 0;
 let anchorY = 0;
 let grappling = 'walk';
 for (let i = 0; i < 3; i++) {
@@ -162,6 +168,7 @@ for (let i = 0; i < 3; i++) {
     return p.t >= p.grappleReadyAt && p.onGround && !p.hook && p.mode === 'walk';
   }, null, 3);
   tp0 = await A.evaluate(() => window.__app.game.priv.tp);
+  const cuts0 = await A.evaluate(() => window.__cuts);
   y0 = await A.evaluate(() => {
     window.__mv.length = 0;
     const p = window.__app.game.player;
@@ -173,16 +180,20 @@ for (let i = 0; i < 3; i++) {
   const fired = await A.evaluate(() => window.__mv.find((m) => m.k === 'grappleFire' || m.k === 'grappleMiss') ?? null);
   anchorY = fired?.y2 ?? 0;
   grappling = (await A.evaluate(() => window.__mv.some((m) => m.k === 'grappleAttach'))) ? 'grapple' : fired ? fired.k : 'rien';
-  if (grappling === 'grapple' && anchorY > y0 + 6) break;
-  console.log(`  (essai ${i + 1} : ${grappling}, ancre ${anchorY.toFixed(1)} m ; au tir : ${fired?.at ?? '?'} ; lacet voulu ${spot.yaw.toFixed(2)} — on recommence)`);
-  // accroché trop bas (regard remis à l'horizontale) : on lâche, on revient au point de départ
+  if (grappling === 'grapple' && anchorY > y0 + 6) {
+    await shot('02-grapple.png');
+    await waitGame((y0) => window.__app.game.player.mode !== 'grapple' && window.__app.game.player.pos.y > y0 + 5, y0, 6);
+    y1 = await A.evaluate(() => window.__app.game.player.pos.y);
+    if (y1 > y0 + 5) break;
+    const cut = (await A.evaluate(() => window.__cuts)) > cuts0;
+    console.log(`  (essai ${i + 1} : accroché à ${anchorY.toFixed(1)} m mais y ${y1.toFixed(1)} ; coupure réseau : ${cut ? 'oui — on recommence' : 'non'})`);
+    if (!cut) break;
+  } else console.log(`  (essai ${i + 1} : ${grappling}, ancre ${anchorY.toFixed(1)} m ; au tir : ${fired?.at ?? '?'} ; lacet voulu ${spot.yaw.toFixed(2)} — on recommence)`);
+  // on lâche et on revient au point de départ
   if (await A.evaluate(() => !!window.__app.game.player.grapple)) await A.keyboard.press('KeyF');
   await A.evaluate((s) => window.__app.net.act({ a: 'debugTp', x: s.x, z: s.z, yaw: s.yaw }), spot);
   await A.waitForFunction((s) => Math.hypot(window.__app.game.player.pos.x - s.x, window.__app.game.player.pos.z - s.z) < 1, spot, { timeout: 180000, polling: 250 });
 }
-await shot('02-grapple.png');
-await waitGame((y0) => window.__app.game.player.mode !== 'grapple' && window.__app.game.player.pos.y > y0 + 5, y0, 6);
-const y1 = await A.evaluate(() => window.__app.game.player.pos.y);
 check('grappin : accroché puis hissé', grappling === 'grapple' && y1 > y0 + 5, `mode ${grappling}, ancre ${anchorY.toFixed(1)} m, y ${y0.toFixed(1)} → ${y1.toFixed(1)}`);
 await sleep(1500);
 const tp1 = await A.evaluate(() => window.__app.game.priv.tp);
@@ -309,7 +320,8 @@ const rivalKit = [
 ];
 botAct({ a: 'debugMoney', n: 50000 });
 for (const [id, lv, slot] of rivalKit) botAct({ a: 'debugCyber', id, lv, slot });
-const front = { x: meet.x + Math.sin(meet.yaw) * 4, z: meet.z + Math.cos(meet.yaw) * 4, yaw: meet.yaw + Math.PI };
+// à 2,6 m, de trois quarts : le bras droit (lame) tourné vers moi
+const front = { x: meet.x + Math.sin(meet.yaw) * 2.6, z: meet.z + Math.cos(meet.yaw) * 2.6, yaw: meet.yaw + Math.PI * 1.25 };
 botAct({ a: 'debugTp', x: front.x, z: front.z, yaw: front.yaw });
 await sleep(1500);
 botAct({ a: 'ab', id: 'bras', slot: 'brasD' });
@@ -341,11 +353,15 @@ if (!rival) console.log('diagnostic Even :', JSON.stringify(await A.evaluate(new
 check('apparence d’Even reçue (bras, jambes, torse, yeux)', !!rival && /brasG=grappin/.test(rival.look) && /jambes1=esquive/.test(rival.look) && /yeux1=thermique/.test(rival.look), rival ? `${rival.look} — à ${rival.d.toFixed(1)} m` : 'Even introuvable près de moi');
 check('implants d’Even construits par mon rendu', !!rival?.sig, rival ? `signature ${rival.sig.slice(0, 60)}` : '');
 check('lame d’Even sortie, visible chez moi (bit du bras droit)', !!rival && (rival.fx & 16) !== 0, rival ? `fx ${rival.fx}` : '');
-// regard vers Even, un peu vers le bas
+// regard vers Even, un peu vers le bas ; captures en pleine définition (le test tourne en demi)
 await A.evaluate((f) => {
-  const p = window.__app.game.player;
+  const g = window.__app.game;
+  const p = g.player;
   p.yaw = Math.atan2(f.x - p.pos.x, f.z - p.pos.z);
-  p.pitch = -0.12;
+  p.pitch = -0.22;
+  g.renderer.setPixelRatio(1);
+  g.renderer.setSize(window.innerWidth, window.innerHeight, false);
+  g.post.setSize(window.innerWidth, window.innerHeight);
 }, front);
 await waitGame(() => false, null, 0.6);
 await shot('08-rival-implants.png');
@@ -370,8 +386,12 @@ const aim = await A.evaluate((f) => {
   return best;
 }, front);
 let cable = false;
-for (let i = 0; i < 3 && aim && rival && !cable; i++) {
-  botAct({ a: 'ab', id: 'grappin', slot: 'brasG', o: aim.o, d: aim.d, p: aim.p });
+if (aim && rival) {
+  // relancé toutes les 4 s (recharge de 3,5 s, câble gardé 7 s) : il reste tendu même si une
+  // image prend plusieurs secondes en rendu logiciel
+  const fire = () => botAct({ a: 'ab', id: 'grappin', slot: 'brasG', o: aim.o, d: aim.d, p: aim.p });
+  fire();
+  const timer = setInterval(fire, 4000);
   cable = await A.waitForFunction(
     (id) => {
       const g = window.__app.game;
@@ -379,15 +399,17 @@ for (let i = 0; i < 3 && aim && rival && !cable; i++) {
       return !!e && (e.view.fx & 1) !== 0 && g.cyber.anchors.has(id);
     },
     rival.id,
-    { timeout: 12000, polling: 100 },
+    { timeout: 180000, polling: 200 },
   )
     .then(() => true)
     .catch(() => false);
   if (cable) await shot('09-rival-grapple.png');
-  else await sleep(4000);
+  clearInterval(timer);
 }
 check('grappin d’Even : câble visible chez moi', cable, aim ? `ancre à ${aim.dist.toFixed(1)} m` : 'aucune façade visée');
 
+const cuts = await A.evaluate(() => window.__cuts ?? 0);
+if (cuts) console.log(`(coupures réseau pendant le test : ${cuts} — rendu logiciel surchargé)`);
 check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 3).join(' | '));
 bot.kill();
 await browser.close();
